@@ -22,7 +22,7 @@ $global:Win = $win
 function New-Row {
     param($Id, $Name, $Desc, $Group = '', $Risk = '', $Extra = '', [bool]$Checked = $false, $Tag = $null)
     $r = New-Object OptiRow
-    $r.Id = $Id; $r.Name = $Name; $r.Desc = $Desc; $r.Group = $Group; $r.Risk = $Risk; $r.Extra = $Extra; $r.IsChecked = $Checked; $r.Tag = $Tag
+    $r.Id = $Id; $r.Name = $Name; $r.Desc = $Desc; $r.Group = ([string]$Group).ToUpper(); $r.Risk = $Risk; $r.Extra = $Extra; $r.IsChecked = $Checked; $r.Tag = $Tag
     return $r
 }
 
@@ -34,7 +34,7 @@ function Initialize-List {
     $view.GroupDescriptions.Add((New-Object System.Windows.Data.PropertyGroupDescription 'Group'))
     $ListBox.GroupStyle.Add([Windows.Markup.XamlReader]::Parse(
         '<GroupStyle xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"><GroupStyle.HeaderTemplate><DataTemplate>' +
-        '<TextBlock Text="{Binding Name}" Foreground="#8C93A8" FontSize="12" FontWeight="Bold" Margin="4,14,0,8"/></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle>'))
+        '<Border Background="#101011" BorderBrush="#2B2B2D" BorderThickness="0,0,0,1" Padding="14,7"><TextBlock Text="{Binding Name}" FontFamily="Cascadia Mono, Consolas" Foreground="#FF9F1C" FontSize="11"/></Border></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle>'))
     $global:OptiFilters[$Key] = ''
     $view.Filter = [Predicate[object]]([scriptblock]::Create(
         "param(`$o) `$t = `$global:OptiFilters['$Key']; if ([string]::IsNullOrEmpty(`$t)) { return `$true }; " +
@@ -64,7 +64,7 @@ function Set-Busy {
     $UI.PagesHost.Opacity = if ($On) { 0.55 } else { 1 }
     $UI.BusyBar.Visibility = if ($On) { 'Visible' } else { 'Hidden' }
     $UI.BusyBar.Value = if ($On) { 100 } else { 0 }
-    $UI.BusyText.Text = if ($On) { "Working: $Text" } else { 'Activity log' }
+    $UI.BusyText.Text = if ($On) { "Working: $Text" } else { 'ACTIVITY LOG' }
     if ($On) {
         $a = New-Object Windows.Media.Animation.DoubleAnimation(0.25, 1, [TimeSpan]::FromMilliseconds(700))
         $a.AutoReverse = $true
@@ -161,17 +161,13 @@ function Update-Live {
 
 function Set-Score {
     param([int]$Pct, [int]$On, [int]$Total)
+    $col = if ($Pct -ge 80) { 'Good' } elseif ($Pct -ge 45) { 'Accent' } else { 'Bad' }
     $UI.ScoreText.Text = "$Pct%"
-    $r = 59.0; $c = 59.0
-    $ang = [math]::Min(359.9, 3.6 * $Pct) * [math]::PI / 180
-    $x = ($c + $r * [math]::Sin($ang)).ToString('0.##', [cultureinfo]::InvariantCulture)
-    $y = ($c - $r * [math]::Cos($ang)).ToString('0.##', [cultureinfo]::InvariantCulture)
-    $large = if ($ang -gt [math]::PI) { 1 } else { 0 }
-    $UI.ScoreArc.Data = [Windows.Media.Geometry]::Parse("M 59,0 A 59,59 0 $large 1 $x,$y")
-    $col = if ($Pct -ge 80) { 'Good' } elseif ($Pct -ge 45) { 'Warn' } else { 'Bad' }
-    $UI.ScoreArc.Stroke = $win.FindResource($col)
-    $UI.ScoreHead.Text = if ($Pct -ge 80) { 'Your PC is well optimized' } elseif ($Pct -ge 45) { 'Room for improvement' } else { 'Your PC is not optimized yet' }
-    $UI.ScoreSub.Text = "$On of $Total recommended tweaks are active on this PC. Click Optimize now to apply the rest safely; every change can be undone."
+    $UI.ScoreText.Foreground = $win.FindResource($col)
+    $UI.ScoreBar.Value = $Pct
+    $UI.ScoreBar.Foreground = $win.FindResource($col)
+    $UI.ScoreHead.Text = if ($Pct -ge 80) { 'System is well tuned' } elseif ($Pct -ge 45) { 'Partially optimized' } else { 'Not optimized yet' }
+    $UI.ScoreSub.Text = "$On of $Total recommended tweaks are active. Every change is recorded and can be undone."
 }
 
 function Update-Score {
@@ -458,7 +454,7 @@ function Show-CurrentDns {
 
 foreach ($p in $global:OptiDns) {
     $b = New-Object Windows.Controls.Button
-    $b.Width = 250; $b.Margin = '0,0,10,10'; $b.Padding = '14,12'
+    $b.Width = 250; $b.Margin = '0,0,8,8'; $b.Padding = '12,10'
     $b.HorizontalContentAlignment = 'Left'
     $sp = New-Object Windows.Controls.StackPanel
     $t1 = New-Object Windows.Controls.TextBlock -Property @{ Text = $p.Name; FontWeight = 'SemiBold'; FontSize = 14 }
@@ -589,10 +585,10 @@ $toolJobs = @{
 foreach ($k in $global:Tools.Keys) {
     $tool = $global:Tools[$k]
     $b = New-Object Windows.Controls.Button
-    $b.Width = 290; $b.Margin = '0,0,12,12'; $b.Padding = '16,14'; $b.HorizontalContentAlignment = 'Left'
+    $b.Width = 290; $b.Height = 84; $b.Margin = '0,0,8,8'; $b.Padding = '16,0'; $b.HorizontalContentAlignment = 'Left'
     if ($tool.Danger) { $b.Style = $win.FindResource('BtnDanger') }
     $sp = New-Object Windows.Controls.StackPanel
-    $sp.Children.Add((New-Object Windows.Controls.TextBlock -Property @{ Text = $tool.Title; FontWeight = 'SemiBold'; FontSize = 14; Foreground = $win.FindResource('Text') })) | Out-Null
+    $sp.Children.Add((New-Object Windows.Controls.TextBlock -Property @{ Text = $tool.Title; FontWeight = 'SemiBold'; FontSize = 14; Foreground = $win.FindResource($(if ($tool.Danger) { 'Bad' } else { 'Text' })) })) | Out-Null
     $sp.Children.Add((New-Object Windows.Controls.TextBlock -Property @{ Text = $tool.Desc; TextWrapping = 'Wrap'; FontSize = 11.5; Margin = '0,4,0,0'; Foreground = $win.FindResource('Muted') })) | Out-Null
     $b.Content = $sp
     $b.Tag = $k
@@ -610,7 +606,7 @@ function Invoke-Tool {
 
 # ================================================================ wiring
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-$UI.AdminText.Text = if ($isAdmin) { 'ADMINISTRATOR' } else { 'LIMITED - RUN AS ADMIN' }
+$UI.AdminText.Text = if ($isAdmin) { 'ADMIN' } else { 'NOT ELEVATED' }
 $UI.AdminText.Foreground = $win.FindResource($(if ($isAdmin) { 'Good' } else { 'Bad' }))
 
 $UI.BtnMin.Add_Click({ $global:Win.WindowState = 'Minimized' })

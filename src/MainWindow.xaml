@@ -2,42 +2,43 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         x:Name="Win" Title="Optimaxer" Width="1220" Height="800" MinWidth="980" MinHeight="620"
-        WindowStartupLocation="CenterScreen" Background="#0E1016" Foreground="#E8EAF2"
-        FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="13" UseLayoutRounding="True" SnapsToDevicePixels="True">
+        WindowStartupLocation="CenterScreen" Background="#0F0F10" Foreground="#DADADA"
+        FontFamily="Segoe UI" FontSize="13" UseLayoutRounding="True" SnapsToDevicePixels="True">
   <shell:WindowChrome.WindowChrome>
     <shell:WindowChrome CaptionHeight="46" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False"/>
   </shell:WindowChrome.WindowChrome>
 
   <Window.Resources>
-    <SolidColorBrush x:Key="Bg" Color="#0E1016"/>
-    <SolidColorBrush x:Key="Panel" Color="#151821"/>
-    <SolidColorBrush x:Key="Card" Color="#1B1F2B"/>
-    <SolidColorBrush x:Key="Card2" Color="#232838"/>
-    <SolidColorBrush x:Key="Line" Color="#2C3245"/>
-    <SolidColorBrush x:Key="Text" Color="#E8EAF2"/>
-    <SolidColorBrush x:Key="Muted" Color="#8C93A8"/>
-    <SolidColorBrush x:Key="Accent" Color="#6C7DFF"/>
-    <SolidColorBrush x:Key="Good" Color="#3DDC97"/>
-    <SolidColorBrush x:Key="Warn" Color="#FFB454"/>
-    <SolidColorBrush x:Key="Bad" Color="#FF6B6B"/>
+    <SolidColorBrush x:Key="Bg" Color="#0F0F10"/>
+    <SolidColorBrush x:Key="Panel" Color="#151516"/>
+    <SolidColorBrush x:Key="Card" Color="#181819"/>
+    <SolidColorBrush x:Key="Card2" Color="#222223"/>
+    <SolidColorBrush x:Key="Line" Color="#2B2B2D"/>
+    <SolidColorBrush x:Key="Text" Color="#DADADA"/>
+    <SolidColorBrush x:Key="Muted" Color="#8A8A8E"/>
+    <SolidColorBrush x:Key="Accent" Color="#FF9F1C"/>
+    <SolidColorBrush x:Key="Good" Color="#7DB46C"/>
+    <SolidColorBrush x:Key="Warn" Color="#E0B040"/>
+    <SolidColorBrush x:Key="Bad" Color="#D9574A"/>
+    <FontFamily x:Key="Mono">Cascadia Mono, Consolas</FontFamily>
 
     <Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource Text}"/></Style>
 
     <Style TargetType="Button">
       <Setter Property="Foreground" Value="{StaticResource Text}"/>
       <Setter Property="Background" Value="{StaticResource Card2}"/>
-      <Setter Property="Padding" Value="14,8"/>
+      <Setter Property="Padding" Value="14,7"/>
       <Setter Property="Margin" Value="0,0,8,0"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}" BorderBrush="{StaticResource Line}" BorderThickness="1">
+            <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="2" Padding="{TemplateBinding Padding}" BorderBrush="#38383B" BorderThickness="1">
               <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="BorderBrush" Value="{StaticResource Accent}"/></Trigger>
-              <Trigger Property="IsPressed" Value="True"><Setter TargetName="b" Property="Opacity" Value="0.75"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="b" Property="Opacity" Value="0.7"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -45,12 +46,12 @@
     </Style>
     <Style x:Key="BtnAccent" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
       <Setter Property="Background" Value="{StaticResource Accent}"/>
-      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="Foreground" Value="#141414"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
     </Style>
     <Style x:Key="BtnDanger" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-      <Setter Property="Background" Value="#3A2229"/>
-      <Setter Property="Foreground" Value="#FF9C9C"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="#E8776B"/>
     </Style>
     <Style x:Key="WinBtn" TargetType="Button">
       <Setter Property="Width" Value="46"/><Setter Property="Height" Value="46"/>
@@ -61,7 +62,7 @@
           <ControlTemplate TargetType="Button">
             <Border x:Name="b" Background="Transparent"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#2A3042"/></Trigger>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#2A2A2C"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -70,23 +71,19 @@
 
     <Style x:Key="Nav" TargetType="RadioButton">
       <Setter Property="Foreground" Value="{StaticResource Muted}"/>
-      <Setter Property="Margin" Value="0,0,0,2"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="RadioButton">
-            <Border x:Name="b" CornerRadius="8" Padding="12,10" Background="Transparent">
-              <Grid>
-                <Border x:Name="bar" Width="3" Height="16" CornerRadius="2" HorizontalAlignment="Left" Background="{StaticResource Accent}" Visibility="Collapsed" Margin="-12,0,0,0"/>
-                <ContentPresenter VerticalAlignment="Center"/>
-              </Grid>
+            <Border x:Name="b" Height="34" Background="Transparent" BorderThickness="2,0,0,0" BorderBrush="Transparent" Padding="14,0,0,0">
+              <ContentPresenter VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#1A1E2A"/><Setter Property="Foreground" Value="{StaticResource Text}"/></Trigger>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#1A1A1B"/><Setter Property="Foreground" Value="{StaticResource Text}"/></Trigger>
               <Trigger Property="IsChecked" Value="True">
-                <Setter TargetName="b" Property="Background" Value="#20263A"/>
-                <Setter TargetName="bar" Property="Visibility" Value="Visible"/>
-                <Setter Property="Foreground" Value="White"/>
+                <Setter TargetName="b" Property="Background" Value="#1D1D1F"/>
+                <Setter TargetName="b" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                <Setter Property="Foreground" Value="#FFFFFF"/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -103,8 +100,8 @@
           <ControlTemplate TargetType="CheckBox">
             <Grid Background="Transparent">
               <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <Border x:Name="box" Width="20" Height="20" CornerRadius="6" BorderThickness="1.5" BorderBrush="#4A5270" Background="Transparent" VerticalAlignment="Center" Margin="0,0,14,0">
-                <Path x:Name="tick" Data="M 4,10 L 8,14 L 16,5" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Visibility="Collapsed"/>
+              <Border x:Name="box" Width="16" Height="16" CornerRadius="2" BorderThickness="1" BorderBrush="#5A5A5E" Background="Transparent" VerticalAlignment="Center" Margin="0,0,12,0">
+                <Path x:Name="tick" Data="M 3,8 L 6.5,11.5 L 13,4.5" Stroke="#141414" StrokeThickness="2" Visibility="Collapsed"/>
               </Border>
               <ContentPresenter Grid.Column="1" VerticalAlignment="Center"/>
             </Grid>
@@ -125,26 +122,25 @@
       <Setter Property="Background" Value="{StaticResource Card}"/>
       <Setter Property="Foreground" Value="{StaticResource Text}"/>
       <Setter Property="CaretBrush" Value="{StaticResource Text}"/>
-      <Setter Property="Padding" Value="10,7"/>
+      <Setter Property="Padding" Value="9,6"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="TextBox">
-            <Border Background="{TemplateBinding Background}" CornerRadius="8" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="{TemplateBinding Padding}">
+            <Border Background="{TemplateBinding Background}" CornerRadius="2" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="{TemplateBinding Padding}">
               <ScrollViewer x:Name="PART_ContentHost"/>
             </Border>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
     </Style>
-
     <Style x:Key="Search" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="TextBox">
-            <Border Background="{TemplateBinding Background}" CornerRadius="8" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="{TemplateBinding Padding}">
+            <Border Background="{TemplateBinding Background}" CornerRadius="2" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="{TemplateBinding Padding}" VerticalAlignment="Center">
               <Grid>
-                <ScrollViewer x:Name="PART_ContentHost"/>
-                <TextBlock x:Name="ph" Text="Search..." Foreground="{StaticResource Muted}" IsHitTestVisible="False" Visibility="Collapsed" Margin="2,0,0,0"/>
+                <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center"/>
+                <TextBlock x:Name="ph" Text="filter..." FontFamily="{StaticResource Mono}" Foreground="{StaticResource Muted}" IsHitTestVisible="False" Visibility="Collapsed" VerticalAlignment="Center" Margin="2,0,0,0"/>
               </Grid>
             </Border>
             <ControlTemplate.Triggers><Trigger Property="Text" Value=""><Setter TargetName="ph" Property="Visibility" Value="Visible"/></Trigger></ControlTemplate.Triggers>
@@ -154,7 +150,7 @@
     </Style>
 
     <Style TargetType="ScrollBar">
-      <Setter Property="Width" Value="9"/>
+      <Setter Property="Width" Value="8"/>
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="Template">
         <Setter.Value>
@@ -162,9 +158,7 @@
             <Grid Background="Transparent">
               <Track x:Name="PART_Track" IsDirectionReversed="True">
                 <Track.Thumb>
-                  <Thumb>
-                    <Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="#3A4160" CornerRadius="4" Margin="1"/></ControlTemplate></Thumb.Template>
-                  </Thumb>
+                  <Thumb><Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="#404043" Margin="2,0"/></ControlTemplate></Thumb.Template></Thumb>
                 </Track.Thumb>
               </Track>
             </Grid>
@@ -175,14 +169,21 @@
 
     <Style TargetType="ProgressBar">
       <Setter Property="Height" Value="6"/>
-      <Setter Property="Background" Value="#262B3B"/>
+      <Setter Property="Background" Value="#242426"/>
       <Setter Property="Foreground" Value="{StaticResource Accent}"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ProgressBar">
             <Grid>
-              <Border Background="{TemplateBinding Background}" CornerRadius="3"/>
-              <Border x:Name="PART_Track"><Border x:Name="PART_Indicator" Background="{TemplateBinding Foreground}" CornerRadius="3" HorizontalAlignment="Left"/></Border>
+              <Border Background="{TemplateBinding Background}"/>
+              <Border x:Name="PART_Track"><Border x:Name="PART_Indicator" Background="{TemplateBinding Foreground}" HorizontalAlignment="Left"/></Border>
+              <Rectangle>
+                <Rectangle.Fill>
+                  <DrawingBrush TileMode="Tile" Viewport="0,0,8,10" ViewportUnits="Absolute" Viewbox="0,0,8,10" ViewboxUnits="Absolute">
+                    <DrawingBrush.Drawing><GeometryDrawing Brush="#151516"><GeometryDrawing.Geometry><RectangleGeometry Rect="6,0,2,10"/></GeometryDrawing.Geometry></GeometryDrawing></DrawingBrush.Drawing>
+                  </DrawingBrush>
+                </Rectangle.Fill>
+              </Rectangle>
             </Grid>
           </ControlTemplate>
         </Setter.Value>
@@ -190,10 +191,12 @@
     </Style>
 
     <Style x:Key="Badge" TargetType="Border">
-      <Setter Property="CornerRadius" Value="6"/>
-      <Setter Property="Padding" Value="8,3"/>
+      <Setter Property="CornerRadius" Value="2"/>
+      <Setter Property="Padding" Value="6,1"/>
       <Setter Property="Margin" Value="8,0,0,0"/>
-      <Setter Property="Background" Value="#262B3B"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="BorderBrush" Value="#3A3A3D"/>
+      <Setter Property="TextBlock.Foreground" Value="#9A9A9E"/>
     </Style>
 
     <Style x:Key="CardItem" TargetType="ListBoxItem">
@@ -211,19 +214,21 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ListBox">
-            <ScrollViewer Focusable="False" Padding="0,0,6,0"><ItemsPresenter/></ScrollViewer>
+            <Border BorderBrush="{StaticResource Line}" BorderThickness="1" Background="{StaticResource Card}">
+              <ScrollViewer Focusable="False"><ItemsPresenter/></ScrollViewer>
+            </Border>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
     </Style>
 
     <DataTemplate x:Key="CardTemplate">
-      <Border Background="{StaticResource Card}" CornerRadius="10" Padding="14,11" Margin="0,0,0,6">
+      <Border x:Name="row" Background="Transparent" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="14,9">
         <CheckBox Style="{StaticResource CardCheck}" IsChecked="{Binding IsChecked, Mode=TwoWay}">
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel VerticalAlignment="Center">
-              <TextBlock Text="{Binding Name}" Foreground="{StaticResource Text}" FontWeight="SemiBold" FontSize="13.5" TextTrimming="CharacterEllipsis"/>
+              <TextBlock Text="{Binding Name}" Foreground="{StaticResource Text}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
               <TextBlock Text="{Binding Desc}" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap" Margin="0,2,0,0"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
@@ -232,47 +237,63 @@
                   <Style TargetType="Border" BasedOn="{StaticResource Badge}">
                     <Style.Triggers>
                       <DataTrigger Binding="{Binding Risk}" Value=""><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
-                      <DataTrigger Binding="{Binding Risk}" Value="Safe"><Setter Property="Background" Value="#16352B"/></DataTrigger>
-                      <DataTrigger Binding="{Binding Risk}" Value="Moderate"><Setter Property="Background" Value="#3A2F17"/></DataTrigger>
-                      <DataTrigger Binding="{Binding Risk}" Value="Advanced"><Setter Property="Background" Value="#3A2229"/></DataTrigger>
+                      <DataTrigger Binding="{Binding Risk}" Value="Safe"><Setter Property="BorderBrush" Value="#4C6E43"/><Setter Property="TextBlock.Foreground" Value="#9CCB8C"/></DataTrigger>
+                      <DataTrigger Binding="{Binding Risk}" Value="Moderate"><Setter Property="BorderBrush" Value="#7A6422"/><Setter Property="TextBlock.Foreground" Value="#E0B040"/></DataTrigger>
+                      <DataTrigger Binding="{Binding Risk}" Value="Advanced"><Setter Property="BorderBrush" Value="#7A3A33"/><Setter Property="TextBlock.Foreground" Value="#E8776B"/></DataTrigger>
                     </Style.Triggers>
                   </Style>
                 </Border.Style>
-                <TextBlock Text="{Binding Risk}" Foreground="#C9CFE0" FontSize="11" FontWeight="SemiBold"/>
+                <TextBlock Text="{Binding Risk}" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{Binding Path=(TextBlock.Foreground), RelativeSource={RelativeSource AncestorType=Border}}"/>
               </Border>
               <Border>
                 <Border.Style>
                   <Style TargetType="Border" BasedOn="{StaticResource Badge}">
                     <Style.Triggers>
                       <DataTrigger Binding="{Binding Extra}" Value=""><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
-                      <DataTrigger Binding="{Binding Extra}" Value="Applied"><Setter Property="Background" Value="#16352B"/></DataTrigger>
+                      <DataTrigger Binding="{Binding Extra}" Value="Applied"><Setter Property="BorderBrush" Value="{StaticResource Accent}"/><Setter Property="TextBlock.Foreground" Value="{StaticResource Accent}"/></DataTrigger>
                     </Style.Triggers>
                   </Style>
                 </Border.Style>
-                <TextBlock Text="{Binding Extra}" Foreground="#C9CFE0" FontSize="11" FontWeight="SemiBold"/>
+                <TextBlock Text="{Binding Extra}" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{Binding Path=(TextBlock.Foreground), RelativeSource={RelativeSource AncestorType=Border}}"/>
               </Border>
             </StackPanel>
           </Grid>
         </CheckBox>
       </Border>
+      <DataTemplate.Triggers>
+        <Trigger SourceName="row" Property="IsMouseOver" Value="True"><Setter TargetName="row" Property="Background" Value="#1E1E20"/></Trigger>
+      </DataTemplate.Triggers>
     </DataTemplate>
+
+    <Style x:Key="Label" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="{StaticResource Mono}"/>
+      <Setter Property="FontSize" Value="10.5"/>
+      <Setter Property="Foreground" Value="{StaticResource Muted}"/>
+    </Style>
+    <Style x:Key="Readout" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="{StaticResource Mono}"/>
+      <Setter Property="FontSize" Value="22"/>
+      <Setter Property="Margin" Value="0,4,0,10"/>
+    </Style>
+    <Style x:Key="PageTitle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="22"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
   </Window.Resources>
 
   <Grid x:Name="RootGrid" Background="{StaticResource Bg}">
     <Grid.RowDefinitions><RowDefinition Height="46"/><RowDefinition Height="*"/></Grid.RowDefinitions>
 
     <!-- title bar -->
-    <Grid Grid.Row="0" Background="#0A0C11">
-      <StackPanel Orientation="Horizontal" Margin="18,0,0,0" VerticalAlignment="Center">
-        <Border Width="22" Height="22" CornerRadius="6" Margin="0,0,10,0">
-          <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#6C7DFF" Offset="0"/><GradientStop Color="#3DDC97" Offset="1"/></LinearGradientBrush></Border.Background>
-          <Path Data="M 6,12 L 10,16 L 17,7" Stroke="White" StrokeThickness="2.2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
-        </Border>
-        <TextBlock Text="Optimaxer" FontWeight="Bold" FontSize="14"/>
-        <TextBlock Text="PC performance suite" Foreground="{StaticResource Muted}" Margin="10,1,0,0" FontSize="12"/>
+    <Grid Grid.Row="0" Background="#0B0B0C">
+      <Border BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1"/>
+      <StackPanel Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
+        <Rectangle Width="10" Height="10" Fill="{StaticResource Accent}" Margin="0,0,10,0"/>
+        <TextBlock Text="OPTIMAXER" FontFamily="{StaticResource Mono}" FontWeight="Bold" FontSize="13"/>
+        <TextBlock Text="v1.0" Style="{StaticResource Label}" Margin="10,2,0,0"/>
       </StackPanel>
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-        <Border x:Name="AdminBadge" Style="{StaticResource Badge}" VerticalAlignment="Center" Margin="0,0,12,0"><TextBlock x:Name="AdminText" FontSize="11" FontWeight="SemiBold"/></Border>
+        <Border x:Name="AdminBadge" Style="{StaticResource Badge}" VerticalAlignment="Center" Margin="0,0,12,0"><TextBlock x:Name="AdminText" FontFamily="{StaticResource Mono}" FontSize="10.5"/></Border>
         <Button x:Name="BtnMin" Style="{StaticResource WinBtn}" Content="&#xE921;" FontFamily="Segoe MDL2 Assets" FontSize="10"/>
         <Button x:Name="BtnMax" Style="{StaticResource WinBtn}" Content="&#xE922;" FontFamily="Segoe MDL2 Assets" FontSize="10"/>
         <Button x:Name="BtnClose" Style="{StaticResource WinBtn}" Content="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="10"/>
@@ -280,11 +301,12 @@
     </Grid>
 
     <Grid Grid.Row="1">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+      <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
 
       <!-- sidebar -->
       <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,1,0">
-        <StackPanel Margin="14,16,14,0">
+        <StackPanel Margin="0,16,0,0">
+          <TextBlock Text="MODULES" Style="{StaticResource Label}" Margin="16,0,0,8"/>
           <RadioButton x:Name="NavDash"     Tag="dash"     Style="{StaticResource Nav}" GroupName="nav" Content="Dashboard" IsChecked="True"/>
           <RadioButton x:Name="NavTweaks"   Tag="tweaks"   Style="{StaticResource Nav}" GroupName="nav" Content="Optimize"/>
           <RadioButton x:Name="NavServices" Tag="services" Style="{StaticResource Nav}" GroupName="nav" Content="Services"/>
@@ -298,7 +320,7 @@
       </Border>
 
       <!-- content -->
-      <Grid Grid.Column="1" Margin="28,22,28,14">
+      <Grid Grid.Column="1" Margin="24,20,24,14">
         <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 
         <Grid x:Name="PagesHost" Grid.Row="0">
@@ -306,55 +328,53 @@
           <!-- DASHBOARD -->
           <Grid x:Name="Page_dash">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <Border Background="{StaticResource Card}" CornerRadius="16" Padding="26">
+            <Border Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="20">
               <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <Grid Width="130" Height="130" Margin="0,0,28,0">
-                  <Ellipse Stroke="#262B3B" StrokeThickness="11"/>
-                  <Path x:Name="ScoreArc" Stroke="{StaticResource Accent}" StrokeThickness="11" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Margin="5.5"/>
-                  <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                    <TextBlock x:Name="ScoreText" Text="--" FontSize="34" FontWeight="Bold" HorizontalAlignment="Center"/>
-                    <TextBlock Text="OPTIMIZED" FontSize="10" Foreground="{StaticResource Muted}" HorizontalAlignment="Center"/>
-                  </StackPanel>
-                </Grid>
+                <StackPanel Margin="0,0,32,0" MinWidth="120">
+                  <TextBlock Text="OPTIMIZATION" Style="{StaticResource Label}"/>
+                  <TextBlock x:Name="ScoreText" Text="--" FontFamily="{StaticResource Mono}" FontSize="52" FontWeight="Bold" Foreground="{StaticResource Accent}" Margin="0,2,0,0"/>
+                </StackPanel>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                  <TextBlock x:Name="ScoreHead" Text="Analyzing your PC..." FontSize="22" FontWeight="SemiBold"/>
-                  <TextBlock x:Name="ScoreSub" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,6,0,16" Text="Checking which recommended tweaks are active."/>
+                  <TextBlock x:Name="ScoreHead" Text="Analyzing..." FontSize="18" FontWeight="SemiBold"/>
+                  <TextBlock x:Name="ScoreSub" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,4,0,14" Text="Checking which recommended tweaks are active."/>
                   <WrapPanel>
-                    <Button x:Name="BtnOptimize" Style="{StaticResource BtnAccent}" Content="Optimize now (recommended)" Padding="20,11"/>
+                    <Button x:Name="BtnOptimize" Style="{StaticResource BtnAccent}" Content="Apply recommended" Padding="18,8"/>
                     <Button x:Name="BtnFreeRam" Content="Free RAM"/>
-                    <Button x:Name="BtnQuickClean" Content="Scan junk files"/>
-                    <Button x:Name="BtnRestorePoint" Content="Create restore point"/>
+                    <Button x:Name="BtnQuickClean" Content="Scan junk"/>
+                    <Button x:Name="BtnRestorePoint" Content="Restore point"/>
                   </WrapPanel>
                 </StackPanel>
+                <ProgressBar x:Name="ScoreBar" Grid.Row="1" Grid.ColumnSpan="2" Maximum="100" Height="10" Margin="0,18,0,0"/>
               </Grid>
             </Border>
-            <UniformGrid Grid.Row="1" Columns="4" Margin="0,14,0,14">
-              <Border Background="{StaticResource Card}" CornerRadius="12" Padding="16" Margin="0,0,10,0">
-                <StackPanel><TextBlock Text="CPU" Foreground="{StaticResource Muted}" FontSize="11"/><TextBlock x:Name="CpuText" Text="--" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,8"/><ProgressBar x:Name="CpuBar" Maximum="100"/></StackPanel>
+            <UniformGrid Grid.Row="1" Columns="4" Margin="0,12,0,12">
+              <Border Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="14,12" Margin="0,0,8,0">
+                <StackPanel><TextBlock Text="CPU" Style="{StaticResource Label}"/><TextBlock x:Name="CpuText" Text="--" Style="{StaticResource Readout}"/><ProgressBar x:Name="CpuBar" Maximum="100"/></StackPanel>
               </Border>
-              <Border Background="{StaticResource Card}" CornerRadius="12" Padding="16" Margin="0,0,10,0">
-                <StackPanel><TextBlock Text="MEMORY" Foreground="{StaticResource Muted}" FontSize="11"/><TextBlock x:Name="RamText" Text="--" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,8"/><ProgressBar x:Name="RamBar" Maximum="100" Foreground="{StaticResource Good}"/></StackPanel>
+              <Border Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="14,12" Margin="0,0,8,0">
+                <StackPanel><TextBlock Text="MEMORY" Style="{StaticResource Label}"/><TextBlock x:Name="RamText" Text="--" Style="{StaticResource Readout}" FontSize="19"/><ProgressBar x:Name="RamBar" Maximum="100"/></StackPanel>
               </Border>
-              <Border Background="{StaticResource Card}" CornerRadius="12" Padding="16" Margin="0,0,10,0">
-                <StackPanel><TextBlock x:Name="DiskLabel" Text="DISK" Foreground="{StaticResource Muted}" FontSize="11"/><TextBlock x:Name="DiskText" Text="--" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,8"/><ProgressBar x:Name="DiskBar" Maximum="100" Foreground="{StaticResource Warn}"/></StackPanel>
+              <Border Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="14,12" Margin="0,0,8,0">
+                <StackPanel><TextBlock x:Name="DiskLabel" Text="DISK" Style="{StaticResource Label}"/><TextBlock x:Name="DiskText" Text="--" Style="{StaticResource Readout}" FontSize="19"/><ProgressBar x:Name="DiskBar" Maximum="100"/></StackPanel>
               </Border>
-              <Border Background="{StaticResource Card}" CornerRadius="12" Padding="16">
-                <StackPanel><TextBlock Text="UPTIME" Foreground="{StaticResource Muted}" FontSize="11"/><TextBlock x:Name="UpText" Text="--" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,8"/><TextBlock x:Name="UpHint" Foreground="{StaticResource Muted}" FontSize="11" Text=" "/></StackPanel>
+              <Border Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="14,12">
+                <StackPanel><TextBlock Text="UPTIME" Style="{StaticResource Label}"/><TextBlock x:Name="UpText" Text="--" Style="{StaticResource Readout}" FontSize="19"/><TextBlock x:Name="UpHint" Style="{StaticResource Label}" Text=" "/></StackPanel>
               </Border>
             </UniformGrid>
-            <Border Grid.Row="2" Background="{StaticResource Card}" CornerRadius="12" Padding="20">
-              <ScrollViewer VerticalScrollBarVisibility="Auto"><TextBlock x:Name="SysInfo" FontFamily="Consolas" FontSize="12.5" Foreground="{StaticResource Muted}" LineHeight="20"/></ScrollViewer>
+            <Border Grid.Row="2" Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="16,12">
+              <ScrollViewer VerticalScrollBarVisibility="Auto"><TextBlock x:Name="SysInfo" FontFamily="{StaticResource Mono}" FontSize="12" Foreground="{StaticResource Muted}" LineHeight="20"/></ScrollViewer>
             </Border>
           </Grid>
 
           <!-- OPTIMIZE -->
           <Grid x:Name="Page_tweaks" Visibility="Collapsed">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <StackPanel><TextBlock Text="Optimize" FontSize="26" FontWeight="Bold"/>
+            <StackPanel><TextBlock Text="Optimize" Style="{StaticResource PageTitle}"/>
               <TextBlock Text="Pick tweaks or a preset, then apply. Original values are saved, so every tweak can be undone." Foreground="{StaticResource Muted}" Margin="0,4,0,14"/></StackPanel>
             <WrapPanel Grid.Row="1" Margin="0,0,0,10">
-              <TextBlock Text="Presets" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+              <TextBlock Text="PRESETS" Style="{StaticResource Label}" VerticalAlignment="Center" Margin="0,0,10,0"/>
               <Button x:Name="BtnPrRec" Content="Recommended"/>
               <Button x:Name="BtnPrGame" Content="Gaming"/>
               <Button x:Name="BtnPrPriv" Content="Privacy"/>
@@ -377,7 +397,7 @@
           <!-- SERVICES -->
           <Grid x:Name="Page_services" Visibility="Collapsed">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <StackPanel><TextBlock Text="Services" FontSize="26" FontWeight="Bold"/>
+            <StackPanel><TextBlock Text="Services" Style="{StaticResource PageTitle}"/>
               <TextBlock Text="Control Windows services. Core system services are hidden. A backup is written before every change." Foreground="{StaticResource Muted}" Margin="0,4,0,14"/></StackPanel>
             <TextBox x:Name="SvSearch" Style="{StaticResource Search}" Grid.Row="1" Margin="0,0,0,10"/>
             <WrapPanel Grid.Row="2" Margin="0,0,0,12">
@@ -394,7 +414,7 @@
           <!-- STARTUP -->
           <Grid x:Name="Page_startup" Visibility="Collapsed">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <StackPanel><TextBlock Text="Startup apps" FontSize="26" FontWeight="Bold"/>
+            <StackPanel><TextBlock Text="Startup apps" Style="{StaticResource PageTitle}"/>
               <TextBlock Text="Programs that launch when you sign in. Disabling is reversible and does not uninstall anything." Foreground="{StaticResource Muted}" Margin="0,4,0,14"/></StackPanel>
             <WrapPanel Grid.Row="1" Margin="0,0,0,12">
               <Button x:Name="BtnStDisable" Style="{StaticResource BtnAccent}" Content="Disable selected"/>
@@ -407,7 +427,7 @@
           <!-- CLEANER -->
           <Grid x:Name="Page_cleanup" Visibility="Collapsed">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <StackPanel><TextBlock Text="Cleaner" FontSize="26" FontWeight="Bold"/>
+            <StackPanel><TextBlock Text="Cleaner" Style="{StaticResource PageTitle}"/>
               <TextBlock Text="Scan first, then remove only what you tick. Files in use are skipped." Foreground="{StaticResource Muted}" Margin="0,4,0,14"/></StackPanel>
             <WrapPanel Grid.Row="1" Margin="0,0,0,12">
               <Button x:Name="BtnClScan" Content="Scan"/>
@@ -420,7 +440,7 @@
           <!-- DEBLOAT -->
           <Grid x:Name="Page_debloat" Visibility="Collapsed">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <StackPanel><TextBlock Text="Debloat apps" FontSize="26" FontWeight="Bold"/>
+            <StackPanel><TextBlock Text="Debloat apps" Style="{StaticResource PageTitle}"/>
               <TextBlock Text="Remove preinstalled apps for all users. Badge shows how safe removal is. Removed apps can be reinstalled from the Microsoft Store." Foreground="{StaticResource Muted}" Margin="0,4,0,14" TextWrapping="Wrap"/></StackPanel>
             <WrapPanel Grid.Row="1" Margin="0,0,0,12">
               <Button x:Name="BtnDbScan" Content="Scan installed apps"/>
@@ -432,7 +452,7 @@
           <!-- NETWORK -->
           <Grid x:Name="Page_network" Visibility="Collapsed">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <StackPanel><TextBlock Text="Network and DNS" FontSize="26" FontWeight="Bold"/>
+            <StackPanel><TextBlock Text="Network and DNS" Style="{StaticResource PageTitle}"/>
               <TextBlock Text="Switch DNS provider on all active adapters (with encrypted DNS where supported) and repair network problems." Foreground="{StaticResource Muted}" Margin="0,4,0,14"/></StackPanel>
             <WrapPanel Grid.Row="1" Margin="0,0,0,12">
               <Button x:Name="BtnDnsBench" Style="{StaticResource BtnAccent}" Content="Benchmark DNS speed"/>
@@ -447,7 +467,7 @@
           <!-- FEATURES -->
           <Grid x:Name="Page_features" Visibility="Collapsed">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <StackPanel><TextBlock Text="Windows features" FontSize="26" FontWeight="Bold"/>
+            <StackPanel><TextBlock Text="Windows features" Style="{StaticResource PageTitle}"/>
               <TextBlock Text="Turn optional Windows components on or off. Some changes need a restart." Foreground="{StaticResource Muted}" Margin="0,4,0,14"/></StackPanel>
             <WrapPanel Grid.Row="1" Margin="0,0,0,12">
               <Button x:Name="BtnFtEnable" Style="{StaticResource BtnAccent}" Content="Enable selected"/>
@@ -460,27 +480,27 @@
           <!-- TOOLS -->
           <Grid x:Name="Page_tools" Visibility="Collapsed">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <StackPanel><TextBlock Text="Repair and tools" FontSize="26" FontWeight="Bold"/>
+            <StackPanel><TextBlock Text="Repair and tools" Style="{StaticResource PageTitle}"/>
               <TextBlock Text="Maintenance, repair and recovery utilities. Long tasks run in the background; watch the activity log." Foreground="{StaticResource Muted}" Margin="0,4,0,14"/></StackPanel>
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><WrapPanel x:Name="ToolsPanel"/></ScrollViewer>
           </Grid>
         </Grid>
 
-        <ProgressBar x:Name="BusyBar" Grid.Row="1" IsIndeterminate="False" Margin="0,10,0,0" Visibility="Hidden" Height="4"/>
+        <ProgressBar x:Name="BusyBar" Grid.Row="1" Margin="0,10,0,0" Visibility="Hidden" Height="3"/>
 
         <!-- log -->
-        <Border Grid.Row="2" Background="{StaticResource Panel}" CornerRadius="10" BorderBrush="{StaticResource Line}" BorderThickness="1" Margin="0,8,0,0" Height="130">
+        <Border Grid.Row="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" Margin="0,8,0,0" Height="130">
           <Grid>
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
             <Grid Margin="14,8,10,0">
-              <TextBlock x:Name="BusyText" Text="Activity log" Foreground="{StaticResource Muted}" FontSize="11" FontWeight="SemiBold"/>
+              <TextBlock x:Name="BusyText" Text="ACTIVITY LOG" Style="{StaticResource Label}"/>
               <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button x:Name="BtnLogOpen" Content="Open log file" Padding="8,2" FontSize="11"/>
                 <Button x:Name="BtnLogCopy" Content="Copy" Padding="8,2" FontSize="11"/>
                 <Button x:Name="BtnLogClear" Content="Clear" Padding="8,2" FontSize="11" Margin="0"/>
               </StackPanel>
             </Grid>
-            <TextBox x:Name="Log" Grid.Row="1" IsReadOnly="True" Background="Transparent" BorderThickness="0" FontFamily="Consolas" FontSize="11.5" Foreground="#A9B0C6" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Margin="6,0,6,6"/>
+            <TextBox x:Name="Log" Grid.Row="1" IsReadOnly="True" Background="Transparent" BorderThickness="0" FontFamily="{StaticResource Mono}" FontSize="11" Foreground="#A0A0A6" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Margin="6,0,6,6"/>
           </Grid>
         </Border>
       </Grid>

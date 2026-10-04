@@ -448,9 +448,9 @@ function Invoke-CleanupTarget {
         'recycle'   { $before = Get-CleanupSize $Target; Clear-RecycleBin -Force -ErrorAction SilentlyContinue; return $before }
         'component' { Dism.exe /Online /Cleanup-Image /StartComponentCleanup | Out-Null; return 0.0 }
     }
-    foreach ($s in @($Target.Services)) { Stop-Service -Name $s -Force -ErrorAction SilentlyContinue }
+    if ($Target.Services) { foreach ($s in $Target.Services) { Stop-Service -Name $s -Force -ErrorAction SilentlyContinue } }
     $freed = 0.0
     foreach ($p in $Target.Paths) { $freed += Clear-PathContents $p }
-    foreach ($s in @($Target.Services)) { Start-Service -Name $s -ErrorAction SilentlyContinue }
+    if ($Target.Services) { foreach ($s in $Target.Services) { Start-Service -Name $s -ErrorAction SilentlyContinue } }
     return $freed
 }
