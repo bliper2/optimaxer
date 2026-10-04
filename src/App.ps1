@@ -38,7 +38,7 @@ function Initialize-List {
     $global:OptiFilters[$Key] = ''
     $view.Filter = [Predicate[object]]([scriptblock]::Create(
         "param(`$o) `$t = `$global:OptiFilters['$Key']; if ([string]::IsNullOrEmpty(`$t)) { return `$true }; " +
-        "(`$o.Name.IndexOf(`$t, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or (`$o.Desc.IndexOf(`$t, [StringComparison]::OrdinalIgnoreCase) -ge 0)"))
+        "([string]`$o.Name).IndexOf(`$t, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or ([string]`$o.Desc).IndexOf(`$t, [StringComparison]::OrdinalIgnoreCase) -ge 0"))
     return , $col
 }
 

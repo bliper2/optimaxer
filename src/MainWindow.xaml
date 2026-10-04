@@ -206,6 +206,7 @@
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="BorderThickness" Value="0"/>
       <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+      <Setter Property="ScrollViewer.CanContentScroll" Value="False"/>
       <Setter Property="ItemContainerStyle" Value="{StaticResource CardItem}"/>
       <Setter Property="Template">
         <Setter.Value>

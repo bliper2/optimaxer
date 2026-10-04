@@ -107,7 +107,7 @@ $global:OptiProtectedServices = @(
 
 # Cleanup targets. Paths are directories (contents are removed) or wildcards (matches are removed).
 $global:OptiCleanup = @(
-    @{ Id = 'usertemp';  Name = 'User temp files';            Desc = 'Per-user temporary files left by apps and installers.';                       Paths = @($env:TEMP, "$env:LOCALAPPDATA\Temp") },
+    @{ Id = 'usertemp';  Name = 'User temp files';            Desc = 'Per-user temporary files left by apps and installers.';                       Paths = @($env:TEMP) },
     @{ Id = 'wintemp';   Name = 'Windows temp files';         Desc = 'System-wide temporary files.';                                                  Paths = @("$env:WINDIR\Temp") },
     @{ Id = 'wu';        Name = 'Windows Update download cache'; Desc = 'Already-installed update packages (re-downloaded if ever needed).';     Paths = @("$env:WINDIR\SoftwareDistribution\Download"); Services = @('wuauserv', 'bits') },
     @{ Id = 'do';        Name = 'Delivery Optimization cache'; Desc = 'Cached update files shared with other PCs.';                                 Paths = @("$env:WINDIR\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache") },
