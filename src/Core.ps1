@@ -146,13 +146,21 @@ function Split-TaskPath {
     return @{ Path = '\' + $Full.Substring(0, $i + 1).TrimStart('\'); Name = $Full.Substring($i + 1) }
 }
 
+$global:TaskCache = @{}
 function Get-TaskSnapshot {
+    # one Get-ScheduledTask call per folder (each call is slow), cached until Clear-TaskCache
     param([string]$Full)
     $s = Split-TaskPath $Full
-    $t = Get-ScheduledTask -TaskPath $s.Path -TaskName $s.Name -ErrorAction SilentlyContinue
-    if (-not $t) { return $null }
-    return @{ Full = $Full; Enabled = [int]($t.State -ne 'Disabled') }
+    if (-not $global:TaskCache.ContainsKey($s.Path)) {
+        $global:TaskCache[$s.Path] = @{}
+        foreach ($t in Get-ScheduledTask -TaskPath $s.Path -ErrorAction SilentlyContinue) { $global:TaskCache[$s.Path][$t.TaskName] = [int]($t.State -ne 'Disabled') }
+    }
+    $state = $global:TaskCache[$s.Path][$s.Name]
+    if ($null -eq $state) { return $null }
+    return @{ Full = $Full; Enabled = $state }
 }
+
+function Clear-TaskCache { $global:TaskCache = @{} }
 
 function Set-TaskEnabled {
     param([string]$Full, [bool]$Enabled)
@@ -267,6 +275,7 @@ function Test-Tweak {
 function Get-TweakStatus {
     # Returns one @{Id; On} per catalog entry. Slow-ish (spawns powercfg etc.), run in a job.
     param([string[]]$Ids)
+    Clear-TaskCache
     foreach ($t in $global:OptiCatalog) {
         if ($Ids -and $Ids -notcontains $t.Id) { continue }
         @{ Id = $t.Id; On = [bool](Test-Tweak $t) }
@@ -276,6 +285,7 @@ function Get-TweakStatus {
 function Invoke-TweakApply {
     param($T)
     Write-Log "Apply: $($T.Name)"
+    Clear-TaskCache
     $state = Get-OptiState
     $fresh = -not ($state.ContainsKey($T.Id) -and (Test-Tweak $T))
     $rec = if ($fresh) { @{ Reg = @(); Svc = @(); Task = @(); Data = $null; Time = (Get-Date).ToString('s') } } else { $state[$T.Id] }
@@ -315,6 +325,7 @@ function Invoke-TweakApply {
 function Invoke-TweakUndo {
     param($T)
     Write-Log "Undo: $($T.Name)"
+    Clear-TaskCache
     $state = Get-OptiState
     $rec = $state[$T.Id]
     if ($rec) {

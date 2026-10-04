@@ -526,7 +526,8 @@ function Set-FeatureJob {
 $global:Tools = [ordered]@{
     restore = @{ Title = 'Create restore point';        Desc = 'Snapshot system settings so you can roll back from Windows System Restore.' }
     ram     = @{ Title = 'Free RAM now';                Desc = 'Trims process working sets and purges the standby list. Helps when memory is nearly full.' }
-    drives  = @{ Title = 'Optimize drives';             Desc = 'TRIM for SSDs, defragment for hard disks.' }
+    drives  = @{ Title = 'Trim SSDs';                   Desc = 'Runs TRIM on every SSD. Takes seconds.' }
+    defrag  = @{ Title = 'Defragment hard disks';       Desc = 'Slow: can take an hour or more on large HDDs. Runs in the background.' }
     health  = @{ Title = 'Disk health report';          Desc = 'Health, temperature, wear and error counters of your drives.' }
     sfc     = @{ Title = 'Scan system files (SFC)';     Desc = 'Repairs corrupted Windows system files. Takes several minutes.' }
     dism    = @{ Title = 'Repair Windows image (DISM)'; Desc = 'RestoreHealth: fixes the component store. Needs internet. Run before SFC if SFC fails.' }
@@ -551,11 +552,22 @@ $toolJobs = @{
         foreach ($v in Get-Volume | Where-Object { $_.DriveLetter -and $_.DriveType -eq 'Fixed' }) {
             $media = 'Unspecified'
             try { $media = (Get-Partition -DriveLetter $v.DriveLetter | Get-Disk | Get-PhysicalDisk).MediaType } catch {}
-            try {
-                if ($media -eq 'HDD') { Write-Log "  $($v.DriveLetter): defrag (HDD)"; Optimize-Volume -DriveLetter $v.DriveLetter -Defrag -ErrorAction Stop }
-                else { Write-Log "  $($v.DriveLetter): TRIM ($media)"; Optimize-Volume -DriveLetter $v.DriveLetter -ReTrim -ErrorAction Stop }
-            } catch { Write-Log "  $($v.DriveLetter): $($_.Exception.Message)" 'WARN' }
+            if ($media -eq 'HDD') { Write-Log "  $($v.DriveLetter): skipped (HDD, use defragment)"; continue }
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            try { Optimize-Volume -DriveLetter $v.DriveLetter -ReTrim -ErrorAction Stop; Write-Log ("  {0}: TRIM done in {1:N1}s" -f $v.DriveLetter, $sw.Elapsed.TotalSeconds) } catch { Write-Log "  $($v.DriveLetter): $($_.Exception.Message)" 'WARN' }
         }
+        Write-Log 'Finished.' 'OK'
+    }
+    defrag = {
+        foreach ($v in Get-Volume | Where-Object { $_.DriveLetter -and $_.DriveType -eq 'Fixed' }) {
+            $media = 'Unspecified'
+            try { $media = (Get-Partition -DriveLetter $v.DriveLetter | Get-Disk | Get-PhysicalDisk).MediaType } catch {}
+            if ($media -ne 'HDD') { continue }
+            Write-Log "  $($v.DriveLetter): defragmenting, this can take a long time..."
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            try { Optimize-Volume -DriveLetter $v.DriveLetter -Defrag -ErrorAction Stop; Write-Log ("  {0}: done in {1:N1} min" -f $v.DriveLetter, $sw.Elapsed.TotalMinutes) } catch { Write-Log "  $($v.DriveLetter): $($_.Exception.Message)" 'WARN' }
+        }
+        Write-Log 'Finished.' 'OK'
     }
     health = {
         foreach ($d in Get-PhysicalDisk) {
@@ -617,6 +629,7 @@ foreach ($k in $global:Tools.Keys) {
 function Invoke-Tool {
     param([string]$Key)
     if ($Key -eq 'rstrui') { Start-Process rstrui.exe; return }
+    if ($Key -eq 'defrag' -and -not (Confirm-Action 'Defragmenting hard disks can take an hour or more and the app stays busy until it finishes. Continue?')) { return }
     if ($Key -eq 'revert' -and -not (Confirm-Action 'Restore ALL settings changed by Optimaxer to their original values?')) { return }
     $after = if ($Key -eq 'revert') { { Update-TweakStatus } } else { $null }
     [void](Start-OptiJob $global:Tools[$Key].Title -Script $toolJobs[$Key] -OnDone $after)
