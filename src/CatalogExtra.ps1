@@ -592,3 +592,126 @@ T -Id 'perf-standbynet' -Cat $P -Name 'Disable network in Modern Standby' -Tags 
       Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\f15576e8-98b7-4186-b944-eafa664402d9' 'ACSettingIndex' 0
       Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\f15576e8-98b7-4186-b944-eafa664402d9' 'DCSettingIndex' 0
   )
+
+# ======================================================================= ATLAS-STYLE QoL / PRIVACY / HARDENING (independent implementations)
+T -Id 'ui-wallpaperq' -Cat $I -Name 'Lossless desktop wallpaper quality' -Tags max `
+  -Desc 'Windows recompresses wallpapers to ~85% JPEG quality; this keeps 100%. Re-apply your wallpaper afterwards.' `
+  -Reg @( Rg $DESK 'JPEGImportQuality' 100 )
+
+T -Id 'ui-dynlighting' -Cat $I -Name 'Stop Windows controlling RGB lighting' -Tags max `
+  -Desc 'Turns off Windows Dynamic Lighting so vendor RGB software (Razer, Corsair, ASUS...) is not overridden.' `
+  -Reg @( Rg 'HKCU:\Software\Microsoft\Lighting' 'AmbientLightingEnabled' 0 )
+
+T -Id 'ui-usbnotify' -Cat $I -Name 'Disable USB error and weak-charger notifications' `
+  -Desc 'No balloon when a USB device malfunctions or charges slowly.' `
+  -Reg @( Rg 'HKCU:\SOFTWARE\Microsoft\Shell\USB' 'NotifyOnUsbErrors' 0; Rg 'HKCU:\SOFTWARE\Microsoft\Shell\USB' 'NotifyOnWeakCharger' 0 )
+
+T -Id 'ui-fullctx' -Cat $I -Name 'Full right-click menu on more than 15 selected items' -Tags max `
+  -Desc 'Windows stops hiding menu entries when you right-click a large selection.' `
+  -Reg @( Rg "$CV\Explorer" 'MultipleInvokePromptMinimum' 100 )
+
+T -Id 'ui-officefiles' -Cat $I -Name 'No cloud/Office files in Quick access' -Tags safe, max `
+  -Desc 'Quick access stops listing recent Office/cloud documents.' `
+  -Reg @( Rg "$CV\Explorer" 'ShowCloudFilesInQuickAccess' 0 )
+
+T -Id 'ui-autoplay' -Cat $I -Name 'Disable AutoPlay for drives and devices' -Tags safe, max `
+  -Desc 'Inserting a USB stick or card no longer pops up AutoPlay. Also a malware-spreading vector closed.' `
+  -Reg @( Rg "$CV\Explorer\AutoplayHandlers" 'DisableAutoplay' 1 )
+
+T -Id 'ui-netwizard' -Cat $I -Name 'No "Public or Private network?" prompt' `
+  -Desc 'New networks are classified automatically without the location wizard popup.' `
+  -Apply { New-Item -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Network\NewNetworkWindowOff' -Force | Out-Null; $null } `
+  -Undo  { Remove-Item -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Network\NewNetworkWindowOff' -Recurse -Force -ErrorAction SilentlyContinue } `
+  -Test  { Test-Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Network\NewNetworkWindowOff' }
+
+T -Id 'ui-eoa' -Cat $I -Name 'Disable Ease of Access auto-read and shortcut launcher' `
+  -Desc 'Stops "always read and scan this section" and the Win+U-style assistive tool launch on touch/pen.' `
+  -Reg @( Rg 'HKCU:\SOFTWARE\Microsoft\Ease of Access' 'selfscan' 0; Rg 'HKCU:\SOFTWARE\Microsoft\Ease of Access' 'selfvoice' 0; Rg 'HKCU:\Control Panel\Accessibility\SlateLaunch' 'LaunchAT' 0 )
+
+T -Id 'ui-printscreen' -Cat $I -Name 'Print Screen does not open Snipping Tool' -Risk Moderate `
+  -Desc 'Frees the Print Screen key for other screenshot tools (it copies the screen as before).' `
+  -Reg @( Rg 'HKCU:\Control Panel\Keyboard' 'PrintScreenKeyForSnippingEnabled' 0 )
+
+T -Id 'perf-shortcuts' -Cat $P -Name 'Do not search for missing shortcut targets' -Tags safe, max `
+  -Desc 'Windows stops hunting the whole disk when a shortcut is broken, which can freeze Explorer for seconds.' `
+  -Reg @( Rg "$CV\Policies\Explorer" 'NoResolveSearch' 1; Rg "$CV\Policies\Explorer" 'NoResolveTrack' 1 )
+
+T -Id 'perf-openwith' -Cat $P -Name 'Do not look up apps online for unknown file types' -Tags safe, max `
+  -Desc 'Opening an unknown file no longer queries Microsoft for "Look for an app in the Store".' `
+  -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'NoInternetOpenWith' 1 )
+
+T -Id 'perf-nicpower' -Cat $P -Name 'Network adapters: never power down to save energy' -Tags gaming, max -DesktopOnly `
+  -Desc 'Disables "Allow the computer to turn off this device to save power" on physical network adapters: fewer dropouts and wake-up lag. Previous settings are saved.' `
+  -Apply {
+      $prev = @()
+      foreach ($a in Get-NetAdapter -Physical -ErrorAction SilentlyContinue) {
+          $pm = Get-NetAdapterPowerManagement -Name $a.Name -ErrorAction SilentlyContinue
+          if ($pm -and $pm.AllowComputerToTurnOffDevice -ne 'Unsupported') {
+              $prev += @{ Name = $a.Name; Value = [string]$pm.AllowComputerToTurnOffDevice }
+              try { Set-NetAdapterPowerManagement -Name $a.Name -AllowComputerToTurnOffDevice Disabled -ErrorAction Stop } catch {}
+          }
+      }
+      , $prev
+  } `
+  -Undo { param($d) foreach ($p in @($d)) { try { Set-NetAdapterPowerManagement -Name $p.Name -AllowComputerToTurnOffDevice $p.Value -ErrorAction Stop } catch {} } } `
+  -Test {
+      $any = $false
+      foreach ($a in Get-NetAdapter -Physical -ErrorAction SilentlyContinue) {
+          $pm = Get-NetAdapterPowerManagement -Name $a.Name -ErrorAction SilentlyContinue
+          if ($pm -and $pm.AllowComputerToTurnOffDevice -ne 'Unsupported') { $any = $true; if ($pm.AllowComputerToTurnOffDevice -ne 'Disabled') { return $false } }
+      }
+      $any
+  }
+
+T -Id 'sec-nullsess' -Cat $N -Name 'Restrict anonymous (null session) access to shares' -Tags safe, max `
+  -Desc 'Security hardening: anonymous connections can no longer reach named pipes and shares.' `
+  -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters' 'RestrictNullSessAccess' 1 )
+
+T -Id 'priv-settingtips' -Cat $V -Name 'Disable online tips in Settings' -Tags safe, privacy, max `
+  -Desc 'Settings stops fetching tips and "did you know" banners from Microsoft.' `
+  -Reg @(
+      Rg 'HKLM:\SOFTWARE\Microsoft\PolicyManager\default\Settings\AllowOnlineTips' 'value' 0
+      Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'AllowOnlineTips' 0
+  )
+
+T -Id 'priv-lockcamera' -Cat $V -Name 'Disable camera on the lock screen' -Tags safe, privacy, max `
+  -Desc 'Swiping on the lock screen can no longer open the camera.' `
+  -Reg @( Rg "$POL\Personalization" 'NoLockScreenCamera' 1 )
+
+T -Id 'priv-speechmodel' -Cat $V -Name 'Stop automatic speech-model downloads' -Tags safe, privacy, max `
+  -Desc 'Windows no longer downloads speech data updates in the background.' `
+  -Reg @( Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Speech' 'AllowSpeechModelUpdate' 0 )
+
+T -Id 'priv-settingsync' -Cat $V -Name 'Disable settings sync to your Microsoft account' -Tags privacy -Risk Moderate `
+  -Desc 'Themes, passwords-metadata and preferences are no longer synced across your devices.' `
+  -Reg @( Rg "$POL\SettingSync" 'DisableSettingSync' 2; Rg "$POL\SettingSync" 'DisableSettingSyncUserOverride' 1 )
+
+T -Id 'priv-msgsync' -Cat $V -Name 'Disable message cloud sync' -Tags safe, privacy, max `
+  -Desc 'Blocks SMS/message sync to the cloud.' `
+  -Reg @( Rg "$POL\Messaging" 'AllowMessageSync' 0 )
+
+T -Id 'priv-nvidia' -Cat $V -Name 'NVIDIA: opt out of telemetry' -Tags safe, privacy, max `
+  -Desc 'Turns off NVIDIA Control Panel usage telemetry and the NVIDIA telemetry container service (if installed).' `
+  -Reg @( Rg 'HKCU:\Software\NVIDIA Corporation\NVControlPanel2\Client' 'OptInOrOutPreference' 0 ) `
+  -Svc @( Sx 'NvTelemetryContainer' 4 )
+
+T -Id 'priv-office' -Cat $V -Name 'Microsoft Office: opt out of telemetry and feedback' -Tags safe, privacy, max `
+  -Desc 'User policies that disable Office customer-data upload, telemetry, feedback, screenshots and the Office logging service.' `
+  -Reg @(
+      Rg 'HKCU:\Software\Policies\Microsoft\office\16.0\common' 'sendcustomerdata' 0
+      Rg 'HKCU:\Software\Policies\Microsoft\office\16.0\common' 'qmenable' 0
+      Rg 'HKCU:\Software\Policies\Microsoft\office\16.0\common' 'updatereliabilitydata' 0
+      Rg 'HKCU:\Software\Policies\Microsoft\office\common\clienttelemetry' 'sendtelemetry' 3
+      Rg 'HKCU:\Software\Policies\Microsoft\office\16.0\common\feedback' 'enabled' 0
+      Rg 'HKCU:\Software\Policies\Microsoft\office\16.0\common\feedback' 'includescreenshot' 0
+      Rg 'HKCU:\Software\Policies\Microsoft\office\16.0\osm' 'enablelogging' 0
+      Rg 'HKCU:\Software\Policies\Microsoft\office\16.0\osm' 'enableupload' 0
+  )
+
+T -Id 'debloat-apparchive' -Cat $D -Name 'Do not auto-archive Store apps' -Tags max `
+  -Desc 'Windows stops silently "archiving" (unloading) apps you have not used for a while.' `
+  -Reg @( Rg "$POL\Appx" 'AllowAutomaticAppArchiving' 0 )
+
+T -Id 'wu-nag' -Cat $D -Name 'Windows Update: remove "update and shut down" nag' -Tags safe, max `
+  -Desc 'The power menu defaults to plain Shut down and the "Get the latest updates" link is hidden.' `
+  -Reg @( Rg "$WU\AU" 'NoAUAsDefaultShutdownOption' 1; Rg 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' 'HideMCTLink' 1 )

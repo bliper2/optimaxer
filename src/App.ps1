@@ -579,6 +579,7 @@ $global:Tools = [ordered]@{
     wu      = @{ Title = 'Reset Windows Update';        Desc = 'Clears the update cache and re-registers update services. Fixes stuck updates.' }
     icons   = @{ Title = 'Rebuild icon cache';          Desc = 'Fixes blank or wrong icons and thumbnails. Restarts Explorer.' }
     store   = @{ Title = 'Reset Microsoft Store cache'; Desc = 'Runs wsreset to fix Store download problems.' }
+    perfctr = @{ Title = 'Rebuild performance counters';  Desc = 'Runs lodctr /r and winmgmt /resyncperf. Fixes empty Task Manager graphs, missing counters and slow WMI.' }
     regbackup = @{ Title = 'Export registry backup';    Desc = 'Saves .reg exports of the policy, Explorer, memory and network keys that Optimaxer edits, to the backups folder.' }
     rstrui  = @{ Title = 'Open System Restore';         Desc = 'Roll your PC back to a restore point.' }
     revert  = @{ Title = 'Undo ALL Optimaxer tweaks';   Desc = 'Restores every setting changed by this tool to its original value.'; Danger = $true }
@@ -646,6 +647,12 @@ $toolJobs = @{
         Start-Sleep -Seconds 1
         if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
         Write-Log 'Icon cache rebuilt.' 'OK'
+    }
+    perfctr = {
+        lodctr.exe /r 2>&1 | Out-Null
+        lodctr.exe /r 2>&1 | Out-Null
+        winmgmt.exe /resyncperf 2>&1 | Out-Null
+        Write-Log 'Performance counters rebuilt. Restart apps that read them (Task Manager, monitoring tools).' 'OK'
     }
     regbackup = {
         $dir = Join-Path $OptiBackupDir ('registry-{0}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
