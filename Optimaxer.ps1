@@ -11,7 +11,8 @@ $global:OptiRoot = $PSScriptRoot
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $sta = [Threading.Thread]::CurrentThread.ApartmentState -eq 'STA'
 
-if ((-not $isAdmin -and -not $NoElevate) -or -not $sta) {
+$isCore = $PSVersionTable.PSEdition -eq 'Core'   # Appx/DISM cmdlets need Windows PowerShell 5.1
+if ((-not $isAdmin -and -not $NoElevate) -or -not $sta -or $isCore) {
     $argLine = "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$PSCommandPath`""
     if ($NoElevate) { $argLine += ' -NoElevate' }
     if ($Screenshot) { $argLine += " -Screenshot `"$Screenshot`"" }

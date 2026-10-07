@@ -523,6 +523,7 @@ foreach ($p in $global:OptiDns) {
     $b.Add_Click({
         param($s, $e)
         $d = $s.Tag
+        if (-not (Test-Elevated)) { return }
         if (-not (Confirm-Action "Set DNS to $($d.Name) on all active network adapters?")) { return }
         [void](Start-OptiJob "DNS: $($d.Name)" -ArgList @($d.Name, ([string[]]$d.V4), ([string[]]$d.V6), $d.Doh) -Script {
             param($name, $v4, $v6, $doh) Set-DnsProvider -Name $name -V4 $v4 -V6 $v6 -Doh $doh
@@ -752,6 +753,7 @@ $UI.BtnFtRefresh.Add_Click({ Update-Features })
 $UI.BtnFlushDns.Add_Click({ [void](Start-OptiJob 'Flush DNS' -Script { Clear-DnsClientCache; Write-Log 'DNS cache flushed.' 'OK' }) })
 $UI.BtnDnsShow.Add_Click({ Show-CurrentDns })
 $UI.BtnResetNet.Add_Click({
+    if (-not (Test-Elevated)) { return }
     if (-not (Confirm-Action "Reset Winsock and the IP stack?`nYou may briefly lose connection and need to restart.")) { return }
     [void](Start-OptiJob 'Reset network stack' -Script {
         netsh winsock reset | Out-Null; netsh int ip reset | Out-Null; ipconfig /flushdns | Out-Null

@@ -283,6 +283,22 @@ function Get-TweakStatus {
     }
 }
 
+function Find-SharedOriginal {
+    # If another tweak already recorded this registry value / service / task, reuse its saved original
+    # (the current value may just be what that tweak wrote). Keeps undo order-independent.
+    param($State, [string]$ExceptId, [string]$Kind, [string]$Key1, [string]$Key2)
+    foreach ($id in $State.Keys) {
+        if ($id -eq $ExceptId) { continue }
+        $rec = $State[$id]
+        switch ($Kind) {
+            'Reg'  { foreach ($r in @($rec.Reg))  { if ($r.P -eq $Key1 -and $r.N -eq $Key2) { return $r } } }
+            'Svc'  { foreach ($s in @($rec.Svc))  { if ($s.Name -eq $Key1) { return $s } } }
+            'Task' { foreach ($t in @($rec.Task)) { if ($t.Full -eq $Key1) { return $t } } }
+        }
+    }
+    return $null
+}
+
 function Invoke-TweakApply {
     param($T)
     Write-Log "Apply: $($T.Name)"
@@ -294,8 +310,12 @@ function Invoke-TweakApply {
     foreach ($r in $T.Reg) {
         try {
             if ($fresh) {
-                $s = Get-RegSnapshot $r
-                $rec.Reg += @{ P = $r.P; N = $r.N; Exists = $s.Exists; Value = $s.Value; Type = $s.Type }
+                $shared = Find-SharedOriginal $state $T.Id 'Reg' $r.P $r.N
+                if ($shared) { $rec.Reg += @{ P = $r.P; N = $r.N; Exists = [bool]$shared.Exists; Value = $shared.Value; Type = $shared.Type } }
+                else {
+                    $s = Get-RegSnapshot $r
+                    $rec.Reg += @{ P = $r.P; N = $r.N; Exists = $s.Exists; Value = $s.Value; Type = $s.Type }
+                }
             }
             Set-RegEntry $r.P $r.N $r.V $r.T
         } catch { Write-Log "  registry $($r.P)\$($r.N): $($_.Exception.Message)" 'WARN' }
@@ -303,13 +323,13 @@ function Invoke-TweakApply {
     foreach ($s in $T.Svc) {
         $snap = Get-SvcSnapshot $s.Name
         if (-not $snap) { continue }
-        if ($fresh) { $rec.Svc += $snap }
+        if ($fresh) { $sh = Find-SharedOriginal $state $T.Id 'Svc' $s.Name; $rec.Svc += $(if ($sh) { @{ Name = $s.Name; Start = [int]$sh.Start; Delayed = [int]$sh.Delayed } } else { $snap }) }
         if ($snap.Start -ne $s.Start -and -not (Set-SvcStart $s.Name $s.Start)) { Write-Log "  service $($s.Name): could not change (protected?)" 'WARN' }
     }
     foreach ($tk in $T.Task) {
         $snap = Get-TaskSnapshot $tk
         if (-not $snap) { continue }
-        if ($fresh) { $rec.Task += $snap }
+        if ($fresh) { $sh = Find-SharedOriginal $state $T.Id 'Task' $tk; $rec.Task += $(if ($sh) { @{ Full = $tk; Enabled = [int]$sh.Enabled } } else { $snap }) }
         Set-TaskEnabled $tk $false
     }
     if ($T.Apply) {
@@ -395,7 +415,7 @@ function Set-StartupItem {
 # ---------------------------------------------------------------- DNS
 function Set-DnsProvider {
     param([string]$Name, [string[]]$V4, [string[]]$V6, [string]$Doh)
-    $adapters = Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object Status -eq 'Up'
+    $adapters = @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' -and $_.HardwareInterface })
     if (-not $adapters) { Write-Log 'No active network adapter found' 'WARN'; return }
     foreach ($a in $adapters) {
         try {
