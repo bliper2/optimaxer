@@ -23,8 +23,15 @@ $global:Win = $win
 function New-Row {
     param($Id, $Name, $Desc, $Group = '', $Risk = '', $Extra = '', [bool]$Checked = $false, $Tag = $null)
     $r = New-Object OptiRow
-    $r.Id = $Id; $r.Name = $Name; $r.Desc = $Desc; $r.Group = ([string]$Group).ToLower(); $r.Risk = $Risk; $r.Extra = $Extra; $r.IsChecked = $Checked; $r.Tag = $Tag
+    $r.Id = $Id; $r.Name = $Name; $r.Desc = $Desc; $r.Group = [string]$Group; $r.Risk = $Risk; $r.Extra = $Extra; $r.IsChecked = $Checked; $r.Tag = $Tag
     return $r
+}
+
+function New-RowFilter {
+    param([string]$Key)
+    return [Predicate[object]]([scriptblock]::Create(
+        "param(`$o) `$t = `$global:OptiFilters['$Key']; if ([string]::IsNullOrEmpty(`$t)) { return `$true }; " +
+        "([string]`$o.Name).IndexOf(`$t, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or ([string]`$o.Desc).IndexOf(`$t, [StringComparison]::OrdinalIgnoreCase) -ge 0"))
 }
 
 function Initialize-List {
@@ -35,11 +42,9 @@ function Initialize-List {
     $view.GroupDescriptions.Add((New-Object System.Windows.Data.PropertyGroupDescription 'Group'))
     $ListBox.GroupStyle.Add([Windows.Markup.XamlReader]::Parse(
         '<GroupStyle xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"><GroupStyle.HeaderTemplate><DataTemplate>' +
-        "<TextBlock Text=`"{Binding Name, StringFormat='# {0}'}`" Foreground=`"{DynamicResource Accent2}`" FontSize=`"11`" Margin=`"6,14,0,4`"/></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle>"))
+        '<TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="13" Foreground="{DynamicResource Text}" Margin="4,14,0,6"/></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle>'))
     $global:OptiFilters[$Key] = ''
-    $view.Filter = [Predicate[object]]([scriptblock]::Create(
-        "param(`$o) `$t = `$global:OptiFilters['$Key']; if ([string]::IsNullOrEmpty(`$t)) { return `$true }; " +
-        "([string]`$o.Name).IndexOf(`$t, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or ([string]`$o.Desc).IndexOf(`$t, [StringComparison]::OrdinalIgnoreCase) -ge 0"))
+    $view.Filter = New-RowFilter $Key
     return , $col
 }
 
@@ -65,7 +70,7 @@ function Set-Busy {
     $UI.PagesHost.Opacity = if ($On) { 0.55 } else { 1 }
     $UI.BusyBar.Visibility = if ($On) { 'Visible' } else { 'Hidden' }
     $UI.BusyBar.Value = if ($On) { 100 } else { 0 }
-    $UI.BusyText.Text = if ($On) { "working: $Text" } else { 'log' }
+    $UI.BusyText.Text = if ($On) { "Working: $Text" } else { 'Log' }
     if ($On) {
         $a = New-Object Windows.Media.Animation.DoubleAnimation(0.25, 1, [TimeSpan]::FromMilliseconds(700))
         $a.AutoReverse = $true
@@ -141,16 +146,16 @@ try {
     $compInfo   = New-Object Microsoft.VisualBasic.Devices.ComputerInfo
 } catch {}
 $sysDrive = New-Object IO.DriveInfo $env:SystemDrive
-$UI.DiskLabel.Text = "disk ($($env:SystemDrive))"
+$UI.DiskLabel.Text = "Disk ($($env:SystemDrive))"
 
 function Update-Live {
     try {
         $UI.BarClock.Text = (Get-Date).ToString('HH:mm')
         $c = if ($cpuCounter) { [math]::Round($cpuCounter.NextValue()) } else { 0 }
-        $UI.BarCpu.Text = 'cpu {0,2}%' -f $c
+        $UI.BarCpu.Text = 'CPU {0}%' -f $c
         if ($compInfo) {
             $tot = [double]$compInfo.TotalPhysicalMemory; $av = [double]$compInfo.AvailablePhysicalMemory
-            $UI.BarRam.Text = 'mem {0:N1}G' -f (($tot - $av) / 1GB)
+            $UI.BarRam.Text = 'RAM {0:N1} GB' -f (($tot - $av) / 1GB)
         }
         if ($UI.Page_dash.Visibility -ne 'Visible') { return }
         $UI.CpuText.Text = "$c%"; Set-Bar $UI.CpuBar $c
@@ -163,7 +168,7 @@ function Update-Live {
         if ($upCounter) {
             $ts = [TimeSpan]::FromSeconds($upCounter.NextValue())
             $UI.UpText.Text = '{0}d {1}h {2}m' -f $ts.Days, $ts.Hours, $ts.Minutes
-            $UI.UpHint.Text = if ($ts.TotalDays -gt 7) { 'restart recommended' } else { ' ' }
+            $UI.UpHint.Text = if ($ts.TotalDays -gt 7) { 'Restart recommended' } else { ' ' }
         }
     } catch {}
 }
@@ -175,8 +180,8 @@ function Set-Score {
     Set-Res $UI.ScoreText ([Windows.Controls.TextBlock]::ForegroundProperty) $col
     Set-Bar $UI.ScoreBar $Pct
     Set-Res $UI.ScoreBar ([Windows.Controls.Primitives.RangeBase]::ForegroundProperty) $(if ($Pct -ge 80) { 'Good' } elseif ($Pct -ge 45) { 'AccentGrad' } else { 'Bad' })
-    $UI.ScoreHead.Text = if ($Pct -ge 80) { 'well tuned' } elseif ($Pct -ge 45) { 'partially optimized' } else { 'not optimized yet' }
-    $UI.ScoreSub.Text = "$On of $Total recommended tweaks active. every change is recorded and can be undone."
+    $UI.ScoreHead.Text = if ($Pct -ge 80) { 'Well tuned' } elseif ($Pct -ge 45) { 'Partially optimized' } else { 'Not optimized yet' }
+    $UI.ScoreSub.Text = "$On of $Total recommended tweaks are active. Every change is recorded and can be undone."
 }
 
 function Update-Score {
@@ -219,15 +224,16 @@ function Initialize-Dashboard {
         if ($i) {
             $global:Sys.Laptop = [bool]$i.Laptop; $global:Sys.SSD = [bool]$i.SSD
             $pairs = @(
-                , @('host', "$($i.Machine) ($(if ($i.Laptop) { 'laptop' } else { 'desktop' }))")
-                , @('os', $i.OS)
-                , @('cpu', $i.CPU)
-                , @('gpu', $i.GPU)
-                , @('mem', "$($i.RAM) GB")
-            ) + @($i.Disks | ForEach-Object { , @('disk', $_) }) + @(, @('startup', "$($i.Startup) items"))
+                , @('Host', "$($i.Machine) ($(if ($i.Laptop) { 'laptop' } else { 'desktop' }))")
+                , @('OS', $i.OS)
+                , @('CPU', $i.CPU)
+                , @('GPU', $i.GPU)
+                , @('Memory', "$($i.RAM) GB")
+            ) + @($i.Disks | ForEach-Object { , @('Disk', $_) }) + @(, @('Startup', "$($i.Startup) items"))
             $UI.SysInfo.Inlines.Clear()
             foreach ($pr in $pairs) {
-                $k = New-Object Windows.Documents.Run(('{0,-8}' -f $pr[0]))
+                $k = New-Object Windows.Documents.Run(($pr[0] + ': '))
+                $k.FontWeight = 'SemiBold'
                 $k.SetResourceReference([Windows.Documents.TextElement]::ForegroundProperty, 'Accent2')
                 [void]$UI.SysInfo.Inlines.Add($k)
                 [void]$UI.SysInfo.Inlines.Add((New-Object Windows.Documents.Run(([string]$pr[1] + "`n"))))
@@ -238,8 +244,13 @@ function Initialize-Dashboard {
 }
 
 # ================================================================ tweaks page
-$global:TwRows = Initialize-List $UI.TwList 'tw'
-Connect-Search $UI.TwSearch 'tw' $global:TwRows
+$global:TwRows = New-Object 'System.Collections.ObjectModel.ObservableCollection[OptiRow]'
+$global:TwViews = New-Object System.Collections.ArrayList
+$global:OptiFilters['tw'] = ''
+$UI.TwSearch.Add_TextChanged({
+    $global:OptiFilters['tw'] = $UI.TwSearch.Text
+    foreach ($v in $global:TwViews) { $v.Refresh() }
+})
 foreach ($t in $global:OptiCatalog) {
     $notes = @()
     if ($t.DesktopOnly) { $notes += 'desktop PCs' }
@@ -248,6 +259,24 @@ foreach ($t in $global:OptiCatalog) {
     if ($t.Tags -contains 'optin') { $notes += 'opt-in, never in presets' }
     $d = if ($notes) { "$($t.Desc)  [$($notes -join ', ')]" } else { $t.Desc }
     $global:TwRows.Add((New-Row $t.Id $t.Name $d $t.Cat $t.Risk '' $false $t))
+}
+$colSize = @(0, 0, 0)
+$tweakCols = @($UI.TwCol1, $UI.TwCol2, $UI.TwCol3)
+foreach ($cat in @($global:TwRows | Group-Object Group)) {
+    $i = 0; for ($j = 1; $j -lt 3; $j++) { if ($colSize[$j] -lt $colSize[$i]) { $i = $j } }
+    $colSize[$i] += $cat.Count + 2
+    $head = New-Object Windows.Controls.TextBlock -Property @{ Text = $cat.Name }
+    $head.Style = $win.FindResource('ColHead')
+    [void]$tweakCols[$i].Children.Add($head)
+    $col = New-Object 'System.Collections.ObjectModel.ObservableCollection[OptiRow]'
+    foreach ($r in $cat.Group) { $col.Add($r) }
+    $ic = New-Object Windows.Controls.ItemsControl
+    $ic.ItemTemplate = $win.FindResource('TweakTemplate')
+    $ic.ItemsSource = $col
+    $view = [System.Windows.Data.CollectionViewSource]::GetDefaultView($col)
+    $view.Filter = New-RowFilter 'tw'
+    [void]$global:TwViews.Add($view)
+    [void]$tweakCols[$i].Children.Add($ic)
 }
 
 function Update-TweakStatus {
@@ -471,7 +500,7 @@ foreach ($p in $global:OptiDns) {
     $b.Width = 236; $b.Margin = '0,0,8,8'; $b.Padding = '12,9'
     $b.HorizontalContentAlignment = 'Left'
     $sp = New-Object Windows.Controls.StackPanel
-    $t1 = New-Object Windows.Controls.TextBlock -Property @{ Text = $p.Name.ToLower(); FontWeight = 'SemiBold'; FontSize = 13 }
+    $t1 = New-Object Windows.Controls.TextBlock -Property @{ Text = $p.Name; FontWeight = 'SemiBold'; FontSize = 13 }
     $t2 = New-Object Windows.Controls.TextBlock -Property @{ Text = $p.Desc; TextWrapping = 'Wrap'; FontSize = 11; Margin = '0,3,0,0' }
     Set-Res $t2 ([Windows.Controls.TextBlock]::ForegroundProperty) 'Muted'
     [void]$sp.Children.Add($t1); [void]$sp.Children.Add($t2)
@@ -615,7 +644,7 @@ foreach ($k in $global:Tools.Keys) {
     $b.Width = 250; $b.Height = 88; $b.Margin = '0,0,8,8'; $b.Padding = '14,0'; $b.HorizontalContentAlignment = 'Left'
     if ($tool.Danger) { $b.Style = $win.FindResource('BtnDanger') }
     $sp = New-Object Windows.Controls.StackPanel
-    $tt1 = New-Object Windows.Controls.TextBlock -Property @{ Text = $tool.Title.ToLower(); FontWeight = 'SemiBold'; FontSize = 13 }
+    $tt1 = New-Object Windows.Controls.TextBlock -Property @{ Text = $tool.Title; FontWeight = 'SemiBold'; FontSize = 13 }
     Set-Res $tt1 ([Windows.Controls.TextBlock]::ForegroundProperty) $(if ($tool.Danger) { 'Bad' } else { 'Text' })
     $tt2 = New-Object Windows.Controls.TextBlock -Property @{ Text = $tool.Desc; TextWrapping = 'Wrap'; FontSize = 11; Margin = '0,4,0,0' }
     Set-Res $tt2 ([Windows.Controls.TextBlock]::ForegroundProperty) 'Muted'
@@ -637,7 +666,7 @@ function Invoke-Tool {
 
 # ================================================================ wiring
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-$UI.AdminText.Text = if ($isAdmin) { 'admin' } else { 'not elevated' }
+$UI.AdminText.Text = if ($isAdmin) { 'Administrator' } else { 'Not elevated' }
 Set-Res $UI.AdminText ([Windows.Controls.TextBlock]::ForegroundProperty) $(if ($isAdmin) { 'Good' } else { 'Bad' })
 
 $UI.BtnMin.Add_Click({ $global:Win.WindowState = 'Minimized' })

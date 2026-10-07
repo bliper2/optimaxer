@@ -17,7 +17,7 @@ Double-click `Launch.bat` (asks for admin). Nothing is installed.
 - **Tools**: free RAM, TRIM/defrag, disk health, SFC, DISM, reset Windows Update, icon cache, Store cache, System Restore.
 
 ## Look
-Tiling-WM style UI: gapped rounded tiles, waybar-style bar with workspace pills (1-9 modules, 0 = appearance), rotating gradient border on the focused tile (focus follows mouse). Workspace `0` (`~/rice`): 8 themes (catppuccin, tokyo night, gruvbox, rose pine, nord, dracula, everforest, hyprland default), 4 animated wallpaper effects (aurora, starfield, rain, embers), gaps / rounding / border size, animation speed, six one-click rices, and a live equivalent `hyprland.conf` snippet. Saved to `%ProgramData%\Optimaxer\settings.json`. For the lowest CPU use pick effect `none` and animations `off`.
+Classic WinUtil-style layout: tab strip on top (Dashboard, Tweaks, Services, Startup, Cleaner, Debloat, Network, Features, Tools, Appearance), tweaks in three category columns with hover descriptions, and a log pane at the bottom. Dark by default; the Appearance tab adds a light theme, 8 more themes, optional animated wallpaper effects, gaps/rounding and a hyprland.conf-style preview. Saved to `%ProgramData%\Optimaxer\settings.json`.
 
 Log: `%ProgramData%\Optimaxer\optimaxer.log`. Tweaks tagged opt-in (VBS off, OneDrive removal, search indexing off, reserved storage) never appear in presets.
 

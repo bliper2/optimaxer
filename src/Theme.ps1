@@ -3,15 +3,18 @@
 function Add-Alpha { param([string]$Hex, [string]$Aa) return '#' + $Aa + $Hex.TrimStart('#') }
 
 function New-Theme {
-    param($Label, $Wall1, $Wall2, $Tile, $Surface, $Hi, $Line, $Text, $Muted, $A1, $A2, $Good, $Warn, $Bad, $On)
+    param($Label, $Wall1, $Wall2, $Tile, $Surface, $Hi, $Line, $Text, $Muted, $A1, $A2, $Good, $Warn, $Bad, $On, [switch]$Solid)
+    $aT, $aS, $aH, $aL = if ($Solid) { 'FF', 'FF', 'FF', 'FF' } else { 'D2', '99', 'CC', '77' }
     @{
         Label = $Label; Wall1 = "#$Wall1"; Wall2 = "#$Wall2"
-        TileBg = Add-Alpha $Tile 'D2'; Surface = Add-Alpha $Surface '99'; SurfaceHi = Add-Alpha $Hi 'CC'; Line = Add-Alpha $Line '77'
+        TileBg = Add-Alpha $Tile $aT; Surface = Add-Alpha $Surface $aS; SurfaceHi = Add-Alpha $Hi $aH; Line = Add-Alpha $Line $aL
         Text = "#$Text"; Muted = "#$Muted"; Accent = "#$A1"; Accent2 = "#$A2"; Good = "#$Good"; Warn = "#$Warn"; Bad = "#$Bad"; OnAccent = "#$On"
     }
 }
 
 $global:OptiThemes = [ordered]@{
+    winutil    = New-Theme 'dark (default)'   '1e1e1e' '1e1e1e' '262626' '333333' '404040' '4a4a4a' 'ffffff' 'a0a0a0' '2d7dd2' '4a9eff' '5cb85c' 'f0ad4e' 'd9534f' 'ffffff' -Solid
+    light      = New-Theme 'light'            'f3f3f3' 'f3f3f3' 'ffffff' 'ececec' 'dedede' 'cccccc' '1a1a1a' '666666' '0067c0' '2b88d8' '2e7d32' 'b26a00' 'c62828' 'ffffff' -Solid
     catppuccin = New-Theme 'catppuccin mocha' '11111b' '1e1e2e' '181825' '313244' '45475a' '585b70' 'cdd6f4' '7f849c' 'cba6f7' '89b4fa' 'a6e3a1' 'f9e2af' 'f38ba8' '11111b'
     tokyonight = New-Theme 'tokyo night'      '16161e' '1a1b26' '1a1b26' '24283b' '2f334d' '3b4261' 'c0caf5' '565f89' '7aa2f7' 'bb9af7' '9ece6a' 'e0af68' 'f7768e' '16161e'
     gruvbox    = New-Theme 'gruvbox dark'     '1d2021' '282828' '282828' '3c3836' '504945' '665c54' 'ebdbb2' '928374' 'fe8019' 'fabd2f' 'b8bb26' 'fabd2f' 'fb4934' '1d2021'
@@ -26,6 +29,7 @@ $global:OptiFxModes = [ordered]@{ none = 'none'; aurora = 'aurora'; stars = 'sta
 
 # hyprland-style "rices": theme + wallpaper effect + gaps + rounding + border
 $global:OptiRices = [ordered]@{
+    'classic'      = @{ Theme = 'winutil';    Fx = 'none';   GapIn = 0;  GapOut = 0;  Round = 0;  Border = 1 }
     'mauve night'  = @{ Theme = 'catppuccin'; Fx = 'aurora'; GapIn = 6;  GapOut = 12; Round = 12; Border = 2 }
     'neon city'    = @{ Theme = 'tokyonight'; Fx = 'rain';   GapIn = 4;  GapOut = 10; Round = 8;  Border = 2 }
     'retro warm'   = @{ Theme = 'gruvbox';    Fx = 'embers'; GapIn = 3;  GapOut = 6;  Round = 4;  Border = 3 }
@@ -34,13 +38,14 @@ $global:OptiRices = [ordered]@{
     'cyber'        = @{ Theme = 'hyprland';   Fx = 'rain';   GapIn = 5;  GapOut = 8;  Round = 10; Border = 2 }
 }
 
-$global:Cfg = @{ Theme = 'catppuccin'; Fx = 'aurora'; GapIn = 6; GapOut = 12; Round = 12; Border = 2; Anim = $true; Speed = 1.0 }
+$global:Cfg = @{ Theme = 'winutil'; Fx = 'none'; GapIn = 0; GapOut = 0; Round = 0; Border = 1; Anim = $true; Speed = 1.0; UiVersion = 3 }
 $global:CfgPath = Join-Path $global:OptiData 'settings.json'
 
 function Import-Cfg {
     if (-not (Test-Path -LiteralPath $global:CfgPath)) { return }
     try {
         $o = Get-Content -LiteralPath $global:CfgPath -Raw | ConvertFrom-Json
+        if ($o.UiVersion -ne 3) { return }
         foreach ($p in $o.PSObject.Properties) { if ($global:Cfg.ContainsKey($p.Name)) { $global:Cfg[$p.Name] = $p.Value } }
         if (-not $global:OptiThemes.Contains($global:Cfg.Theme)) { $global:Cfg.Theme = 'catppuccin' }
         if (-not $global:OptiFxModes.Contains($global:Cfg.Fx)) { $global:Cfg.Fx = 'aurora' }
@@ -167,7 +172,7 @@ function Set-Layout {
 function Set-ActiveTile {
     param($Tile)
     $global:ActiveTile = $Tile
-    foreach ($t in $global:Tiles) { $t.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, $(if ($t -eq $Tile) { 'ActiveBorder' } else { 'Line' })) }
+    foreach ($t in $global:Tiles) { $t.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, 'Line') }
 }
 
 function Set-Rice {
@@ -309,8 +314,7 @@ function Initialize-Rice {
 function Initialize-Look {
     Import-Cfg
     $global:Fx = New-Object OptiFx $UI.FxCanvas
-    $global:Tiles = @($UI.TileBar, $UI.TileMain, $UI.TileInfo, $UI.TileLog)
-    foreach ($tile in $global:Tiles) { $tile.Add_MouseEnter({ param($s, $e) Set-ActiveTile $s }) }
+    $global:Tiles = @($UI.TileBar, $UI.TileMain, $UI.TileLog)
     Initialize-Rice
     Set-Layout
     $global:ActiveTile = $UI.TileMain
