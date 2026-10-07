@@ -123,6 +123,10 @@ function Complete-OptiJobs {
         $global:Jobs.Remove($j)
         Set-Busy $false
         if ($j.OnDone) { try { & $j.OnDone $res } catch { Write-Log "UI update failed: $($_.Exception.Message)" 'ERROR' } }
+        if ($global:PendingPage -and -not $global:Busy) {
+            $pp = $global:PendingPage; $global:PendingPage = $null
+            if ($global:CurrentPage -eq $pp) { Show-Page $pp -Reload }
+        }
     }
 }
 
@@ -134,12 +138,16 @@ function Update-LogPane {
 }
 
 function Show-Page {
-    param([string]$Name)
-    foreach ($k in @($UI.Keys)) { if ($k -like 'Page_*') { $UI[$k].Visibility = if ($k -eq "Page_$Name") { 'Visible' } else { 'Collapsed' } } }
-    $titles = @{ install = 'install'; dash = 'dashboard'; tweaks = 'optimize'; services = 'services'; startup = 'startup'; cleanup = 'cleaner'; debloat = 'debloat'; network = 'network'; features = 'features'; tools = 'tools'; rice = 'rice' }
-    $UI.BarTitle.Text = "~/$($titles[$Name])"
-    Start-PageIn $UI["Page_$Name"]
-    if (-not $global:Loaded[$Name] -and -not $global:Busy) {
+    param([string]$Name, [switch]$Reload)
+    $global:CurrentPage = $Name
+    if (-not $Reload) {
+        foreach ($k in @($UI.Keys)) { if ($k -like 'Page_*') { $UI[$k].Visibility = if ($k -eq "Page_$Name") { 'Visible' } else { 'Collapsed' } } }
+        $titles = @{ install = 'install'; dash = 'dashboard'; tweaks = 'optimize'; services = 'services'; startup = 'startup'; cleanup = 'cleaner'; debloat = 'debloat'; network = 'network'; features = 'features'; tools = 'tools'; rice = 'rice' }
+        $UI.BarTitle.Text = "~/$($titles[$Name])"
+        Start-PageIn $UI["Page_$Name"]
+    }
+    if (-not $global:Loaded[$Name]) {
+        if ($global:Busy) { $global:PendingPage = $Name; return }   # a job is running: load as soon as it finishes
         switch ($Name) {
             'install'  { Update-Installed }
             'services' { Update-Services }
@@ -147,6 +155,9 @@ function Show-Page {
             'features' { Update-Features }
             'network'  { Show-CurrentDns }
         }
+    }
+    elseif ($Name -eq 'install' -and -not $global:Busy -and @($global:AppRows | Where-Object { -not $_.Icon }).Count) {
+        Update-AppIcons   # retry icons that failed earlier (no connection, etc.)
     }
 }
 
