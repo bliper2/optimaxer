@@ -22,3 +22,6 @@ Classic WinUtil-style layout: tab strip on top (Dashboard, Tweaks, Services, Sta
 Log: `%ProgramData%\Optimaxer\optimaxer.log`. Tweaks tagged opt-in (VBS off, OneDrive removal, search indexing off, reserved storage) never appear in presets.
 
 Dev: `Optimaxer.ps1 -NoElevate -Screenshot <dir>` renders every page to PNG.
+
+## Credits
+Tweak ideas draw on [Win11Debloat](https://github.com/Raphire/Win11Debloat) (MIT) and [WinUtil](https://github.com/ChrisTitusTech/winutil) (MIT), plus general knowledge of AtlasOS-style tuning (AtlasOS is GPL-3.0; no code copied). All tweaks are implemented here with snapshot/undo.

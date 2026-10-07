@@ -579,6 +579,7 @@ $global:Tools = [ordered]@{
     wu      = @{ Title = 'Reset Windows Update';        Desc = 'Clears the update cache and re-registers update services. Fixes stuck updates.' }
     icons   = @{ Title = 'Rebuild icon cache';          Desc = 'Fixes blank or wrong icons and thumbnails. Restarts Explorer.' }
     store   = @{ Title = 'Reset Microsoft Store cache'; Desc = 'Runs wsreset to fix Store download problems.' }
+    regbackup = @{ Title = 'Export registry backup';    Desc = 'Saves .reg exports of the policy, Explorer, memory and network keys that Optimaxer edits, to the backups folder.' }
     rstrui  = @{ Title = 'Open System Restore';         Desc = 'Roll your PC back to a restore point.' }
     revert  = @{ Title = 'Undo ALL Optimaxer tweaks';   Desc = 'Restores every setting changed by this tool to its original value.'; Danger = $true }
 }
@@ -645,6 +646,14 @@ $toolJobs = @{
         Start-Sleep -Seconds 1
         if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
         Write-Log 'Icon cache rebuilt.' 'OK'
+    }
+    regbackup = {
+        $dir = Join-Path $OptiBackupDir ('registry-{0}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $keys = 'HKLM\SOFTWARE\Policies', 'HKCU\SOFTWARE\Policies', 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer', 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager',
+                'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management', 'HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl', 'HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters'
+        foreach ($k in $keys) { $f = Join-Path $dir (($k -replace '[\\ ]', '_') + '.reg'); reg.exe export $k $f /y 2>&1 | Out-Null; Write-Log "  exported $k" }
+        Write-Log "Registry backup saved to $dir" 'OK'
     }
     store = { Start-Process wsreset.exe -Wait; Write-Log 'Store cache reset.' 'OK' }
     revert = {

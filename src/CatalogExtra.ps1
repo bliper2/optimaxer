@@ -451,3 +451,144 @@ T -Id 'br-opera-startup' -Cat $B -Name 'Opera / Opera GX: stop autostart and bac
       if ($key) { foreach ($n in $key.GetValueNames() | Where-Object { $_ -like 'Opera*' }) { if (Test-StartupEnabled $apr $n) { return $false } } }
       -not (Get-ScheduledTask -TaskPath '\' -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'Opera*' -and $_.State -ne 'Disabled' })
   }
+
+
+# ======================================================================= MORE MODULES
+# Ideas drawn from Win11Debloat (MIT), WinUtil (MIT) and AtlasOS-style tuning; implemented here with snapshot/undo.
+
+# ---- context menu clean-up (keys are exported to a .reg backup before deletion; undo re-imports)
+T -Id 'ui-ctx-share' -Cat $I -Name 'Remove "Share" from the right-click menu' -Explorer `
+  -Desc 'Removes the ModernSharing context-menu handler. The deleted key is exported first; undo re-imports it.' `
+  -Apply { Remove-RegKeysWithBackup @('HKEY_CLASSES_ROOT\*\shellex\ContextMenuHandlers\ModernSharing') 'ctx-share' } `
+  -Undo  { param($d) Restore-RegFiles $d } `
+  -Test  { Test-RegKeysGone @('HKEY_CLASSES_ROOT\*\shellex\ContextMenuHandlers\ModernSharing') }
+
+T -Id 'ui-ctx-giveaccess' -Cat $I -Name 'Remove "Give access to" from the right-click menu' -Explorer `
+  -Desc 'Removes the network-sharing "Give access to" handlers from files, folders and drives. Backed up and reversible.' `
+  -Apply {
+      Remove-RegKeysWithBackup @(
+          'HKEY_CLASSES_ROOT\*\shellex\ContextMenuHandlers\Sharing'
+          'HKEY_CLASSES_ROOT\Directory\Background\shellex\ContextMenuHandlers\Sharing'
+          'HKEY_CLASSES_ROOT\Directory\shellex\ContextMenuHandlers\Sharing'
+          'HKEY_CLASSES_ROOT\Drive\shellex\ContextMenuHandlers\Sharing'
+          'HKEY_CLASSES_ROOT\LibraryFolder\background\shellex\ContextMenuHandlers\Sharing'
+          'HKEY_CLASSES_ROOT\UserLibraryFolder\shellex\ContextMenuHandlers\Sharing') 'ctx-giveaccess'
+  } `
+  -Undo { param($d) Restore-RegFiles $d } `
+  -Test { Test-RegKeysGone @('HKEY_CLASSES_ROOT\*\shellex\ContextMenuHandlers\Sharing', 'HKEY_CLASSES_ROOT\Directory\shellex\ContextMenuHandlers\Sharing', 'HKEY_CLASSES_ROOT\Drive\shellex\ContextMenuHandlers\Sharing') }
+
+T -Id 'ui-ctx-library' -Cat $I -Name 'Remove "Include in library" from the right-click menu' -Explorer `
+  -Desc 'Removes the Library Location handler from folders. Backed up and reversible.' `
+  -Apply { Remove-RegKeysWithBackup @('HKEY_CLASSES_ROOT\Folder\ShellEx\ContextMenuHandlers\Library Location', 'HKEY_LOCAL_MACHINE\SOFTWARE\Classes\Folder\ShellEx\ContextMenuHandlers\Library Location') 'ctx-library' } `
+  -Undo  { param($d) Restore-RegFiles $d } `
+  -Test  { Test-RegKeysGone @('HKEY_LOCAL_MACHINE\SOFTWARE\Classes\Folder\ShellEx\ContextMenuHandlers\Library Location') }
+
+T -Id 'ui-thispc-clean' -Cat $I -Name 'This PC: hide 3D Objects, Music and duplicate removable drives' -Explorer `
+  -Desc 'Removes those entries from the This PC / navigation pane. Backed up and reversible.' `
+  -Apply {
+      Remove-RegKeysWithBackup @(
+          'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}'
+          'HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}'
+          'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{3dfdf296-dbec-4fb4-81d1-6a3438bcf4de}'
+          'HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{3dfdf296-dbec-4fb4-81d1-6a3438bcf4de}'
+          'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\DelegateFolders\{F5FB2C77-0E2F-4A16-A381-3E560C68BC83}') 'thispc'
+  } `
+  -Undo { param($d) Restore-RegFiles $d } `
+  -Test { Test-RegKeysGone @('HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{3dfdf296-dbec-4fb4-81d1-6a3438bcf4de}', 'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\DelegateFolders\{F5FB2C77-0E2F-4A16-A381-3E560C68BC83}') }
+
+T -Id 'ui-onedrive-nav' -Cat $I -Name 'Hide OneDrive in the Explorer navigation pane' -Explorer `
+  -Desc 'Takes the OneDrive entry out of the Explorer sidebar without uninstalling OneDrive.' `
+  -Reg @( Rg 'HKCU:\Software\Classes\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}' 'System.IsPinnedToNameSpaceTree' 0 )
+
+T -Id 'ui-recent' -Cat $I -Name 'Do not track recent and frequent files in Explorer' -Tags privacy `
+  -Desc 'Quick access stops showing recent files and frequent folders.' `
+  -Reg @( Rg "$CV\Explorer" 'ShowRecent' 0; Rg "$CV\Explorer" 'ShowFrequent' 0 )
+
+T -Id 'ui-alttab' -Cat $I -Name 'Alt+Tab: windows only, no Edge tabs' `
+  -Desc 'Alt+Tab lists windows, not individual browser tabs.' `
+  -Reg @( Rg $EXA 'MultiTaskingAltTabFilter' 3 )
+
+T -Id 'ui-lastactive' -Cat $I -Name 'Taskbar: clicking a grouped app re-opens its last window' -Explorer `
+  -Desc 'Single click on a grouped taskbar icon focuses the last active window instead of showing previews.' `
+  -Reg @( Rg $EXA 'LastActiveClick' 1 )
+
+T -Id 'ui-notifs-off' -Cat $I -Name 'Turn off all toast notifications' -Risk Moderate `
+  -Desc 'No notification popups from any app (you can still open the notification center). Re-enable in Settings > Notifications.' `
+  -Reg @( Rg "$CV\PushNotifications" 'ToastEnabled' 0 )
+
+T -Id 'ui-settingshome' -Cat $I -Name 'Hide the Settings home page' `
+  -Desc 'Settings opens on System instead of the Home page with cloud and account promos.' `
+  -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'SettingsPageVisibility' 'hide:home' 'String' )
+
+T -Id 'ui-sharetray' -Cat $I -Name 'Disable the Share drag tray' -Tags safe, max `
+  -Desc 'Stops the "drag files here to share" tray that appears when dragging files to the top of the screen.' `
+  -Reg @( Rg "$CV\CDP" 'DragTrayEnabled' 0 )
+
+T -Id 'ui-phonelink-start' -Cat $I -Name 'Hide Phone Link in the Start menu' -Tags safe, max `
+  -Desc 'Removes the Phone Link companion panel from Start.' `
+  -Reg @( Rg "$CV\Start\Companions\Microsoft.YourPhone_8wekyb3d8bbwe" 'IsEnabled' 0 )
+
+T -Id 'ui-legacyboot' -Cat $I -Name 'Classic boot menu (F8 advanced options)' -Risk Moderate `
+  -Desc 'bcdedit bootmenupolicy legacy: F8 works at boot for Safe Mode. Undo sets it back to standard.' `
+  -Apply { bcdedit /set '{default}' bootmenupolicy legacy | Out-Null; $null } `
+  -Undo  { bcdedit /set '{default}' bootmenupolicy standard | Out-Null } `
+  -Test  { (bcdedit /enum '{current}' | Out-String) -match 'bootmenupolicy\s+Legacy' }
+
+# ---- privacy / debloat
+T -Id 'priv-searchhistory' -Cat $V -Name 'Disable device search history' -Tags safe, privacy, max `
+  -Desc 'Windows stops remembering what you search for on this device.' `
+  -Reg @( Rg "$CV\SearchSettings" 'IsDeviceSearchHistoryEnabled' 0 )
+
+T -Id 'priv-speech' -Cat $V -Name 'Disable online speech recognition' -Tags safe, privacy, max `
+  -Desc 'Voice data is no longer sent to Microsoft for cloud speech recognition.' `
+  -Reg @( Rg 'HKCU:\Software\Microsoft\Speech_OneCore\Settings\OnlineSpeechPrivacy' 'HasAccepted' 0 )
+
+T -Id 'priv-findmydevice' -Cat $V -Name 'Disable Find My Device' -Tags privacy -Risk Moderate `
+  -Desc 'Stops location reporting for Find My Device. You lose the ability to locate this PC from your Microsoft account.' `
+  -Reg @( Rg 'HKLM:\SOFTWARE\Policies\Microsoft\FindMyDevice' 'AllowFindMyDevice' 0 )
+
+T -Id 'priv-anon' -Cat $V -Name 'Block anonymous enumeration of accounts and shares' -Tags safe, max `
+  -Desc 'Security hardening: anonymous users can no longer list accounts or share names.' `
+  -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' 'RestrictAnonymous' 1; Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' 'RestrictAnonymousSAM' 1 )
+
+T -Id 'debloat-devicemeta' -Cat $D -Name 'Do not auto-download device apps from manufacturers' -Tags safe, max, deai `
+  -Desc 'Windows stops fetching vendor companion apps and icons when you plug in hardware.' `
+  -Reg @( Rg "$POL\Device Metadata" 'PreventDeviceMetadataFromNetwork' 1 )
+
+T -Id 'debloat-settings365' -Cat $D -Name 'Remove Microsoft 365 and account promos from Settings' -Tags safe, max, deai `
+  -Desc 'Hides the consumer account-state banners and offers in the Settings app.' `
+  -Reg @( Rg "$POL\CloudContent" 'DisableConsumerAccountStateContent' 1 )
+
+T -Id 'debloat-suggestions2' -Cat $D -Name 'Turn off remaining Windows suggestions and nag toasts' -Tags safe, max, deai `
+  -Desc 'Account notifications, sync-provider (OneDrive) ads, backup reminders, suggested-toast notifications and mobile-device nags.' `
+  -Reg @(
+      Rg $CDM 'SubscribedContent-353698Enabled' 0
+      Rg "$CV\SystemSettings\AccountNotifications" 'EnableAccountNotifications' 0
+      Rg $EXA 'ShowSyncProviderNotifications' 0
+      Rg "$CV\Notifications\Settings\Windows.SystemToast.Suggested" 'Enabled' 0
+      Rg "$CV\Notifications\Settings\Windows.SystemToast.BackupReminder" 'Enabled' 0
+      Rg "$CV\Mobility" 'OptedIn' 0
+  )
+
+T -Id 'debloat-aiservice' -Cat $D -Name 'AI Fabric service: start on demand only' -Tags safe, max, deai `
+  -Desc 'Sets the Windows AI Fabric service (WSAIFabricSvc) to Manual so it does not start with Windows.' `
+  -Svc @( Sx 'WSAIFabricSvc' 3 )
+
+T -Id 'wu-asap' -Cat $D -Name 'Windows Update: do not get new features as soon as available' -Tags safe, max `
+  -Desc 'Turns off "Get the latest updates as soon as they are available" so feature rollouts reach you later, after they have settled.' `
+  -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' 'IsContinuousInnovationOptedIn' 0 )
+
+T -Id 'sto-bitlocker' -Cat $D -Name 'Prevent automatic BitLocker device encryption' -Tags max -Risk Moderate `
+  -Desc 'Stops Windows from silently encrypting the drive at first sign-in with a Microsoft account. Already-encrypted drives are not decrypted.' `
+  -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\BitLocker' 'PreventDeviceEncryption' 1 )
+
+T -Id 'sto-storagesense' -Cat $D -Name 'Turn off Storage Sense' -Tags optin `
+  -Desc 'Windows stops auto-deleting temp files and Recycle Bin items on a schedule. Use the Cleaner tab instead.' `
+  -Reg @( Rg "$CV\StorageSense\Parameters\StoragePolicy" '01' 0 )
+
+T -Id 'perf-standbynet' -Cat $P -Name 'Disable network in Modern Standby' -Tags max -Risk Moderate `
+  -Desc 'No network activity while the PC is in Modern Standby (S0): less battery drain and fewer random wake-ups. Notifications arrive when you wake it.' `
+  -Reg @(
+      Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\f15576e8-98b7-4186-b944-eafa664402d9' 'ACSettingIndex' 0
+      Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\f15576e8-98b7-4186-b944-eafa664402d9' 'DCSettingIndex' 0
+  )

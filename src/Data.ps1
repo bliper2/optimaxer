@@ -181,6 +181,53 @@ Microsoft.XboxIdentityProvider|Xbox identity provider (needed for Xbox sign-in)|
 MicrosoftWindows.Client.WebExperience|Widgets web experience|O
 Microsoft.WidgetsPlatformRuntime|Widgets runtime|O
 Microsoft.Edge.GameAssist|Edge Game Assist|O
+Microsoft.PCManager|PC Manager|R
+Microsoft.Windows.AIHub|Copilot+ AI Hub|R
+Microsoft.NetworkSpeedTest|Network Speed Test|R
+Microsoft.News|Microsoft News app|R
+Microsoft.Office.Sway|Sway|R
+Microsoft.MicrosoftPowerBIForWindows|Power BI|R
+Microsoft.BingFoodAndDrink|Bing Food and Drink|R
+Microsoft.BingHealthAndFitness|Bing Health and Fitness|R
+Microsoft.BingTranslator|Bing Translator|R
+Microsoft.BingTravel|Bing Travel|R
+Microsoft.M365Companions|Microsoft 365 Companions|R
+Microsoft.Office.OneNote|OneNote (UWP)|O
+MicrosoftCorporationII.QuickAssist|Quick Assist|O
+MicrosoftWindows.CrossDevice|Cross Device Experience|O
+Microsoft.StartExperiencesApp|Start experiences (widgets host)|O
+AD2F1837.*|HP preinstalled apps|O
+DellInc.*|Dell preinstalled apps|O
+E046963F.LenovoCompanion|Lenovo Vantage|O
+LenovoCompanyLimited.*|Lenovo services|O
+*Asphalt*|Asphalt|R
+*FarmVille*|FarmVille|R
+*HiddenCity*|Hidden City|R
+*MarchofEmpires*|March of Empires|R
+*RoyalRevolt*|Royal Revolt|R
+*CaesarsSlots*|Caesars Slots|R
+*CookingFever*|Cooking Fever|R
+*DisneyMagicKingdoms*|Disney Magic Kingdoms|R
+*BubbleWitch*|Bubble Witch|R
+*Flipboard*|Flipboard|R
+*iHeartRadio*|iHeartRadio|R
+*TuneInRadio*|TuneIn Radio|R
+*PandoraMedia*|Pandora|R
+*PicsArt*|PicsArt|R
+*Phototastic*|Phototastic Collage|R
+*Polarr*|Polarr Photo Editor|R
+*SlingTV*|Sling TV|R
+*WinZip*|WinZip trial|R
+*ACGMediaPlayer*|ACG Media Player|R
+*ActiproSoftware*|Actipro Software|R
+*AdobePhotoshopExpress*|Photoshop Express|R
+*AutodeskSketchBook*|Autodesk SketchBook|R
+*CyberLinkMediaSuite*|CyberLink Media Suite|R
+*DrawboardPDF*|Drawboard PDF|R
+*EclipseManager*|Eclipse Manager|R
+*NYTCrossword*|NYT Crossword|R
+*OneCalendar*|One Calendar|R
+*LiveWallpaper*|Live Wallpaper|R
 *Spotify*|Spotify|R
 *Disney*|Disney+|R
 *Netflix*|Netflix|R

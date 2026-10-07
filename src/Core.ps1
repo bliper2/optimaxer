@@ -487,3 +487,31 @@ function Invoke-CleanupTarget {
     foreach ($s in $wasRunning) { Start-Service -Name $s -ErrorAction SilentlyContinue }
     return $freed
 }
+
+# ---------------------------------------------------------------- registry key deletion with .reg backup
+function Remove-RegKeysWithBackup {
+    # Keys in native form (HKEY_CLASSES_ROOT\...). A key is only deleted after its export succeeded.
+    param([string[]]$Keys, [string]$Tag)
+    $files = @(); $i = 0
+    foreach ($k in $Keys) {
+        $p = "Registry::$k"
+        if (-not (Test-Path -LiteralPath $p)) { continue }
+        $i++
+        $f = Join-Path $global:OptiBackupDir ('{0}-{1}-{2}.reg' -f $Tag, (Get-Date -Format 'yyyyMMdd-HHmmss'), $i)
+        reg.exe export $k $f /y 2>&1 | Out-Null
+        if (Test-Path -LiteralPath $f) { $files += $f; Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
+        else { Write-Log "  could not back up $k, left untouched" 'WARN' }
+    }
+    , $files
+}
+
+function Restore-RegFiles {
+    param($Files)
+    foreach ($f in @($Files)) { if ($f -and (Test-Path -LiteralPath $f)) { reg.exe import $f 2>&1 | Out-Null } }
+}
+
+function Test-RegKeysGone {
+    param([string[]]$Keys)
+    foreach ($k in $Keys) { if (Test-Path -LiteralPath "Registry::$k") { return $false } }
+    return $true
+}
