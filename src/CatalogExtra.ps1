@@ -418,3 +418,36 @@ T -Id 'br-vivaldi-debloat' -Cat $B -Name 'Vivaldi: no metrics or background mode
 T -Id 'br-updaters' -Cat $B -Name 'Browser updater services: set to Manual' -Tags max `
   -Desc 'Google Update and Brave Update services stop running constantly and start on demand. Browsers still update through their scheduled tasks.' `
   -Svc @( Sx 'gupdate' 3; Sx 'gupdatem' 3; Sx 'brave' 3; Sx 'bravem' 3 )
+
+T -Id 'br-opera-startup' -Cat $B -Name 'Opera / Opera GX: stop autostart and background auto-update tasks' -Tags max -Risk Moderate `
+  -Desc 'Disables the "Opera Browser Assistant" startup entries and the "Opera scheduled Autoupdate" tasks, so Opera no longer launches helpers at sign-in. Opera still updates when you open it. Opera has no policy support, so its AI (Aria), GX Corner, wallet and sidebar toggles can only be changed inside Opera settings.' `
+  -Apply {
+      $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+      $apr = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+      $done = @{ Run = @(); Tasks = @() }
+      $key = Get-Item -LiteralPath $run -ErrorAction SilentlyContinue
+      if ($key) {
+          foreach ($n in $key.GetValueNames() | Where-Object { $_ -like 'Opera*' }) {
+              if (Test-StartupEnabled $apr $n) { Set-StartupItem @{ Name = $n; Approved = $apr } $false; $done.Run += $n }
+          }
+      }
+      foreach ($t in Get-ScheduledTask -TaskPath '\' -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'Opera*' -and $_.State -ne 'Disabled' }) {
+          Disable-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction SilentlyContinue | Out-Null
+          $done.Tasks += $t.TaskName
+      }
+      $done
+  } `
+  -Undo {
+      param($d)
+      $apr = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+      foreach ($n in @($d.Run)) { Set-StartupItem @{ Name = $n; Approved = $apr } $true }
+      foreach ($n in @($d.Tasks)) { Enable-ScheduledTask -TaskPath '\' -TaskName $n -ErrorAction SilentlyContinue | Out-Null }
+  } `
+  -Test {
+      $installed = (Test-Path "$env:LOCALAPPDATA\Programs\Opera GX") -or (Test-Path "$env:LOCALAPPDATA\Programs\Opera")
+      if (-not $installed) { return $false }
+      $apr = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+      $key = Get-Item -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue
+      if ($key) { foreach ($n in $key.GetValueNames() | Where-Object { $_ -like 'Opera*' }) { if (Test-StartupEnabled $apr $n) { return $false } } }
+      -not (Get-ScheduledTask -TaskPath '\' -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'Opera*' -and $_.State -ne 'Disabled' })
+  }
