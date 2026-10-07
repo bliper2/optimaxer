@@ -63,11 +63,11 @@ function Set-Res {
 }
 
 function Swap-Brush {
-    # theme brushes are frozen once a Style seals them, so replace the resource with a fresh brush and ease it in
+    # theme brushes are frozen once a Style seals them, so replace the resource with a fresh brush and ease it in.
+    # The animation must start BEFORE the brush goes into the dictionary, which would otherwise freeze it.
     param([string]$Key, [Windows.Media.Color]$To)
     $old = $win.Resources[$Key]
     $nb = New-Object Windows.Media.SolidColorBrush $To
-    $win.Resources[$Key] = [Windows.Media.Brush]$nb
     if ($global:Cfg.Anim -and $old.Color -ne $To) {
         try {
             $a = New-Object Windows.Media.Animation.ColorAnimation($old.Color, $To, (Get-Dur 380))
@@ -75,6 +75,7 @@ function Swap-Brush {
             $nb.BeginAnimation([Windows.Media.SolidColorBrush]::ColorProperty, $a)
         } catch {}
     }
+    $win.Resources[$Key] = [Windows.Media.Brush]$nb
 }
 
 function Swap-Gradient {

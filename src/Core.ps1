@@ -318,7 +318,11 @@ function Invoke-TweakApply {
                 }
             }
             Set-RegEntry $r.P $r.N $r.V $r.T
-        } catch { Write-Log "  registry $($r.P)\$($r.N): $($_.Exception.Message)" 'WARN' }
+        } catch {
+            $msg = $_.Exception.Message
+            if ($msg -match 'not allowed|denied') { $msg += ' (this key is write-protected on this PC by Windows, a policy or another tool)' }
+            Write-Log "  registry $($r.P)\$($r.N): $msg" 'WARN'
+        }
     }
     foreach ($s in $T.Svc) {
         $snap = Get-SvcSnapshot $s.Name
