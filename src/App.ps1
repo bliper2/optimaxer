@@ -388,9 +388,9 @@ function Test-Winget {
 
 
 # ---- tile icons: favicon of each app's homepage, downloaded once into %ProgramData%\Optimaxer\icons
-$global:IconDir = Join-Path $global:OptiData 'icons3'   # v3: WinUtil's favicon source; older icon folders are ignored
-$global:AppDomain = @{}; $global:AppLink = @{}
-foreach ($a in $global:OptiApps) { $global:AppDomain[$a.Id] = $a.Domain; $global:AppLink[$a.Id] = $a.Link }
+$global:IconDir = Join-Path $global:OptiData 'icons4'   # v4: icon packs first, favicons as fallback; older icon folders are ignored
+$global:AppDomain = @{}; $global:AppLink = @{}; $global:AppPack = @{}
+foreach ($a in $global:OptiApps) { $global:AppDomain[$a.Id] = $a.Domain; $global:AppLink[$a.Id] = $a.Link; $global:AppPack[$a.Id] = $a.Pack }
 
 function Get-IconPath {
     param([string]$Id)
@@ -400,6 +400,20 @@ function Get-IconPath {
 function Set-RowIcon {
     param($Row, [string]$Path)
     try {
+        $head = [IO.File]::ReadAllText($Path)
+        if ($head.StartsWith('SVGPATH|')) {
+            # Simple Icons glyph: one SVG path, drawn in the brand colour (very dark brands are lightened to stay visible)
+            $parts = $head.Split('|', 3)
+            $hex = $parts[1]
+            $r = [Convert]::ToInt32($hex.Substring(0, 2), 16); $g = [Convert]::ToInt32($hex.Substring(2, 2), 16); $b = [Convert]::ToInt32($hex.Substring(4, 2), 16)
+            if ((0.299 * $r + 0.587 * $g + 0.114 * $b) -lt 70) { $r = 224; $g = 224; $b = 224 }
+            $brush = New-Object Windows.Media.SolidColorBrush ([Windows.Media.Color]::FromRgb($r, $g, $b)); $brush.Freeze()
+            $geo = [Windows.Media.Geometry]::Parse($parts[2]); $geo.Freeze()
+            $drawing = New-Object Windows.Media.GeometryDrawing($brush, $null, $geo); $drawing.Freeze()
+            $img = New-Object Windows.Media.DrawingImage($drawing); $img.Freeze()
+            $Row.Icon = $img
+            return $true
+        }
         $bi = New-Object Windows.Media.Imaging.BitmapImage
         $bi.BeginInit(); $bi.UriSource = [uri]$Path; $bi.CacheOption = 'OnLoad'; $bi.EndInit(); $bi.Freeze()
         $Row.Icon = $bi
@@ -412,7 +426,7 @@ function Update-AppIcons {
         $path = Get-IconPath $row.Id
         if (-not $row.Icon -and (Test-Path -LiteralPath $path)) { [void](Set-RowIcon $row $path) }
     }
-    $missing = @($global:AppRows | Where-Object { -not $_.Icon -and ($global:AppDomain[$_.Id] -or $global:AppLink[$_.Id]) } | ForEach-Object { @{ Id = $_.Id; Domain = $global:AppDomain[$_.Id]; Link = $global:AppLink[$_.Id]; Path = (Get-IconPath $_.Id) } })
+    $missing = @($global:AppRows | Where-Object { -not $_.Icon -and ($global:AppPack[$_.Id] -or $global:AppDomain[$_.Id] -or $global:AppLink[$_.Id]) } | ForEach-Object { @{ Id = $_.Id; Domain = $global:AppDomain[$_.Id]; Link = $global:AppLink[$_.Id]; Pack = $global:AppPack[$_.Id]; Path = (Get-IconPath $_.Id) } })
     if (-not $missing.Count) { return }
     [void](Start-OptiJob 'Downloading app icons' -ArgList @(, $missing) -Script {
         param($items)
@@ -423,8 +437,24 @@ function Update-AppIcons {
         $jobs = foreach ($i in $items) {
             $ps = [powershell]::Create(); $ps.RunspacePool = $pool
             [void]$ps.AddScript({
-                param($domain, $link, $path)
+                param($domain, $link, $pack, $path)
                 # try the largest source first, fall back to smaller ones
+                # 1) icon packs (selfh.st icons CC BY 4.0, dashboard-icons Apache-2.0, Simple Icons CC0) served by jsDelivr
+                if ($pack) {
+                    $kind, $name, $hex = $pack -split ':'
+                    try {
+                        if ($kind -eq 'si') {
+                            $svg = (Invoke-WebRequest -Uri "https://cdn.jsdelivr.net/npm/simple-icons/icons/$name.svg" -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop).Content
+                            if ($svg -match ' d="([^"]+)"') { [IO.File]::WriteAllText($path, "SVGPATH|$hex|$($Matches[1])"); return $path }
+                        } else {
+                            $base = if ($kind -eq 'sh') { 'https://cdn.jsdelivr.net/gh/selfhst/icons/png' } else { 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png' }
+                            Invoke-WebRequest -Uri "$base/$name.png" -OutFile $path -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
+                            if ((Get-Item -LiteralPath $path).Length -ge 300) { return $path }
+                        }
+                    } catch {}
+                    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+                }
+                # 2) favicon of the product page (the source WinUtil uses)
                 $page = if ($link) { $link } else { "https://$domain" }
                 $urls = if ($domain -like 'github.com/*') { @("https://github.com/$($domain.Substring(11)).png?size=128") }
                         else { @("https://www.google.com/s2/favicons?sz=128&domain_url=$([uri]::EscapeDataString($page))",
@@ -438,7 +468,7 @@ function Update-AppIcons {
                     Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
                 }
                 return $null
-            }).AddArgument($i.Domain).AddArgument($i.Link).AddArgument($i.Path)
+            }).AddArgument($i.Domain).AddArgument($i.Link).AddArgument($i.Pack).AddArgument($i.Path)
             [pscustomobject]@{ PS = $ps; H = $ps.BeginInvoke() }
         }
         $ok = 0

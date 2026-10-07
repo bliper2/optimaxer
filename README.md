@@ -26,3 +26,6 @@ Dev: `Optimaxer.ps1 -NoElevate -Screenshot <dir>` renders every page to PNG.
 
 ## Credits
 Tweak ideas draw on [Win11Debloat](https://github.com/Raphire/Win11Debloat) (MIT) and [WinUtil](https://github.com/ChrisTitusTech/winutil) (MIT), plus general knowledge of AtlasOS-style tuning (AtlasOS is GPL-3.0; no code copied). All tweaks are implemented here with snapshot/undo.
+
+### App icons
+Install-tab icons are fetched at runtime (never bundled) from open icon packs served by jsDelivr, then cached in `%ProgramData%\Optimaxer\icons4`: [selfh.st icons](https://selfh.st/icons/) (CC BY 4.0, attribution: selfh.st), [Dashboard Icons](https://github.com/homarr-labs/dashboard-icons) (Apache-2.0) and [Simple Icons](https://simpleicons.org) (CC0). Apps without a pack icon fall back to the favicon of their product page (Google favicon service, as WinUtil does). Logos remain the trademarks of their owners.
