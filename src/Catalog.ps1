@@ -481,3 +481,5 @@ T -Id 'ui-scrollbars' -Cat $I -Name 'Scrollbars always visible' -Desc 'Stops scr
   -Reg @( Rg 'HKCU:\Control Panel\Accessibility' 'DynamicScrollbars' 0 )
 T -Id 'ui-verbosebsod' -Cat $I -Name 'Verbose blue-screen details' -Desc 'Shows technical parameters on BSOD for troubleshooting.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\CrashControl' 'DisplayParameters' 1 )
+
+. "$PSScriptRoot\CatalogExtra.ps1"

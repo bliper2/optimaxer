@@ -7,7 +7,7 @@ Inspired by the module layout of [Chris Titus Tech's WinUtil](https://github.com
 Double-click `Launch.bat` (asks for admin). Nothing is installed.
 
 ## What it does
-- **Optimize**: 65+ tweaks (performance, gaming, network, privacy, debloat, interface), presets (Recommended / Gaming / Privacy / Maximum). Original values are snapshotted per tweak (`%ProgramData%\Optimaxer\state.json`), so each tweak and "Undo ALL" restore real prior values. Optional restore point first.
+- **Optimize**: 100+ tweaks (performance, gaming, network, privacy, debloat, interface), presets (Recommended / Gaming / Privacy / Maximum). Original values are snapshotted per tweak (`%ProgramData%\Optimaxer\state.json`), so each tweak and "Undo ALL" restore real prior values. Optional restore point first.
 - **Services**: ~240 services, recommended Manual/Disable lists, protected core services hidden, JSON backup before every change + restore.
 - **Startup apps**: enable/disable registry and folder startup items (same mechanism as Task Manager).
 - **Cleaner**: scan then clean temp, update cache, shader caches, browser caches, dumps, logs, Recycle Bin, component store.
