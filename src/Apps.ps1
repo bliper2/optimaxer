@@ -36,7 +36,7 @@ Development|Fast Node Manager|Schniz.fnm|github.com/Schniz
 Development|Git|Git.Git|gitforwindows.org
 Development|Git Extensions|GitExtensionsTeam.GitExtensions|gitextensions.github.io
 Development|GitHub CLI|GitHub.cli|cli.github.com
-Development|GitHub Desktop|GitHub.GitHubDesktop|github.com
+Development|GitHub Desktop|GitHub.GitHubDesktop|desktop.github.com
 Development|Go|GoLang.Go|go.dev
 Development|JetBrains Toolbox|JetBrains.Toolbox|jetbrains.com
 Development|Lazygit|JesseDuffield.lazygit|github.com/jesseduffield
@@ -44,12 +44,12 @@ Development|Neovim|Neovim.Neovim|neovim.io
 Development|NodeJS|OpenJS.NodeJS|nodejs.org
 Development|NodeJS LTS|OpenJS.NodeJS.LTS|nodejs.org
 Development|Notepad++|Notepad++.Notepad++|notepad-plus-plus.org
-Development|Oh My Posh|JanDeDobbeleer.OhMyPosh|ohmyposh.dev
+Development|Oh My Posh|JanDeDobbeleer.OhMyPosh|github.com/JanDeDobbeleer
 Development|pnpm|pnpm.pnpm|pnpm.io
 Development|Postman|Postman.Postman|postman.com
 Development|PowerShell 7|Microsoft.PowerShell|microsoft.com
 Development|Python 3.13|Python.Python.3.13|python.org
-Development|Rust (rustup)|Rustlang.Rustup|rust-lang.github.io
+Development|Rust (rustup)|Rustlang.Rustup|rust-lang.org
 Development|Starship|Starship.Starship|starship.rs
 Development|Sublime Text|SublimeHQ.SublimeText.4|sublimetext.com
 Development|Temurin JDK 21|EclipseAdoptium.Temurin.21.JDK|adoptium.net
@@ -57,12 +57,12 @@ Development|Unity Hub|Unity.UnityHub|unity.com
 Development|uv|astral-sh.uv|github.com/astral-sh
 Development|Visual Studio 2022 Community|Microsoft.VisualStudio.2022.Community|visualstudio.microsoft.com
 Development|VS Code|Microsoft.VisualStudioCode|code.visualstudio.com
-Development|VSCodium|VSCodium.VSCodium|vscodium.com
+Development|VSCodium|VSCodium.VSCodium|github.com/VSCodium
 Development|WinMerge|WinMerge.WinMerge|winmerge.org
 Development|Windows Terminal|Microsoft.WindowsTerminal|docs.microsoft.com
-Development|Yarn|Yarn.Yarn|yarnpkg.com
+Development|Yarn|Yarn.Yarn|github.com/yarnpkg
 Development|Zed|ZedIndustries.Zed|zed.dev
-Documents|Adobe Acrobat Reader|Adobe.Acrobat.Reader.64-bit|adobe.com
+Documents|Adobe Acrobat Reader|Adobe.Acrobat.Reader.64-bit|acrobat.adobe.com
 Documents|Foxit PDF Reader|Foxit.FoxitReader|foxitsoftware.com
 Documents|Joplin|Joplin.Joplin|joplinapp.org
 Documents|LibreOffice|TheDocumentFoundation.LibreOffice|libreoffice.org
@@ -93,15 +93,15 @@ Games|Ubisoft Connect|Ubisoft.Connect|ubisoftconnect.com
 Microsoft Tools|.NET Desktop Runtime 8|Microsoft.DotNet.DesktopRuntime.8|dotnet.microsoft.com
 Microsoft Tools|.NET Desktop Runtime 9|Microsoft.DotNet.DesktopRuntime.9|dotnet.microsoft.com
 Microsoft Tools|.NET Desktop Runtime 10|Microsoft.DotNet.DesktopRuntime.10|dotnet.microsoft.com
-Microsoft Tools|Autoruns|Microsoft.Sysinternals.Autoruns|learn.microsoft.com
+Microsoft Tools|Autoruns|Microsoft.Sysinternals.Autoruns|sysinternals.com
 Microsoft Tools|OneDrive|Microsoft.OneDrive|microsoft.com
 Microsoft Tools|PowerToys|Microsoft.PowerToys|github.com/microsoft
-Microsoft Tools|Process Explorer|Microsoft.Sysinternals.ProcessExplorer|learn.microsoft.com
-Microsoft Tools|Process Monitor|Microsoft.Sysinternals.ProcessMonitor|learn.microsoft.com
-Microsoft Tools|RDCMan|Microsoft.Sysinternals.RDCMan|learn.microsoft.com
-Microsoft Tools|TCPView|Microsoft.Sysinternals.TCPView|learn.microsoft.com
-Microsoft Tools|Visual C++ 2015-2022 x64|Microsoft.VCRedist.2015+.x64|learn.microsoft.com
-Microsoft Tools|Visual C++ 2015-2022 x86|Microsoft.VCRedist.2015+.x86|learn.microsoft.com
+Microsoft Tools|Process Explorer|Microsoft.Sysinternals.ProcessExplorer|sysinternals.com
+Microsoft Tools|Process Monitor|Microsoft.Sysinternals.ProcessMonitor|sysinternals.com
+Microsoft Tools|RDCMan|Microsoft.Sysinternals.RDCMan|sysinternals.com
+Microsoft Tools|TCPView|Microsoft.Sysinternals.TCPView|sysinternals.com
+Microsoft Tools|Visual C++ 2015-2022 x64|Microsoft.VCRedist.2015+.x64|microsoft.com
+Microsoft Tools|Visual C++ 2015-2022 x86|Microsoft.VCRedist.2015+.x86|microsoft.com
 Multimedia|Audacity|Audacity.Audacity|audacityteam.org
 Multimedia|Blender|BlenderFoundation.Blender|blender.org
 Multimedia|Calibre|calibre.calibre|calibre-ebook.com
@@ -120,7 +120,7 @@ Multimedia|OBS Studio|OBSProject.OBSStudio|obsproject.com
 Multimedia|Paint.NET|dotPDN.PaintDotNet|getpaint.net
 Multimedia|ShareX|ShareX.ShareX|getsharex.com
 Multimedia|Spotify|Spotify.Spotify|spotify.com
-Multimedia|VLC|VideoLAN.VLC|videolan.org
+Multimedia|VLC|VideoLAN.VLC|github.com/videolan
 Utilities|7-Zip|7zip.7zip|7-zip.org
 Utilities|AnyDesk|AnyDesk.AnyDesk|anydesk.com
 Utilities|balenaEtcher|Balena.Etcher|etcher.balena.io
@@ -143,7 +143,7 @@ Utilities|Mullvad VPN|MullvadVPN.MullvadVPN|mullvad.net
 Utilities|Nmap|Insecure.Nmap|nmap.org
 Utilities|OpenVPN Connect|OpenVPNTechnologies.OpenVPNConnect|openvpn.net
 Utilities|Proton VPN|Proton.ProtonVPN|protonvpn.com
-Utilities|PuTTY|PuTTY.PuTTY|chiark.greenend.org.uk
+Utilities|PuTTY|PuTTY.PuTTY|putty.org
 Utilities|qBittorrent|qBittorrent.qBittorrent|qbittorrent.org
 Utilities|Revo Uninstaller|RevoUninstaller.RevoUninstaller|revouninstaller.com
 Utilities|Rufus|Rufus.Rufus|rufus.ie
@@ -200,7 +200,7 @@ Microsoft Tools|DISMTools|CodingWondersSoftware.DISMTools.Stable|github.com/Codi
 Microsoft Tools|NTLite|Nlitesoft.NTLite|ntlite.com
 Microsoft Tools|NuGet|Microsoft.NuGet|nuget.org
 Multimedia|AIMP (Music Player)|AIMP.AIMP|aimp.ru
-Multimedia|EarTrumpet (Audio)|File-New-Project.EarTrumpet|eartrumpet.app
+Multimedia|EarTrumpet (Audio)|File-New-Project.EarTrumpet|github.com/File-New-Project
 Multimedia|File Converter|AdrienAllard.FileConverter|file-converter.io
 Multimedia|Greenshot|Greenshot.Greenshot|getgreenshot.org
 Multimedia|K-Lite Codec Standard|CodecGuide.K-LiteCodecPack.Standard|codecguide.com
@@ -213,7 +213,7 @@ Multimedia|Streamlabs|Streamlabs.Streamlabs|streamlabs.com
 Pro Tools|Advanced IP Scanner|Famatech.AdvancedIPScanner|advanced-ip-scanner.com
 Pro Tools|Angry IP Scanner|angryziber.AngryIPScanner|angryip.org
 Pro Tools|Cinebench R23|Maxon.CinebenchR23|maxon.net
-Pro Tools|gsudo|gerardog.gsudo|gerardog.github.io
+Pro Tools|gsudo|gerardog.gsudo|github.com/gerardog
 Pro Tools|Simplewall|Henry++.simplewall|github.com/henrypp
 Selfhosted|Jellyfin Media Player|Jellyfin.JellyfinMediaPlayer|github.com/jellyfin
 Selfhosted|LocalSend|LocalSend.LocalSend|localsend.org
@@ -221,13 +221,13 @@ Selfhosted|NetBird|Netbird.Netbird|netbird.io
 Selfhosted|Syncthing (CLI / Web UI)|Syncthing.Syncthing|github.com/syncthing
 Selfhosted|SyncTrayzor|GermanCoding.SyncTrayzor|github.com/GermanCoding
 Utilities|1Password|AgileBits.1Password|1password.com
-Utilities|AB Download Manager|amir1376.ABDownloadManager|abdownloadmanager.com
+Utilities|AB Download Manager|amir1376.ABDownloadManager|github.com/amir1376
 Utilities|AutoHotkey|AutoHotkey.AutoHotkey|autohotkey.com
 Utilities|BlurAutoClicker|Blur009.BlurAutoClicker|github.com/Blur009
 Utilities|Cloudflare WARP|Cloudflare.Warp|one.one.one.one
 Utilities|Corsair iCUE|Corsair.iCUE.5|corsair.com
 Utilities|Deskflow|Deskflow.Deskflow|github.com/deskflow
-Utilities|Ditto Clipboard|Ditto.Ditto|sabrogden.github.io
+Utilities|Ditto Clipboard|Ditto.Ditto|github.com/sabrogden
 Utilities|Dropbox|Dropbox.Dropbox|dropbox.com
 Utilities|Ente Auth|ente-io.auth-desktop|github.com/ente-io
 Utilities|F.lux|flux.flux|justgetflux.com
@@ -257,7 +257,7 @@ Utilities|Proton Authenticator|Proton.ProtonAuthenticator|proton.me
 Utilities|Proton Drive|Proton.ProtonDrive|proton.me
 Utilities|Proton Pass|Proton.ProtonPass|proton.me
 Utilities|SignalRGB|WhirlwindFX.SignalRgb|signalrgb.com
-Utilities|Snappy Driver Installer Origin|GlennDelahoy.SnappyDriverInstallerOrigin|glenn.delahoy.com
+Utilities|Snappy Driver Installer Origin|GlennDelahoy.SnappyDriverInstallerOrigin|sdi-tool.org
 Utilities|Speccy|Piriform.Speccy|ccleaner.com
 Utilities|StartAllBack|StartIsBack.StartAllBack|startallback.com
 Utilities|TightVNC|GlavSoft.TightVNC|tightvnc.com

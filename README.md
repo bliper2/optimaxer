@@ -7,7 +7,7 @@ Inspired by the module layout of [Chris Titus Tech's WinUtil](https://github.com
 Double-click `Launch.bat` (asks for admin). Nothing is installed.
 
 ## What it does
-- **Install**: 260+ apps in 10 categories (the WinUtil list plus more) (browsers, communications, development, documents, games, Microsoft tools, multimedia, utilities, self-hosted) installed, upgraded or uninstalled through WinGet; tiles show each app's icon (favicon fetched once from DuckDuckGo's icon service by homepage domain, cached in `%ProgramData%\Optimaxer\icons`); "Show installed" marks what you already have; "Upgrade all" updates everything WinGet manages.
+- **Install**: 260+ apps in 10 categories (the WinUtil list plus more) (browsers, communications, development, documents, games, Microsoft tools, multimedia, utilities, self-hosted) installed, upgraded or uninstalled through WinGet; tiles show each app's icon (favicon fetched once by homepage domain from Google's favicon service, with DuckDuckGo's icon service as fallback and GitHub avatars for GitHub-hosted projects, cached in `%ProgramData%\Optimaxer\icons2`); "Show installed" marks what you already have; "Upgrade all" updates everything WinGet manages.
 - **Optimize**: 100+ tweaks (performance, gaming, network, privacy, debloat, interface), presets (Recommended / Gaming / Privacy / Maximum). Original values are snapshotted per tweak (`%ProgramData%\Optimaxer\state.json`), so each tweak and "Undo ALL" restore real prior values. Optional restore point first.
 - **Services**: ~240 services, recommended Manual/Disable lists, protected core services hidden, JSON backup before every change + restore.
 - **Startup apps**: enable/disable registry and folder startup items (same mechanism as Task Manager).

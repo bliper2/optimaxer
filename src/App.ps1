@@ -388,7 +388,7 @@ function Test-Winget {
 
 
 # ---- tile icons: favicon of each app's homepage, downloaded once into %ProgramData%\Optimaxer\icons
-$global:IconDir = Join-Path $global:OptiData 'icons'
+$global:IconDir = Join-Path $global:OptiData 'icons2'   # v2: 128 px sources; the old 'icons' folder is ignored
 $global:AppDomain = @{}; foreach ($a in $global:OptiApps) { $global:AppDomain[$a.Id] = $a.Domain }
 
 function Get-IconPath {
@@ -423,12 +423,18 @@ function Update-AppIcons {
             $ps = [powershell]::Create(); $ps.RunspacePool = $pool
             [void]$ps.AddScript({
                 param($domain, $path)
-                try {
-                    $url = if ($domain -like 'github.com/*') { "https://github.com/$($domain.Substring(11)).png?size=64" } else { "https://icons.duckduckgo.com/ip3/$domain.ico" }
-                    Invoke-WebRequest -Uri $url -OutFile $path -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
-                    if ((Get-Item -LiteralPath $path).Length -lt 100) { Remove-Item -LiteralPath $path -Force; return $null }
-                    return $path
-                } catch { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue; return $null }
+                # try the largest source first, fall back to smaller ones
+                $urls = if ($domain -like 'github.com/*') { @("https://github.com/$($domain.Substring(11)).png?size=128") }
+                        else { @("https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://$domain&size=128",
+                                 "https://icons.duckduckgo.com/ip3/$domain.ico") }
+                foreach ($u in $urls) {
+                    try {
+                        Invoke-WebRequest -Uri $u -OutFile $path -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
+                        if ((Get-Item -LiteralPath $path).Length -ge 300) { return $path }
+                    } catch {}
+                    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+                }
+                return $null
             }).AddArgument($i.Domain).AddArgument($i.Path)
             [pscustomobject]@{ PS = $ps; H = $ps.BeginInvoke() }
         }
