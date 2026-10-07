@@ -29,3 +29,6 @@ Tweak ideas draw on [Win11Debloat](https://github.com/Raphire/Win11Debloat) (MIT
 
 ### App icons
 Install-tab icons are fetched at runtime (never bundled) from open icon packs served by jsDelivr, then cached in `%ProgramData%\Optimaxer\icons4`: [selfh.st icons](https://selfh.st/icons/) (CC BY 4.0, attribution: selfh.st), [Dashboard Icons](https://github.com/homarr-labs/dashboard-icons) (Apache-2.0) and [Simple Icons](https://simpleicons.org) (CC0). Apps without a pack icon fall back to the favicon of their product page (Google favicon service, as WinUtil does). Logos remain the trademarks of their owners.
+
+## Updates
+Optimaxer checks GitHub Releases once per launch (Appearance > Updates, or Tools > Check for updates). When a newer release exists an **Update to vX** button appears in the title bar. Updating downloads the release zip, verifies its published SHA-256 checksum, unpacks it, backs up the current files to `%ProgramData%\Optimaxerackupspp-<version>-<time>`, swaps them in after the app closes and restarts it. A git checkout is never overwritten (use `git pull`). For a private fork set the `OPTIMAXER_TOKEN` environment variable to a GitHub token with read access.

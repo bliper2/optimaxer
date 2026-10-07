@@ -38,7 +38,7 @@ $global:OptiRices = [ordered]@{
     'cyber'        = @{ Theme = 'hyprland';   Fx = 'rain';   GapIn = 5;  GapOut = 8;  Round = 10; Border = 2 }
 }
 
-$global:Cfg = @{ Theme = 'winutil'; Fx = 'none'; GapIn = 0; GapOut = 0; Round = 0; Border = 1; Anim = $true; Speed = 1.0; UiVersion = 3 }
+$global:Cfg = @{ Theme = 'winutil'; Fx = 'none'; GapIn = 0; GapOut = 0; Round = 0; Border = 1; Anim = $true; Speed = 1.0; AutoUpdate = $true; UiVersion = 3 }
 $global:CfgPath = Join-Path $global:OptiData 'settings.json'
 
 function Import-Cfg {
@@ -209,7 +209,7 @@ animations {
 }
 
 # ---------------------------------------------------------------- appearance page
-$global:RiceButtons = @{ theme = @{}; fx = @{}; anim = @{} }
+$global:RiceButtons = @{ theme = @{}; fx = @{}; anim = @{}; upd = @{} }
 $global:LayoutValues = @{}
 
 function New-RiceButton {
@@ -238,6 +238,7 @@ function Update-Rice {
         $on = if ($k -eq 'on') { $global:Cfg.Anim } elseif ($k -eq 'off') { -not $global:Cfg.Anim } else { $k -eq $speedKey }
         Set-Res $global:RiceButtons.anim[$k] $bp $(if ($on) { 'Accent' } else { 'Line' })
     }
+    foreach ($k in $global:RiceButtons.upd.Keys) { Set-Res $global:RiceButtons.upd[$k] $bp $(if (($k -eq 'on') -eq [bool]$global:Cfg.AutoUpdate) { 'Accent' } else { 'Line' }) }
     foreach ($k in $global:LayoutValues.Keys) { $global:LayoutValues[$k].Text = [string]$global:Cfg[$k] }
     $UI.ConfPreview.Text = Get-HyprConf
 }
@@ -308,6 +309,13 @@ function Initialize-Rice {
         })
         $global:RiceButtons.anim[$k] = $b
         [void]$UI.AnimPanel.Children.Add($b)
+    }
+    foreach ($k in 'on', 'off') {
+        $b = New-RiceButton $(if ($k -eq 'on') { 'check at startup' } else { 'never check' })
+        $b.Tag = $k
+        $b.Add_Click({ param($s, $e) $global:Cfg.AutoUpdate = ($s.Tag -eq 'on'); Save-Cfg; Update-Rice })
+        $global:RiceButtons.upd[$k] = $b
+        [void]$UI.UpdPanel.Children.Add($b)
     }
     $UI.BtnConfCopy.Add_Click({ [Windows.Clipboard]::SetText((Get-HyprConf)) })
 }

@@ -309,6 +309,7 @@ function Update-TweakStatus {
         foreach ($row in $global:TwRows) { $row.Extra = if ($map[$row.Id]) { 'Applied' } else { '' } }
         $global:Loaded['tweaks'] = $true
         Update-Score
+        if ($global:Cfg.AutoUpdate -and -not $global:UpdateChecked) { $global:UpdateChecked = $true; Start-UpdateCheck }
     })
 }
 
@@ -354,6 +355,56 @@ function Invoke-TweakJob {
         Update-Score
     })
 }
+
+# ================================================================ self-update
+$global:UpdateInfo = $null
+$global:OptiVersionText = (Get-OptiVersion).ToString()
+$UI.BarSub.Text = "  v$global:OptiVersionText  Windows performance toolkit"
+
+function Start-UpdateCheck {
+    param([switch]$Manual)
+    [void](Start-OptiJob 'Checking for updates' -ArgList @([bool]$Manual) -Script { param($manual) Get-LatestRelease } -OnDone {
+        param($res)
+        $r = $res | Select-Object -First 1
+        $manual = $global:UpdateManual
+        if (-not $r -or $r.Error) {
+            Write-Log "Update check: $(if ($r) { $r.Error } else { 'no answer' })" 'WARN'
+            if ($manual) { [void][System.Windows.MessageBox]::Show("Could not check for updates.`n`n$(if ($r) { $r.Error })`n`nIf the repository is private, set the OPTIMAXER_TOKEN environment variable to a GitHub token with read access.", 'Optimaxer', 'OK', 'Warning') }
+            return
+        }
+        if ($r.Newer) {
+            $global:UpdateInfo = @{ Version = $r.Version; Tag = $r.Tag; Notes = $r.Notes; Url = $r.Url; Digest = $r.Digest }
+            $UI.BtnUpdate.Content = "Update to v$($r.Version)"
+            $UI.BtnUpdate.Visibility = 'Visible'
+            Write-Log "Update available: v$($r.Version) (you have v$global:OptiVersionText)" 'OK'
+            if ($manual) { Show-UpdatePrompt }
+        } else {
+            Write-Log "Optimaxer is up to date (v$global:OptiVersionText)." 'OK'
+            if ($manual) { [void][System.Windows.MessageBox]::Show("You are on the latest version (v$global:OptiVersionText).", 'Optimaxer', 'OK', 'Information') }
+        }
+    })
+    $global:UpdateManual = [bool]$Manual
+}
+
+function Show-UpdatePrompt {
+    $u = $global:UpdateInfo
+    if (-not $u) { return }
+    if (Test-Path -LiteralPath (Join-Path $global:OptiRoot '.git')) {
+        [void][System.Windows.MessageBox]::Show("v$($u.Version) is available, but this copy is a git checkout. Run 'git pull' instead of auto-updating.", 'Optimaxer', 'OK', 'Information')
+        return
+    }
+    $notes = ($u.Notes -replace '\r', '').Trim()
+    if ($notes.Length -gt 700) { $notes = $notes.Substring(0, 700) + '...' }
+    if (-not (Confirm-Action "Update Optimaxer from v$global:OptiVersionText to v$($u.Version)?`n`n$notes`n`nThe app restarts. Current files are backed up first.")) { return }
+    [void](Start-OptiJob "Updating to v$($u.Version)" -ArgList @($u.Url, $u.Digest, $u.Version) -Script {
+        param($url, $digest, $ver)
+        if (Install-OptiUpdate -Url $url -Digest $digest -Version $ver) { 'restart' }
+    } -OnDone {
+        param($res)
+        if (@($res) -contains 'restart') { $global:Win.Close() }
+    })
+}
+$UI.BtnUpdate.Add_Click({ Show-UpdatePrompt })
 
 # ================================================================ install page (WinGet)
 $global:AppRows = New-Object 'System.Collections.ObjectModel.ObservableCollection[OptiRow]'
@@ -781,6 +832,7 @@ $global:Tools = [ordered]@{
     icons   = @{ Title = 'Rebuild icon cache';          Desc = 'Fixes blank or wrong icons and thumbnails. Restarts Explorer.' }
     store   = @{ Title = 'Reset Microsoft Store cache'; Desc = 'Runs wsreset to fix Store download problems.' }
     perfctr = @{ Title = 'Rebuild performance counters';  Desc = 'Runs lodctr /r and winmgmt /resyncperf. Fixes empty Task Manager graphs, missing counters and slow WMI.' }
+    update  = @{ Title = 'Check for updates';           Desc = 'Looks for a newer Optimaxer release on GitHub and offers to install it (checksum-verified, current files are backed up first).' }
     regbackup = @{ Title = 'Export registry backup';    Desc = 'Saves .reg exports of the policy, Explorer, memory and network keys that Optimaxer edits, to the backups folder.' }
     rstrui  = @{ Title = 'Open System Restore';         Desc = 'Roll your PC back to a restore point.' }
     revert  = @{ Title = 'Undo ALL Optimaxer tweaks';   Desc = 'Restores every setting changed by this tool to its original value.'; Danger = $true }
@@ -849,6 +901,7 @@ $toolJobs = @{
         if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
         Write-Log 'Icon cache rebuilt.' 'OK'
     }
+    update = { }
     perfctr = {
         lodctr.exe /r 2>&1 | Out-Null
         lodctr.exe /r 2>&1 | Out-Null
@@ -891,6 +944,7 @@ foreach ($k in $global:Tools.Keys) {
 function Invoke-Tool {
     param([string]$Key)
     if ($Key -eq 'rstrui') { Start-Process rstrui.exe; return }
+    if ($Key -eq 'update') { Start-UpdateCheck -Manual; return }
     if (-not (Test-Elevated)) { return }
     if ($Key -eq 'defrag' -and -not (Confirm-Action 'Defragmenting hard disks can take an hour or more and the app stays busy until it finishes. Continue?')) { return }
     if ($Key -eq 'revert' -and -not (Confirm-Action 'Restore ALL settings changed by Optimaxer to their original values?')) { return }

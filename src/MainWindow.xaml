@@ -406,9 +406,10 @@
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
             <TextBlock Text="Optimaxer" FontWeight="Bold" FontSize="14"/>
             <TextBlock x:Name="BarTitle" Text="" Visibility="Collapsed"/>
-            <TextBlock Text="  Windows performance toolkit" Style="{StaticResource Dim}" VerticalAlignment="Center"/>
+            <TextBlock x:Name="BarSub" Text="  Windows performance toolkit" Style="{StaticResource Dim}" VerticalAlignment="Center"/>
           </StackPanel>
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Stretch">
+            <Button x:Name="BtnUpdate" Style="{StaticResource BtnAccent}" Content="Update available" Padding="10,2" Margin="0,5,14,5" Visibility="Collapsed"/>
             <TextBlock x:Name="BarCpu" Text="CPU --" Style="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,14,0"/>
             <TextBlock x:Name="BarRam" Text="RAM --" Style="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,14,0"/>
             <TextBlock x:Name="AdminText" Text="user" FontSize="12" VerticalAlignment="Center" Margin="0,0,14,0"/>
@@ -651,6 +652,8 @@
                 <StackPanel x:Name="LayoutPanel"/>
                 <TextBlock Text="Animations" Style="{StaticResource ColHead}" Margin="0,8,0,6"/>
                 <WrapPanel x:Name="AnimPanel"/>
+                <TextBlock Text="Updates" Style="{StaticResource ColHead}" Margin="0,8,0,6"/>
+                <WrapPanel x:Name="UpdPanel"/>
                 <TextBlock Text="Equivalent hyprland.conf" Style="{StaticResource ColHead}" Margin="0,8,0,6"/>
                 <Border Background="{DynamicResource Surface}" CornerRadius="4" Padding="12,10"><TextBlock x:Name="ConfPreview" FontFamily="Consolas" FontSize="12" Foreground="{DynamicResource Muted}"/></Border>
                 <Button x:Name="BtnConfCopy" Content="Copy" HorizontalAlignment="Left" Margin="0,8,0,10"/>

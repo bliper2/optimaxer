@@ -587,3 +587,72 @@ function Repair-WingetClient {
     Repair-WinGetPackageManager -AllUsers
 }
 
+# ---------------------------------------------------------------- self-update (GitHub releases)
+$global:OptiRepo = 'bliper2/optimaxer'
+
+function Get-OptiVersion {
+    try { return [version]((Get-Content -LiteralPath (Join-Path $global:OptiRoot 'VERSION') -Raw -ErrorAction Stop).Trim()) } catch { return [version]'0.0.0' }
+}
+
+function Get-OptiGitHubHeaders {
+    $h = @{ 'User-Agent' = 'Optimaxer-Updater'; 'Accept' = 'application/vnd.github+json' }
+    if ($env:OPTIMAXER_TOKEN) { $h['Authorization'] = "Bearer $env:OPTIMAXER_TOKEN" }   # optional, only needed while the repo is private
+    return $h
+}
+
+function Get-LatestRelease {
+    # Returns @{Version; Tag; Notes; Url; Digest; Name; Newer} or @{Error}
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    try {
+        $r = Invoke-RestMethod -Uri "https://api.github.com/repos/$global:OptiRepo/releases/latest" -Headers (Get-OptiGitHubHeaders) -TimeoutSec 12 -ErrorAction Stop
+    } catch {
+        return @{ Error = "could not reach GitHub releases ($($_.Exception.Message))" }
+    }
+    $asset = @($r.assets | Where-Object { $_.name -like 'Optimaxer-v*.zip' })[0]
+    if (-not $asset) { return @{ Error = 'latest release has no Optimaxer zip' } }
+    try { $v = [version]($r.tag_name.TrimStart('v', 'V')) } catch { return @{ Error = "unreadable version tag $($r.tag_name)" } }
+    $url = if ($env:OPTIMAXER_TOKEN) { $asset.url } else { $asset.browser_download_url }
+    return @{ Version = $v.ToString(); Tag = $r.tag_name; Notes = [string]$r.body; Url = $url; Digest = [string]$asset.digest; Name = $asset.name; Newer = ($v -gt (Get-OptiVersion)) }
+}
+
+function Install-OptiUpdate {
+    # Downloads and verifies the release zip, stages it, and starts a helper that swaps the files once this process exits.
+    # Returns $true when the helper is running and the caller should exit.
+    param([string]$Url, [string]$Digest, [string]$Version, [string]$InstallDir = $global:OptiRoot, [int]$WaitPid = $PID, [switch]$NoRelaunch)
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $work = Join-Path ([IO.Path]::GetTempPath()) ('optimaxer-update-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    New-Item -ItemType Directory -Path $work -Force | Out-Null
+    $zip = Join-Path $work 'update.zip'
+    $headers = Get-OptiGitHubHeaders
+    if ($Url -like 'https://api.github.com/*') { $headers['Accept'] = 'application/octet-stream' }
+    Write-Log "Downloading Optimaxer v$Version ..."
+    try { Invoke-WebRequest -Uri $Url -Headers $headers -OutFile $zip -UseBasicParsing -TimeoutSec 120 -ErrorAction Stop } catch { Write-Log "Download failed: $($_.Exception.Message)" 'ERROR'; return $false }
+    if ($Digest -match '^sha256:(?<h>[0-9a-fA-F]{64})$') {
+        $got = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+        if ($got -ne $Matches['h']) { Write-Log "Update rejected: checksum mismatch (expected $($Matches['h']), got $got)" 'ERROR'; return $false }
+        Write-Log 'Checksum verified (SHA-256).' 'OK'
+    } else { Write-Log 'Release has no published checksum; relying on HTTPS only.' 'WARN' }
+    $stage = Join-Path $work 'stage'
+    try { Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force -ErrorAction Stop } catch { Write-Log "Could not unpack update: $($_.Exception.Message)" 'ERROR'; return $false }
+    foreach ($need in 'Optimaxer.ps1', 'src\Core.ps1', 'src\App.ps1', 'VERSION') {
+        if (-not (Test-Path -LiteralPath (Join-Path $stage $need))) { Write-Log "Update rejected: package is missing $need" 'ERROR'; return $false }
+    }
+    $backup = Join-Path $global:OptiBackupDir ('app-' + (Get-OptiVersion).ToString() + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    $helper = Join-Path $work 'apply.ps1'
+    @'
+param($WaitPid, $Stage, $Dst, $Backup, $Relaunch)
+try { Wait-Process -Id $WaitPid -Timeout 90 -ErrorAction SilentlyContinue } catch {}
+Start-Sleep -Milliseconds 400
+New-Item -ItemType Directory -Path $Backup -Force | Out-Null
+Copy-Item -Path (Join-Path $Dst '*') -Destination $Backup -Recurse -Force -ErrorAction SilentlyContinue
+Copy-Item -Path (Join-Path $Stage '*') -Destination $Dst -Recurse -Force
+if ($Relaunch -eq '1') {
+    Start-Process powershell.exe -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "{0}"' -f (Join-Path $Dst 'Optimaxer.ps1'))
+}
+'@ | Set-Content -LiteralPath $helper -Encoding UTF8
+    $helperArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $helper, '-WaitPid', $WaitPid, '-Stage', $stage, '-Dst', $InstallDir, '-Backup', $backup, '-Relaunch', $(if ($NoRelaunch) { '0' } else { '1' }))
+    $p = Start-Process -FilePath powershell.exe -ArgumentList ($helperArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -WindowStyle Hidden -PassThru
+    Write-Log "Update staged; Optimaxer will restart as v$Version. Previous files are backed up in $backup" 'OK'
+    return $true
+}
+
