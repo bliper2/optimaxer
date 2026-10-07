@@ -161,6 +161,111 @@ Selfhosted|Kodi|XBMCFoundation.Kodi
 Selfhosted|Nextcloud Desktop|Nextcloud.NextcloudDesktop
 Selfhosted|Plex Desktop|Plex.Plex
 Selfhosted|Plex Media Server|Plex.PlexMediaServer
+Browsers|Helium|ImputNet.Helium
+Browsers|Ungoogled Chromium|eloston.ungoogled-chromium
+Communications|Chatterino|ChatterinoTeam.Chatterino
+Communications|Dorion|SpikeHD.Dorion
+Communications|QTox|Tox.qTox
+Communications|Teams|Microsoft.Teams
+Communications|TeamSpeak 6|TeamSpeakSystems.TeamSpeakClient.Beta.6
+Development|Amazon Corretto 21 (LTS)|Amazon.Corretto.21.JDK
+Development|Amazon Corretto 25 (LTS)|Amazon.Corretto.25.JDK
+Development|Amazon Corretto 8 (LTS)|Amazon.Corretto.8.JDK
+Development|Claude Code|Anthropic.ClaudeCode
+Development|Codex|OpenAI.Codex
+Development|DBeaver Community|DBeaver.DBeaver.Community
+Development|HeidiSQL|HeidiSQL.HeidiSQL
+Development|LM Studio|ElementLabs.LMStudio
+Development|Lua|rjpcomputing.luaforwindows
+Development|MongoDB Compass|MongoDB.Compass.Full
+Development|Ollama|Ollama.Ollama
+Development|Python3|Python.Python.3.14
+Development|Ruby|RubyInstallerTeam.Ruby.4.0
+Development|Rust|Rustlang.Rust.MSVC
+Development|System Informer|WinsiderSS.SystemInformer
+Development|Vagrant|Hashicorp.Vagrant
+Development|Visual Studio 2026|Microsoft.VisualStudio.Community
+Documents|Figma|Figma.Figma
+Documents|NAPS2 (Scanner)|Cyanfish.NAPS2
+Documents|Notion|Notion.Notion
+Documents|PDFsam Basic|PDFsam.PDFsam
+Documents|PDF-XChange Editor|TrackerSoftware.PDF-XChangeEditor
+Documents|QOwnNotes|pbek.QOwnNotes
+Games|CurseForge|Overwolf.CurseForge
+Games|EmulationStation Desktop Edition|ES-DE.EmulationStation-DE
+Games|Itch.io|ItchIo.Itch
+Games|Virtual Desktop Streamer|VirtualDesktop.Streamer
+Microsoft Tools|.NET Desktop Runtime 6|Microsoft.DotNet.DesktopRuntime.6
+Microsoft Tools|DISMTools|CodingWondersSoftware.DISMTools.Stable
+Microsoft Tools|NTLite|Nlitesoft.NTLite
+Microsoft Tools|NuGet|Microsoft.NuGet
+Multimedia|AIMP (Music Player)|AIMP.AIMP
+Multimedia|EarTrumpet (Audio)|File-New-Project.EarTrumpet
+Multimedia|File Converter|AdrienAllard.FileConverter
+Multimedia|Greenshot|Greenshot.Greenshot
+Multimedia|K-Lite Codec Standard|CodecGuide.K-LiteCodecPack.Standard
+Multimedia|Lively Wallpaper|rocksdanister.LivelyWallpaper
+Multimedia|mpc-qt|mpc-qt.mpc-qt
+Multimedia|mpv|shinchiro.mpv
+Multimedia|nomacs|nomacs.nomacs
+Multimedia|Rainmeter|Rainmeter.Rainmeter
+Multimedia|Streamlabs|Streamlabs.Streamlabs
+Pro Tools|Advanced IP Scanner|Famatech.AdvancedIPScanner
+Pro Tools|Angry IP Scanner|angryziber.AngryIPScanner
+Pro Tools|Cinebench R23|Maxon.CinebenchR23
+Pro Tools|gsudo|gerardog.gsudo
+Pro Tools|Simplewall|Henry++.simplewall
+Selfhosted|Jellyfin Media Player|Jellyfin.JellyfinMediaPlayer
+Selfhosted|LocalSend|LocalSend.LocalSend
+Selfhosted|NetBird|Netbird.Netbird
+Selfhosted|Syncthing (CLI / Web UI)|Syncthing.Syncthing
+Selfhosted|SyncTrayzor|GermanCoding.SyncTrayzor
+Utilities|1Password|AgileBits.1Password
+Utilities|AB Download Manager|amir1376.ABDownloadManager
+Utilities|AutoHotkey|AutoHotkey.AutoHotkey
+Utilities|BlurAutoClicker|Blur009.BlurAutoClicker
+Utilities|Cloudflare WARP|Cloudflare.Warp
+Utilities|Corsair iCUE|Corsair.iCUE.5
+Utilities|Deskflow|Deskflow.Deskflow
+Utilities|Ditto Clipboard|Ditto.Ditto
+Utilities|Dropbox|Dropbox.Dropbox
+Utilities|Ente Auth|ente-io.auth-desktop
+Utilities|F.lux|flux.flux
+Utilities|Files|FilesCommunity.Files
+Utilities|GlazeWM|glzr-io.glazewm
+Utilities|Google Drive|Google.GoogleDrive
+Utilities|Hugo|Hugo.Hugo.Extended
+Utilities|HxD Hex Editor|MHNexus.HxD
+Utilities|Intel Driver and Support Assistant|Intel.IntelDriverAndSupportAssistant
+Utilities|Internet Download Manager|Tonec.InternetDownloadManager
+Utilities|JPEG View|sylikc.JPEGView
+Utilities|Logitech G HUB|Logitech.GHUB
+Utilities|MiniTool Partition Wizard|MiniTool.PartitionWizard.Free
+Utilities|MSEdgeRedirect|rcmaehl.MSEdgeRedirect
+Utilities|NanaZip|M2Team.NanaZip
+Utilities|Nilesoft Shell|Nilesoft.Shell
+Utilities|NVCleanstall|TechPowerUp.NVCleanstall
+Utilities|OFGB (Oh Frick Go Back)|xM4ddy.OFGB
+Utilities|OPAutoClicker|OPAutoClicker.OPAutoClicker
+Utilities|OpenRGB|OpenRGB.OpenRGB
+Utilities|Oracle VirtualBox|Oracle.VirtualBox
+Utilities|Parsec|Parsec.Parsec
+Utilities|PeaZip|Giorgiotani.Peazip
+Utilities|Policy Plus|Fleex255.PolicyPlus
+Utilities|Process Lasso|BitSum.ProcessLasso
+Utilities|Proton Authenticator|Proton.ProtonAuthenticator
+Utilities|Proton Drive|Proton.ProtonDrive
+Utilities|Proton Pass|Proton.ProtonPass
+Utilities|SignalRGB|WhirlwindFX.SignalRgb
+Utilities|Snappy Driver Installer Origin|GlennDelahoy.SnappyDriverInstallerOrigin
+Utilities|Speccy|Piriform.Speccy
+Utilities|StartAllBack|StartIsBack.StartAllBack
+Utilities|TightVNC|GlavSoft.TightVNC
+Utilities|Total Commander|Ghisler.TotalCommander
+Utilities|TranslucentTB|CharlesMilette.TranslucentTB
+Utilities|UniGetUI|Devolutions.UniGetUI
+Utilities|WinDirStat|WinDirStat.WinDirStat
+Utilities|Wise Program Uninstaller (WiseCleaner)|WiseCleaner.WiseProgramUninstaller
 '@ -split "`r?`n" | Where-Object { $_ } | ForEach-Object {
     $p = $_ -split '\|', 3
     [pscustomobject]@{ Cat = $p[0]; Name = $p[1]; Id = $p[2] }
