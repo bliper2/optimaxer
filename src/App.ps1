@@ -58,6 +58,12 @@ function Connect-Search {
     $TextBox.Tag = @{ Key = $Key; Col = $Collection }
 }
 
+function Test-Elevated {
+    if (([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { return $true }
+    [void][System.Windows.MessageBox]::Show('This action changes system settings and needs administrator rights. Close Optimaxer and start it with Launch.bat (accept the UAC prompt).', 'Optimaxer', 'OK', 'Warning')
+    return $false
+}
+
 function Confirm-Action {
     param([string]$Text, [string]$Title = 'Optimaxer')
     return ([System.Windows.MessageBox]::Show($Text, $Title, 'YesNo', 'Question') -eq 'Yes')
@@ -107,7 +113,11 @@ function Complete-OptiJobs {
         if (-not $j.Handle.IsCompleted) { continue }
         $res = @()
         try { $res = @($j.PS.EndInvoke($j.Handle)) } catch { Write-Log "$($j.Title) failed: $($_.Exception.Message)" 'ERROR' }
-        foreach ($e in $j.PS.Streams.Error) { Write-Log ("  ! " + $e.ToString()) 'WARN' }
+        foreach ($e in $j.PS.Streams.Error) {
+            $where = if ($e.InvocationInfo -and $e.InvocationInfo.Line) { ' [' + $e.InvocationInfo.Line.Trim() + ']' } else { '' }
+            $msg = "  ! $($e.ToString())$where"
+            Write-Log ($msg.Substring(0, [math]::Min(300, $msg.Length))) 'WARN'
+        }
         $j.PS.Dispose(); $j.RS.Close(); $j.RS.Dispose()
         $global:Jobs.Remove($j)
         Set-Busy $false
@@ -301,6 +311,7 @@ function Invoke-TweakJob {
     param([ValidateSet('apply', 'undo')][string]$Mode)
     $sel = @($global:TwRows | Where-Object IsChecked)
     if (-not $sel.Count) { Write-Log 'No tweaks selected.' 'WARN'; return }
+    if (-not (Test-Elevated)) { return }
     if ($Mode -eq 'apply') {
         $adv = @($sel | Where-Object { $_.Risk -eq 'Advanced' } | ForEach-Object Name)
         $msg = "Apply $($sel.Count) tweak(s)?"
@@ -366,6 +377,7 @@ function Set-ServiceStartJob {
     param([int]$Start, [string]$Label)
     $names = @($global:SvRows | Where-Object IsChecked | ForEach-Object Id)
     if (-not $names.Count) { Write-Log 'No services selected.' 'WARN'; return }
+    if (-not (Test-Elevated)) { return }
     if (-not (Confirm-Action "Set $($names.Count) service(s) to ${Label}?`nA backup is saved first so you can restore.")) { return }
     [void](Start-OptiJob "Services to $Label" -ArgList @($names, $Start) -Script {
         param($names, $start)
@@ -434,6 +446,7 @@ function Start-CleanScan {
 function Start-Clean {
     $ids = @($global:ClRows | Where-Object IsChecked | ForEach-Object Id)
     if (-not $ids.Count) { Write-Log 'Nothing selected. Scan first.' 'WARN'; return }
+    if (-not (Test-Elevated)) { return }
     if (-not (Confirm-Action "Delete the selected items? This cannot be undone.")) { return }
     [void](Start-OptiJob 'Cleaning' -ArgList @(, $ids) -Script {
         param($ids)
@@ -474,6 +487,7 @@ function Start-AppScan {
 function Start-AppRemove {
     $names = @($global:DbRows | Where-Object IsChecked | ForEach-Object Id)
     if (-not $names.Count) { Write-Log 'No apps selected.' 'WARN'; return }
+    if (-not (Test-Elevated)) { return }
     if (-not (Confirm-Action "Remove $($names.Count) app(s) for all users?`nThey can be reinstalled from the Microsoft Store.")) { return }
     [void](Start-OptiJob 'Removing apps' -ArgList @(, $names) -Script {
         param($names)
@@ -539,6 +553,7 @@ function Set-FeatureJob {
     param([bool]$Enable)
     $ids = @($global:FtRows | Where-Object IsChecked | ForEach-Object Id)
     if (-not $ids.Count) { Write-Log 'No features selected.' 'WARN'; return }
+    if (-not (Test-Elevated)) { return }
     [void](Start-OptiJob "$(if ($Enable) { 'Enable' } else { 'Disable' }) features" -ArgList @($ids, $Enable) -Script {
         param($ids, $enable)
         foreach ($id in $ids) {
@@ -658,6 +673,7 @@ foreach ($k in $global:Tools.Keys) {
 function Invoke-Tool {
     param([string]$Key)
     if ($Key -eq 'rstrui') { Start-Process rstrui.exe; return }
+    if (-not (Test-Elevated)) { return }
     if ($Key -eq 'defrag' -and -not (Confirm-Action 'Defragmenting hard disks can take an hour or more and the app stays busy until it finishes. Continue?')) { return }
     if ($Key -eq 'revert' -and -not (Confirm-Action 'Restore ALL settings changed by Optimaxer to their original values?')) { return }
     $after = if ($Key -eq 'revert') { { Update-TweakStatus } } else { $null }

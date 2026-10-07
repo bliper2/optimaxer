@@ -81,9 +81,10 @@ function ConvertTo-RegValue {
 
 function Set-RegEntry {
     param([string]$Path, [string]$Name, $Value, [string]$Type = 'DWord')
-    if (-not (Test-Path -LiteralPath $Path)) { New-Item -Path $Path -Force | Out-Null }
+    # -ErrorAction Stop so callers can catch and log protected keys instead of silently failing
+    if (-not (Test-Path -LiteralPath $Path)) { New-Item -Path $Path -Force -ErrorAction Stop | Out-Null }
     $v = ConvertTo-RegValue $Value $Type
-    New-ItemProperty -LiteralPath $Path -Name $Name -Value $v -PropertyType $Type -Force | Out-Null
+    New-ItemProperty -LiteralPath $Path -Name $Name -Value $v -PropertyType $Type -Force -ErrorAction Stop | Out-Null
 }
 
 function Remove-RegEntry {
@@ -459,9 +460,10 @@ function Invoke-CleanupTarget {
         'recycle'   { $before = Get-CleanupSize $Target; Clear-RecycleBin -Force -ErrorAction SilentlyContinue; return $before }
         'component' { Dism.exe /Online /Cleanup-Image /StartComponentCleanup | Out-Null; return 0.0 }
     }
-    if ($Target.Services) { foreach ($s in $Target.Services) { Stop-Service -Name $s -Force -ErrorAction SilentlyContinue } }
+    $wasRunning = @()
+    if ($Target.Services) { foreach ($s in $Target.Services) { if ((Get-Service -Name $s -ErrorAction SilentlyContinue).Status -eq 'Running') { $wasRunning += $s }; Stop-Service -Name $s -Force -ErrorAction SilentlyContinue } }
     $freed = 0.0
     foreach ($p in $Target.Paths) { $freed += Clear-PathContents $p }
-    if ($Target.Services) { foreach ($s in $Target.Services) { Start-Service -Name $s -ErrorAction SilentlyContinue } }
+    foreach ($s in $wasRunning) { Start-Service -Name $s -ErrorAction SilentlyContinue }
     return $freed
 }
