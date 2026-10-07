@@ -388,8 +388,9 @@ function Test-Winget {
 
 
 # ---- tile icons: favicon of each app's homepage, downloaded once into %ProgramData%\Optimaxer\icons
-$global:IconDir = Join-Path $global:OptiData 'icons2'   # v2: 128 px sources; the old 'icons' folder is ignored
-$global:AppDomain = @{}; foreach ($a in $global:OptiApps) { $global:AppDomain[$a.Id] = $a.Domain }
+$global:IconDir = Join-Path $global:OptiData 'icons3'   # v3: WinUtil's favicon source; older icon folders are ignored
+$global:AppDomain = @{}; $global:AppLink = @{}
+foreach ($a in $global:OptiApps) { $global:AppDomain[$a.Id] = $a.Domain; $global:AppLink[$a.Id] = $a.Link }
 
 function Get-IconPath {
     param([string]$Id)
@@ -411,7 +412,7 @@ function Update-AppIcons {
         $path = Get-IconPath $row.Id
         if (-not $row.Icon -and (Test-Path -LiteralPath $path)) { [void](Set-RowIcon $row $path) }
     }
-    $missing = @($global:AppRows | Where-Object { -not $_.Icon -and $global:AppDomain[$_.Id] } | ForEach-Object { @{ Id = $_.Id; Domain = $global:AppDomain[$_.Id]; Path = (Get-IconPath $_.Id) } })
+    $missing = @($global:AppRows | Where-Object { -not $_.Icon -and ($global:AppDomain[$_.Id] -or $global:AppLink[$_.Id]) } | ForEach-Object { @{ Id = $_.Id; Domain = $global:AppDomain[$_.Id]; Link = $global:AppLink[$_.Id]; Path = (Get-IconPath $_.Id) } })
     if (-not $missing.Count) { return }
     [void](Start-OptiJob 'Downloading app icons' -ArgList @(, $missing) -Script {
         param($items)
@@ -422,11 +423,13 @@ function Update-AppIcons {
         $jobs = foreach ($i in $items) {
             $ps = [powershell]::Create(); $ps.RunspacePool = $pool
             [void]$ps.AddScript({
-                param($domain, $path)
+                param($domain, $link, $path)
                 # try the largest source first, fall back to smaller ones
+                $page = if ($link) { $link } else { "https://$domain" }
                 $urls = if ($domain -like 'github.com/*') { @("https://github.com/$($domain.Substring(11)).png?size=128") }
-                        else { @("https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://$domain&size=128",
-                                 "https://icons.duckduckgo.com/ip3/$domain.ico") }
+                        else { @("https://www.google.com/s2/favicons?sz=128&domain_url=$([uri]::EscapeDataString($page))",
+                                "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=$([uri]::EscapeDataString($page))&size=128",
+                                "https://icons.duckduckgo.com/ip3/$domain.ico") }
                 foreach ($u in $urls) {
                     try {
                         Invoke-WebRequest -Uri $u -OutFile $path -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
@@ -435,12 +438,12 @@ function Update-AppIcons {
                     Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
                 }
                 return $null
-            }).AddArgument($i.Domain).AddArgument($i.Path)
+            }).AddArgument($i.Domain).AddArgument($i.Link).AddArgument($i.Path)
             [pscustomobject]@{ PS = $ps; H = $ps.BeginInvoke() }
         }
         $ok = 0
         foreach ($j in $jobs) { $r = @($j.PS.EndInvoke($j.H))[0]; if ($r) { $ok++; $r } }
-        Write-Log "  downloaded $ok of $($items.Count) icons"
+        Write-Log "  downloaded $ok of $($items.Count) icons$(if ($ok -lt $items.Count) { ' (the rest keep a letter tile; check your internet connection)' })"
         $pool.Close()
     } -OnDone {
         param($res)
