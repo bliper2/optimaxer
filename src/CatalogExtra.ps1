@@ -304,3 +304,117 @@ T -Id 'debloat-store' -Cat $D -Name 'Microsoft Store: no promoted apps or auto-u
 T -Id 'debloat-feeds' -Cat $D -Name 'Turn off news, weather and interests feeds' -Tags safe, max, deai `
   -Desc 'Removes the news-and-interests feed from the taskbar and the Widgets news board via policy.' `
   -Reg @( Rg "$POL\Windows Feeds" 'EnableFeeds' 0; Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Dsh' 'AllowNewsAndInterests' 0 )
+
+# ======================================================================= BROWSERS (enterprise policies; browsers show "managed by your organization")
+$B = 'Browsers'
+$CHR = 'HKLM:\SOFTWARE\Policies\Google\Chrome'
+$BRV = 'HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'
+$EDG = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
+$FFX = 'HKLM:\SOFTWARE\Policies\Mozilla\Firefox'
+$VIV = 'HKLM:\SOFTWARE\Policies\Vivaldi'
+$NOTE = ' Applied as browser policy, so the browser shows "managed by your organization". Undo removes it.'
+
+T -Id 'br-chrome-debloat' -Cat $B -Name 'Chrome: no telemetry, background mode or promos' -Tags safe, privacy, max, deai `
+  -Desc ('Turns off usage metrics, background running, startup boost, default-browser nags, shopping and promo tabs, feedback surveys and Privacy Sandbox ad topics.' + $NOTE) `
+  -Reg @(
+      Rg $CHR 'MetricsReportingEnabled' 0
+      Rg $CHR 'UrlKeyedAnonymizedDataCollectionEnabled' 0
+      Rg $CHR 'SafeBrowsingExtendedReportingEnabled' 0
+      Rg $CHR 'BackgroundModeEnabled' 0
+      Rg $CHR 'StartupBoostEnabled' 0
+      Rg $CHR 'DefaultBrowserSettingEnabled' 0
+      Rg $CHR 'ShoppingListEnabled' 0
+      Rg $CHR 'PromotionalTabsEnabled' 0
+      Rg $CHR 'UserFeedbackAllowed' 0
+      Rg $CHR 'FeedbackSurveysEnabled' 0
+      Rg $CHR 'MediaRecommendationsEnabled' 0
+      Rg $CHR 'PrivacySandboxPromptEnabled' 0
+      Rg $CHR 'PrivacySandboxAdTopicsEnabled' 0
+      Rg $CHR 'PrivacySandboxAdMeasurementEnabled' 0
+      Rg $CHR 'PrivacySandboxSiteEnabledAdsEnabled' 0
+  )
+
+T -Id 'br-chrome-ai' -Cat $B -Name 'Chrome: turn off Gemini and generative AI features' -Tags safe, privacy, max, deai `
+  -Desc ('Disables Gemini integration, Help me write, tab organizer, AI themes, tab compare and the AI-mode omnibox entry.' + $NOTE) `
+  -Reg @(
+      Rg $CHR 'GenAiDefaultSettings' 2
+      Rg $CHR 'GeminiSettings' 1
+      Rg $CHR 'HelpMeWriteSettings' 2
+      Rg $CHR 'TabOrganizerSettings' 2
+      Rg $CHR 'CreateThemesSettings' 2
+      Rg $CHR 'TabCompareSettings' 2
+      Rg $CHR 'AIModeSettings' 1
+  )
+
+T -Id 'br-brave-debloat' -Cat $B -Name 'Brave: remove Rewards, Wallet, VPN, News, Talk and AI Chat' -Tags safe, privacy, max, deai `
+  -Desc ('Hides the crypto, ads, VPN, news, Talk and Leo features and turns off metrics, stats ping, web discovery and background mode.' + $NOTE) `
+  -Reg @(
+      Rg $BRV 'BraveRewardsDisabled' 1
+      Rg $BRV 'BraveWalletDisabled' 1
+      Rg $BRV 'BraveVPNDisabled' 1
+      Rg $BRV 'BraveNewsDisabled' 1
+      Rg $BRV 'BraveTalkDisabled' 1
+      Rg $BRV 'BraveAIChatEnabled' 0
+      Rg $BRV 'BraveWebDiscoveryEnabled' 0
+      Rg $BRV 'BraveStatsPingEnabled' 0
+      Rg $BRV 'MetricsReportingEnabled' 0
+      Rg $BRV 'BackgroundModeEnabled' 0
+      Rg $BRV 'SafeBrowsingExtendedReportingEnabled' 0
+  )
+
+T -Id 'br-edge-debloat' -Cat $B -Name 'Edge: remove new-tab feed, workspaces, Bing ads and promos' -Tags safe, privacy, max, deai `
+  -Desc ('Extra Edge policies on top of "Edge: disable nags": new-tab news feed, promotional tabs, workspaces, Bing ads, default-browser nag, metrics and site-info reporting, game mode panel.' + $NOTE) `
+  -Reg @(
+      Rg $EDG 'PromotionalTabsEnabled' 0
+      Rg $EDG 'NewTabPageContentEnabled' 0
+      Rg $EDG 'EdgeWorkspacesEnabled' 0
+      Rg $EDG 'BingAdsSuppression' 1
+      Rg $EDG 'DefaultBrowserSettingEnabled' 0
+      Rg $EDG 'MetricsReportingEnabled' 0
+      Rg $EDG 'SendSiteInfoToImproveServices' 0
+      Rg $EDG 'WebWidgetIsEnabledOnStartup' 0
+      Rg $EDG 'ShowAcrobatSubscriptionButton' 0
+      Rg $EDG 'GamerModeEnabled' 0
+      Rg $EDG 'EdgeShoppingAssistantEnabled' 0
+      Rg $EDG 'PersonalizationReportingEnabled' 0
+  )
+
+T -Id 'br-firefox-debloat' -Cat $B -Name 'Firefox: no telemetry, studies, Pocket, sponsored content or nags' -Tags safe, privacy, max, deai `
+  -Desc ('Disables telemetry, Shield studies, Pocket, sponsored top sites and suggestions, the default-browser agent, feedback commands, whats-new pages and extension/feature recommendations.' + $NOTE) `
+  -Reg @(
+      Rg $FFX 'DisableTelemetry' 1
+      Rg $FFX 'DisableFirefoxStudies' 1
+      Rg $FFX 'DisablePocket' 1
+      Rg $FFX 'DisableFeedbackCommands' 1
+      Rg $FFX 'DisableDefaultBrowserAgent' 1
+      Rg $FFX 'DontCheckDefaultBrowser' 1
+      Rg "$FFX\FirefoxHome" 'SponsoredTopSites' 0
+      Rg "$FFX\FirefoxHome" 'SponsoredPocket' 0
+      Rg "$FFX\FirefoxHome" 'Snippets' 0
+      Rg "$FFX\FirefoxSuggest" 'WebSuggestions' 0
+      Rg "$FFX\FirefoxSuggest" 'SponsoredSuggestions' 0
+      Rg "$FFX\FirefoxSuggest" 'ImproveSuggest' 0
+      Rg "$FFX\UserMessaging" 'WhatsNew' 0
+      Rg "$FFX\UserMessaging" 'ExtensionRecommendations' 0
+      Rg "$FFX\UserMessaging" 'FeatureRecommendations' 0
+      Rg "$FFX\UserMessaging" 'UrlbarInterventions' 0
+      Rg "$FFX\UserMessaging" 'MoreFromMozilla' 0
+      Rg "$FFX\UserMessaging" 'SkipOnboarding' 1
+  )
+
+T -Id 'br-firefox-ai' -Cat $B -Name 'Firefox: turn off AI chatbot, link previews and AI tab groups' -Tags safe, privacy, max, deai `
+  -Desc ('Sets the GenerativeAI policy so the sidebar chatbot, AI link previews and AI tab-group suggestions are off (Firefox 139 and newer).' + $NOTE) `
+  -Reg @(
+      Rg "$FFX\GenerativeAI" 'Enabled' 0
+      Rg "$FFX\GenerativeAI" 'Chatbot' 0
+      Rg "$FFX\GenerativeAI" 'LinkPreviews' 0
+      Rg "$FFX\GenerativeAI" 'TabGroups' 0
+  )
+
+T -Id 'br-vivaldi-debloat' -Cat $B -Name 'Vivaldi: no metrics or background mode' -Tags max `
+  -Desc ('Vivaldi honors Chromium policies: turns off metrics and background running.' + $NOTE) `
+  -Reg @( Rg $VIV 'MetricsReportingEnabled' 0; Rg $VIV 'BackgroundModeEnabled' 0 )
+
+T -Id 'br-updaters' -Cat $B -Name 'Browser updater services: set to Manual' -Tags max `
+  -Desc 'Google Update and Brave Update services stop running constantly and start on demand. Browsers still update through their scheduled tasks.' `
+  -Svc @( Sx 'gupdate' 3; Sx 'gupdatem' 3; Sx 'brave' 3; Sx 'bravem' 3 )
