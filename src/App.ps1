@@ -2,6 +2,7 @@
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml, Microsoft.VisualBasic
 . "$global:OptiRoot\src\Types.ps1"
+. "$global:OptiRoot\src\Apps.ps1"
 
 $global:OptiLogQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
 $global:Jobs    = New-Object System.Collections.ArrayList
@@ -135,11 +136,12 @@ function Update-LogPane {
 function Show-Page {
     param([string]$Name)
     foreach ($k in @($UI.Keys)) { if ($k -like 'Page_*') { $UI[$k].Visibility = if ($k -eq "Page_$Name") { 'Visible' } else { 'Collapsed' } } }
-    $titles = @{ dash = 'dashboard'; tweaks = 'optimize'; services = 'services'; startup = 'startup'; cleanup = 'cleaner'; debloat = 'debloat'; network = 'network'; features = 'features'; tools = 'tools'; rice = 'rice' }
+    $titles = @{ install = 'install'; dash = 'dashboard'; tweaks = 'optimize'; services = 'services'; startup = 'startup'; cleanup = 'cleaner'; debloat = 'debloat'; network = 'network'; features = 'features'; tools = 'tools'; rice = 'rice' }
     $UI.BarTitle.Text = "~/$($titles[$Name])"
     Start-PageIn $UI["Page_$Name"]
     if (-not $global:Loaded[$Name] -and -not $global:Busy) {
         switch ($Name) {
+            'install'  { Update-Installed }
             'services' { Update-Services }
             'startup'  { Update-Startup }
             'features' { Update-Features }
@@ -341,6 +343,103 @@ function Invoke-TweakJob {
         Update-Score
     })
 }
+
+# ================================================================ install page (WinGet)
+$global:AppRows = New-Object 'System.Collections.ObjectModel.ObservableCollection[OptiRow]'
+$global:AppViews = New-Object System.Collections.ArrayList
+$global:OptiFilters['app'] = ''
+
+function Update-AppCount {
+    $n = @($global:AppRows | Where-Object IsChecked).Count
+    $UI.InstCount.Text = "Selected: $n"
+}
+
+foreach ($a in $global:OptiApps) {
+    $r = New-Row $a.Id $a.Name $a.Id $a.Cat '' '' $false $null
+    $r.add_PropertyChanged({ param($s, $e) if ($e.PropertyName -eq 'IsChecked') { Update-AppCount } })
+    $global:AppRows.Add($r)
+}
+foreach ($cat in @($global:AppRows | Group-Object Group)) {
+    $head = New-Object Windows.Controls.TextBlock -Property @{ Text = $cat.Name }
+    $head.Style = $win.FindResource('ColHead')
+    [void]$UI.InstCats.Children.Add($head)
+    $col = New-Object 'System.Collections.ObjectModel.ObservableCollection[OptiRow]'
+    foreach ($r in $cat.Group) { $col.Add($r) }
+    $ic = New-Object Windows.Controls.ItemsControl
+    $ic.Style = $win.FindResource('TileItems')
+    $ic.ItemsSource = $col
+    $view = [System.Windows.Data.CollectionViewSource]::GetDefaultView($col)
+    $view.Filter = New-RowFilter 'app'
+    [void]$global:AppViews.Add($view)
+    [void]$UI.InstCats.Children.Add($ic)
+}
+$UI.InstSearch.Add_TextChanged({
+    $global:OptiFilters['app'] = $UI.InstSearch.Text
+    foreach ($v in $global:AppViews) { $v.Refresh() }
+})
+
+function Test-Winget {
+    if (Get-Command winget -ErrorAction SilentlyContinue) { return $true }
+    [void][System.Windows.MessageBox]::Show("WinGet was not found. Install or update 'App Installer' from the Microsoft Store, then restart Optimaxer.", 'Optimaxer', 'OK', 'Warning')
+    return $false
+}
+
+function Update-Installed {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { return }
+    [void](Start-OptiJob 'Checking installed apps' -Script {
+        $tmp = Join-Path $env:TEMP ('opti-winget-{0}.json' -f [guid]::NewGuid())
+        winget export -o $tmp --source winget --accept-source-agreements --disable-interactivity 2>&1 | Out-Null
+        if (Test-Path -LiteralPath $tmp) {
+            try {
+                $j = Get-Content -LiteralPath $tmp -Raw | ConvertFrom-Json
+                foreach ($src in $j.Sources) { foreach ($p in $src.Packages) { [string]$p.PackageIdentifier } }
+            } catch {}
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        }
+    } -OnDone {
+        param($res)
+        $have = @{}; foreach ($i in $res) { $have[[string]$i] = $true }
+        foreach ($row in $global:AppRows) { $row.Extra = if ($have.ContainsKey($row.Id)) { 'Installed' } else { '' } }
+        $global:Loaded['install'] = $true
+        Write-Log "Detected $($have.Count) installed WinGet apps."
+    })
+}
+
+function Invoke-AppJob {
+    param([ValidateSet('install', 'uninstall')][string]$Mode)
+    $ids = @($global:AppRows | Where-Object IsChecked | ForEach-Object Id)
+    if (-not $ids.Count) { Write-Log 'No apps selected.' 'WARN'; return }
+    if (-not (Test-Winget)) { return }
+    if ($Mode -eq 'uninstall' -and -not (Confirm-Action "Uninstall $($ids.Count) app(s)?")) { return }
+    [void](Start-OptiJob "$Mode $($ids.Count) app(s)" -ArgList @($ids, $Mode) -Script {
+        param($ids, $mode)
+        foreach ($id in $ids) {
+            Write-Log "  $mode $id ..."
+            $args = if ($mode -eq 'install') { @('install', '--id', $id, '--exact', '--source', 'winget', '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') }
+                    else { @('uninstall', '--id', $id, '--exact', '--silent', '--disable-interactivity') }
+            $out = Invoke-Native winget $args
+            $code = $global:OptiExit
+            $last = ($out -split '[\r\n]+' | Where-Object { $_.Trim() -and $_ -notmatch '^[\s\-\\|/]+$' } | Select-Object -Last 1)
+            if ($code -eq 0) { Write-Log "    done" 'OK' }
+            elseif ($code -in -1978335189, -1978335135) { Write-Log "    already installed / up to date" }
+            else { Write-Log "    failed (exit $code): $last" 'WARN' }
+        }
+    } -OnDone { Update-Installed })
+}
+
+$UI.BtnInstall.Add_Click({ Invoke-AppJob 'install' })
+$UI.BtnUninstall.Add_Click({ Invoke-AppJob 'uninstall' })
+$UI.BtnInstClear.Add_Click({ foreach ($r in $global:AppRows) { $r.IsChecked = $false } })
+$UI.BtnShowInstalled.Add_Click({ Update-Installed })
+$UI.BtnUpgradeAll.Add_Click({
+    if (-not (Test-Winget)) { return }
+    if (-not (Confirm-Action 'Upgrade every app that WinGet can update? This can take a while.')) { return }
+    [void](Start-OptiJob 'Upgrading all apps' -Script {
+        $out = Invoke-Native winget @('upgrade', '--all', '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
+        $out -split '[\r\n]+' | Where-Object { $_.Trim() -and $_ -notmatch '^[\s\-\\|/]+$' } | Select-Object -Last 12 | ForEach-Object { Write-Log "  $_" }
+        Write-Log "WinGet exit code $global:OptiExit" 'OK'
+    } -OnDone { Update-Installed })
+})
 
 # ================================================================ services page
 $global:SvRows = Initialize-List $UI.SvList 'sv'
@@ -714,7 +813,7 @@ $UI.TileBar.Add_MouseLeftButtonDown({
     else { $global:Win.DragMove() }
 })
 
-foreach ($n in 'NavDash', 'NavTweaks', 'NavServices', 'NavStartup', 'NavCleanup', 'NavDebloat', 'NavNetwork', 'NavFeatures', 'NavTools', 'NavRice') {
+foreach ($n in 'NavDash', 'NavTweaks', 'NavServices', 'NavStartup', 'NavCleanup', 'NavDebloat', 'NavNetwork', 'NavFeatures', 'NavTools', 'NavRice', 'NavInstall') {
     $UI[$n].Add_Checked({ param($s, $e) Show-Page $s.Tag })
 }
 

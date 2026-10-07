@@ -351,6 +351,28 @@
       </DataTemplate.Triggers>
     </DataTemplate>
 
+    <DataTemplate x:Key="AppTile">
+      <Border Width="188" Height="34" Margin="0,0,6,6" CornerRadius="4" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" Padding="10,0" ToolTip="{Binding Desc}">
+        <CheckBox Style="{StaticResource CardCheck}" IsChecked="{Binding IsChecked, Mode=TwoWay}" VerticalAlignment="Center">
+          <DockPanel LastChildFill="True">
+            <TextBlock DockPanel.Dock="Right" Text="&#x2714;" Foreground="{DynamicResource Good}" FontSize="11" VerticalAlignment="Center" Margin="6,0,0,0">
+              <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                  <Setter Property="Visibility" Value="Collapsed"/>
+                  <Style.Triggers><DataTrigger Binding="{Binding Extra}" Value="Installed"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers>
+                </Style>
+              </TextBlock.Style>
+            </TextBlock>
+            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" FontSize="12.5"/>
+          </DockPanel>
+        </CheckBox>
+      </Border>
+    </DataTemplate>
+    <Style x:Key="TileItems" TargetType="ItemsControl">
+      <Setter Property="ItemTemplate" Value="{StaticResource AppTile}"/>
+      <Setter Property="ItemsPanel"><Setter.Value><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></Setter.Value></Setter>
+    </Style>
+
     <Style x:Key="Tile" TargetType="Border">
       <Setter Property="Background" Value="{DynamicResource TileBg}"/>
       <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
@@ -390,6 +412,7 @@
       <Border Grid.Row="1" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1">
         <StackPanel Orientation="Horizontal">
           <RadioButton x:Name="NavDash"     Tag="dash"     Style="{StaticResource Ws}" GroupName="ws" Content="Dashboard" IsChecked="True"/>
+          <RadioButton x:Name="NavInstall"  Tag="install"  Style="{StaticResource Ws}" GroupName="ws" Content="Install"/>
           <RadioButton x:Name="NavTweaks"   Tag="tweaks"   Style="{StaticResource Ws}" GroupName="ws" Content="Tweaks"/>
           <RadioButton x:Name="NavServices" Tag="services" Style="{StaticResource Ws}" GroupName="ws" Content="Services"/>
           <RadioButton x:Name="NavStartup"  Tag="startup"  Style="{StaticResource Ws}" GroupName="ws" Content="Startup"/>
@@ -440,6 +463,24 @@
                 <TextBlock x:Name="SysInfo" FontSize="12" TextWrapping="Wrap" LineHeight="18"/>
               </StackPanel>
             </Border>
+          </Grid>
+
+          <!-- install -->
+          <Grid x:Name="Page_install" Visibility="Collapsed">
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+            <Grid Margin="0,8,0,6">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel Orientation="Horizontal">
+                <Button x:Name="BtnInstall" Style="{StaticResource BtnAccent}" Content="Install / Upgrade"/>
+                <Button x:Name="BtnUninstall" Style="{StaticResource BtnDanger}" Content="Uninstall"/>
+                <Button x:Name="BtnUpgradeAll" Content="Upgrade all"/>
+                <Button x:Name="BtnShowInstalled" Content="Show installed"/>
+                <Button x:Name="BtnInstClear" Content="Clear selection"/>
+              </StackPanel>
+              <TextBox x:Name="InstSearch" Grid.Column="1" Style="{StaticResource Search}" Margin="14,0,14,0"/>
+              <TextBlock x:Name="InstCount" Grid.Column="2" Text="Selected: 0" Style="{StaticResource Dim}" VerticalAlignment="Center"/>
+            </Grid>
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="InstCats" Margin="0,0,10,10"/></ScrollViewer>
           </Grid>
 
           <!-- tweaks -->
