@@ -515,3 +515,71 @@ function Test-RegKeysGone {
     foreach ($k in $Keys) { if (Test-Path -LiteralPath "Registry::$k") { return $false } }
     return $true
 }
+
+# ---------------------------------------------------------------- WinGet runner (same flow and exit-code handling as WinUtil's installer)
+function Invoke-WingetPackages {
+    # One winget process per package, real exit code, per-package outcome, and a verification step.
+    param([ValidateSet('Install', 'Uninstall', 'Upgrade')][string]$Action, [string[]]$Programs)
+
+    $adminContextProhibited = -1978335107   # per-user package touched from an elevated process
+    $nothingToDo = @{ -1978335135 = 'already installed'; -1978335189 = 'no applicable update' }
+    $rebootCodes = @{ 3010 = 'installed, a restart is needed to finish'; 1641 = 'installed, the installer started a restart'
+                      -1978334967 = 'installed, a restart is needed to finish'; -1978334965 = 'installed, the installer started a restart' }
+
+    $total = @($Programs).Count; $n = 0
+    $ok = 0; $skipped = 0; $failed = @()
+    foreach ($program in $Programs) {
+        if ([string]::IsNullOrWhiteSpace($program)) { continue }
+        $n++
+        $upgradeAll = $Action -eq 'Upgrade' -and $program -eq 'all'
+        Write-Log "[$n/$total] $Action $program"
+
+        $arguments = switch ($Action) {
+            'Uninstall' { @('uninstall', '--id', $program, '--source', 'winget', '--silent') }
+            'Upgrade'   { if ($upgradeAll) { @('upgrade', '--all', '--accept-package-agreements', '--accept-source-agreements', '--include-unknown', '--silent') }
+                          else { @('upgrade', '--id', $program, '--accept-package-agreements', '--accept-source-agreements', '--source', 'winget', '--include-unknown', '--silent') } }
+            default     { @('install', '--id', $program, '--accept-package-agreements', '--accept-source-agreements', '--source', 'winget', '--silent') }
+        }
+
+        $outFile = [IO.Path]::GetTempFileName(); $errFile = [IO.Path]::GetTempFileName()
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        try {
+            $proc = Start-Process -FilePath winget -ArgumentList $arguments -NoNewWindow -Wait -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile -ErrorAction Stop
+            $exit = $proc.ExitCode
+        } catch {
+            $exit = -1
+            Write-Log "    could not start winget: $($_.Exception.Message)" 'ERROR'
+        }
+        $tail = (Get-Content -LiteralPath $outFile, $errFile -ErrorAction SilentlyContinue | Where-Object { $_ -and $_.Trim() -and $_ -notmatch '^[\s\-\\|/]+$' } | Select-Object -Last 2) -join ' | '
+        Remove-Item -LiteralPath $outFile, $errFile -Force -ErrorAction SilentlyContinue
+
+        if ($exit -eq 0 -or $rebootCodes.ContainsKey($exit)) {
+            $detail = if ($exit -eq 0) { 'exit code 0' } else { $rebootCodes[$exit] }
+            # do not trust the exit code alone: confirm the package state changed
+            if (-not $upgradeAll) {
+                $null = winget list --id $program --exact --accept-source-agreements 2>&1
+                $listed = ($LASTEXITCODE -eq 0)
+                if ($Action -eq 'Install' -and -not $listed) { Write-Log ("    winget reported success ({0}) but {1} is not listed as installed" -f $detail, $program) 'WARN'; $failed += $program; continue }
+                if ($Action -eq 'Uninstall' -and $listed) { Write-Log "    winget reported success but $program is still listed" 'WARN'; $failed += $program; continue }
+            }
+            $ok++
+            Write-Log ("    {0} ok in {1:N0}s ({2}), verified" -f $Action.ToLower(), $sw.Elapsed.TotalSeconds, $detail) 'OK'
+        }
+        elseif ($nothingToDo.ContainsKey($exit)) { $skipped++; Write-Log "    skipped: $($nothingToDo[$exit])" }
+        elseif ($exit -eq $adminContextProhibited) { $skipped++; Write-Log '    skipped: installed for the current user only; an elevated session cannot change it' 'WARN' }
+        else {
+            $failed += $program
+            Write-Log ("    FAILED (WinGet 0x{0:X8}, exit {1}) {2}" -f $exit, $exit, $tail) 'WARN'
+        }
+    }
+    Write-Log ("{0} finished: {1} ok, {2} skipped, {3} failed{4}" -f $Action, $ok, $skipped, $failed.Count, $(if ($failed.Count) { ' (' + ($failed -join ', ') + ')' } else { '' })) $(if ($failed.Count) { 'WARN' } else { 'OK' })
+}
+
+function Repair-WingetClient {
+    # Same repair path WinUtil uses when winget is missing or broken.
+    Install-PackageProvider -Name NuGet -Force | Out-Null
+    Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery
+    Import-Module Microsoft.WinGet.Client
+    Repair-WinGetPackageManager -AllUsers
+}
+

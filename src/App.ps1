@@ -380,9 +380,12 @@ $UI.InstSearch.Add_TextChanged({
 
 function Test-Winget {
     if (Get-Command winget -ErrorAction SilentlyContinue) { return $true }
-    [void][System.Windows.MessageBox]::Show("WinGet was not found. Install or update 'App Installer' from the Microsoft Store, then restart Optimaxer.", 'Optimaxer', 'OK', 'Warning')
+    if (Confirm-Action "WinGet was not found. Install/repair it now (NuGet + Microsoft.WinGet.Client + Repair-WinGetPackageManager)? This needs internet and can take a few minutes.") {
+        [void](Start-OptiJob 'Repairing WinGet' -Script { Repair-WingetClient; Write-Log 'WinGet repair finished. Press the button again.' 'OK' })
+    }
     return $false
 }
+
 
 # ---- tile icons: favicon of each app's homepage, downloaded once into %ProgramData%\Optimaxer\icons
 $global:IconDir = Join-Path $global:OptiData 'icons'
@@ -447,7 +450,7 @@ function Update-Installed {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { Update-AppIcons; return }
     [void](Start-OptiJob 'Checking installed apps' -Script {
         $tmp = Join-Path $env:TEMP ('opti-winget-{0}.json' -f [guid]::NewGuid())
-        winget export -o $tmp --source winget --accept-source-agreements --disable-interactivity 2>&1 | Out-Null
+        winget export -o $tmp --source winget --accept-source-agreements 2>&1 | Out-Null
         if (Test-Path -LiteralPath $tmp) {
             try {
                 $j = Get-Content -LiteralPath $tmp -Raw | ConvertFrom-Json
@@ -471,19 +474,10 @@ function Invoke-AppJob {
     if (-not $ids.Count) { Write-Log 'No apps selected.' 'WARN'; return }
     if (-not (Test-Winget)) { return }
     if ($Mode -eq 'uninstall' -and -not (Confirm-Action "Uninstall $($ids.Count) app(s)?")) { return }
-    [void](Start-OptiJob "$Mode $($ids.Count) app(s)" -ArgList @($ids, $Mode) -Script {
-        param($ids, $mode)
-        foreach ($id in $ids) {
-            Write-Log "  $mode $id ..."
-            $args = if ($mode -eq 'install') { @('install', '--id', $id, '--exact', '--source', 'winget', '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') }
-                    else { @('uninstall', '--id', $id, '--exact', '--silent', '--disable-interactivity') }
-            $out = Invoke-Native winget $args
-            $code = $global:OptiExit
-            $last = ($out -split '[\r\n]+' | Where-Object { $_.Trim() -and $_ -notmatch '^[\s\-\\|/]+$' } | Select-Object -Last 1)
-            if ($code -eq 0) { Write-Log "    done" 'OK' }
-            elseif ($code -in -1978335189, -1978335135) { Write-Log "    already installed / up to date" }
-            else { Write-Log "    failed (exit $code): $last" 'WARN' }
-        }
+    $action = if ($Mode -eq 'install') { 'Install' } else { 'Uninstall' }
+    [void](Start-OptiJob "$Mode $($ids.Count) app(s)" -ArgList @($ids, $action) -Script {
+        param($ids, $action)
+        Invoke-WingetPackages -Action $action -Programs $ids
     } -OnDone { Update-Installed })
 }
 
@@ -495,9 +489,7 @@ $UI.BtnUpgradeAll.Add_Click({
     if (-not (Test-Winget)) { return }
     if (-not (Confirm-Action 'Upgrade every app that WinGet can update? This can take a while.')) { return }
     [void](Start-OptiJob 'Upgrading all apps' -Script {
-        $out = Invoke-Native winget @('upgrade', '--all', '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
-        $out -split '[\r\n]+' | Where-Object { $_.Trim() -and $_ -notmatch '^[\s\-\\|/]+$' } | Select-Object -Last 12 | ForEach-Object { Write-Log "  $_" }
-        Write-Log "WinGet exit code $global:OptiExit" 'OK'
+        Invoke-WingetPackages -Action Upgrade -Programs @('all')
     } -OnDone { Update-Installed })
 })
 
