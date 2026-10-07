@@ -1,0 +1,13 @@
+<Canvas xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Width="32" Height="32">
+  <!-- Optimaxer mark: performance gauge (270 degree arc) with an upward chevron, on a rounded blue badge -->
+  <Rectangle Width="32" Height="32" RadiusX="8" RadiusY="8">
+    <Rectangle.Fill>
+      <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#2D7DD2" Offset="0"/>
+        <GradientStop Color="#35C2FF" Offset="1"/>
+      </LinearGradientBrush>
+    </Rectangle.Fill>
+  </Rectangle>
+  <Path Data="M 10.34,22.66 A 8,8 0 1 1 21.66,22.66" Stroke="White" StrokeThickness="3" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+  <Path Data="M 11.8,19.4 L 16,15 L 20.2,19.4" Stroke="White" StrokeThickness="3" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+</Canvas>

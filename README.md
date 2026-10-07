@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" width="96" alt="Optimaxer logo"></p>
+
 # Optimaxer
 
 Windows 10/11 performance, privacy and cleanup suite. WPF GUI in Windows PowerShell 5.1.

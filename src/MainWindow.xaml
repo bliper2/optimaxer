@@ -404,6 +404,7 @@
       <Border x:Name="TileBar" Grid.Row="0" Style="{StaticResource Tile}" BorderThickness="0,0,0,1" CornerRadius="0" Padding="14,0,0,0" Height="34">
         <Grid>
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <ContentControl x:Name="LogoHost" Width="22" Height="22" Margin="0,0,9,0" VerticalAlignment="Center"/>
             <TextBlock Text="Optimaxer" FontWeight="Bold" FontSize="14"/>
             <TextBlock x:Name="BarTitle" Text="" Visibility="Collapsed"/>
             <TextBlock x:Name="BarSub" Text="  Windows performance toolkit" Style="{StaticResource Dim}" VerticalAlignment="Center"/>
