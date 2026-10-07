@@ -7,6 +7,9 @@ public class OptiRow : INotifyPropertyChanged {
     void N(string p) { var h = PropertyChanged; if (h != null) h(this, new PropertyChangedEventArgs(p)); }
     string _name, _desc, _group, _risk, _extra; bool _chk;
     public string Id { get; set; }
+    object _icon;
+    public object Icon { get { return _icon; } set { _icon = value; N("Icon"); } }
+    public string Initial { get { return string.IsNullOrEmpty(_name) ? "?" : _name.Substring(0, 1).ToUpper(); } }
     public object Tag { get; set; }
     public string Name  { get { return _name;  } set { _name  = value; N("Name");  } }
     public string Desc  { get { return _desc;  } set { _desc  = value; N("Desc");  } }

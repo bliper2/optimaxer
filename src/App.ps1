@@ -384,8 +384,67 @@ function Test-Winget {
     return $false
 }
 
+# ---- tile icons: favicon of each app's homepage, downloaded once into %ProgramData%\Optimaxer\icons
+$global:IconDir = Join-Path $global:OptiData 'icons'
+$global:AppDomain = @{}; foreach ($a in $global:OptiApps) { $global:AppDomain[$a.Id] = $a.Domain }
+
+function Get-IconPath {
+    param([string]$Id)
+    return Join-Path $global:IconDir (($Id -replace '[^\w\.\-]', '_') + '.ico')
+}
+
+function Set-RowIcon {
+    param($Row, [string]$Path)
+    try {
+        $bi = New-Object Windows.Media.Imaging.BitmapImage
+        $bi.BeginInit(); $bi.UriSource = [uri]$Path; $bi.CacheOption = 'OnLoad'; $bi.EndInit(); $bi.Freeze()
+        $Row.Icon = $bi
+        return $true
+    } catch { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue; return $false }
+}
+
+function Update-AppIcons {
+    foreach ($row in $global:AppRows) {
+        $path = Get-IconPath $row.Id
+        if (-not $row.Icon -and (Test-Path -LiteralPath $path)) { [void](Set-RowIcon $row $path) }
+    }
+    $missing = @($global:AppRows | Where-Object { -not $_.Icon -and $global:AppDomain[$_.Id] } | ForEach-Object { @{ Id = $_.Id; Domain = $global:AppDomain[$_.Id]; Path = (Get-IconPath $_.Id) } })
+    if (-not $missing.Count) { return }
+    [void](Start-OptiJob 'Downloading app icons' -ArgList @(, $missing) -Script {
+        param($items)
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $dir = Split-Path $items[0].Path
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        $pool = [runspacefactory]::CreateRunspacePool(1, 12); $pool.Open()
+        $jobs = foreach ($i in $items) {
+            $ps = [powershell]::Create(); $ps.RunspacePool = $pool
+            [void]$ps.AddScript({
+                param($domain, $path)
+                try {
+                    $url = if ($domain -like 'github.com/*') { "https://github.com/$($domain.Substring(11)).png?size=64" } else { "https://icons.duckduckgo.com/ip3/$domain.ico" }
+                    Invoke-WebRequest -Uri $url -OutFile $path -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
+                    if ((Get-Item -LiteralPath $path).Length -lt 100) { Remove-Item -LiteralPath $path -Force; return $null }
+                    return $path
+                } catch { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue; return $null }
+            }).AddArgument($i.Domain).AddArgument($i.Path)
+            [pscustomobject]@{ PS = $ps; H = $ps.BeginInvoke() }
+        }
+        $ok = 0
+        foreach ($j in $jobs) { $r = @($j.PS.EndInvoke($j.H))[0]; if ($r) { $ok++; $r } }
+        Write-Log "  downloaded $ok of $($items.Count) icons"
+        $pool.Close()
+    } -OnDone {
+        param($res)
+        foreach ($p in $res) {
+            $id = [IO.Path]::GetFileNameWithoutExtension([string]$p)
+            $row = $global:AppRows | Where-Object { (Get-IconPath $_.Id) -eq [string]$p } | Select-Object -First 1
+            if ($row) { [void](Set-RowIcon $row ([string]$p)) }
+        }
+    })
+}
+
 function Update-Installed {
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { return }
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { Update-AppIcons; return }
     [void](Start-OptiJob 'Checking installed apps' -Script {
         $tmp = Join-Path $env:TEMP ('opti-winget-{0}.json' -f [guid]::NewGuid())
         winget export -o $tmp --source winget --accept-source-agreements --disable-interactivity 2>&1 | Out-Null
@@ -402,6 +461,7 @@ function Update-Installed {
         foreach ($row in $global:AppRows) { $row.Extra = if ($have.ContainsKey($row.Id)) { 'Installed' } else { '' } }
         $global:Loaded['install'] = $true
         Write-Log "Detected $($have.Count) installed WinGet apps."
+        Update-AppIcons
     })
 }
 
