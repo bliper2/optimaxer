@@ -698,6 +698,7 @@ $UI.BtnQuickClean.Add_Click({ $UI.NavCleanup.IsChecked = $true; Start-CleanScan 
 $UI.BtnPrRec.Add_Click({ Set-Preset 'safe' })
 $UI.BtnPrGame.Add_Click({ Set-Preset 'gaming' })
 $UI.BtnPrPriv.Add_Click({ Set-Preset 'privacy' })
+$UI.BtnPrDeai.Add_Click({ Set-Preset 'deai' })
 $UI.BtnPrMax.Add_Click({ Set-Preset 'max' })
 $UI.BtnPrNone.Add_Click({ Set-Preset 'none' })
 $UI.BtnTwApply.Add_Click({ Invoke-TweakJob 'apply' })

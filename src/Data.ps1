@@ -175,6 +175,10 @@ Microsoft.XboxGameOverlay|Xbox Game overlay|O
 Microsoft.Xbox.TCUI|Xbox TCUI|O
 Microsoft.XboxSpeechToTextOverlay|Xbox speech overlay|O
 Microsoft.XboxIdentityProvider|Xbox identity provider (needed for Xbox sign-in)|C
+*Copilot*|Copilot (all packages)|R
+MicrosoftWindows.Client.WebExperience|Widgets web experience|O
+Microsoft.WidgetsPlatformRuntime|Widgets runtime|O
+Microsoft.Edge.GameAssist|Edge Game Assist|O
 *Spotify*|Spotify|R
 *Disney*|Disney+|R
 *Netflix*|Netflix|R

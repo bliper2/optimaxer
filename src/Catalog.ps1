@@ -303,7 +303,7 @@ T -Id 'priv-adid' -Cat $V -Name 'Disable advertising ID and tailored ads' -Tags 
       Rg 'HKCU:\Control Panel\International\User Profile' 'HttpAcceptLanguageOptOut' 1
   )
 
-T -Id 'priv-consumer' -Cat $V -Name 'Disable Start/lock-screen ads and suggested apps' -Tags safe, privacy, max `
+T -Id 'priv-consumer' -Cat $V -Name 'Disable Start/lock-screen ads and suggested apps' -Tags safe, privacy, max, deai `
   -Desc 'Stops consumer features, silent app installs, Start suggestions, tips and "finish setting up" nags.' `
   -Reg @(
       Rg "$POL\CloudContent" 'DisableWindowsConsumerFeatures' 1
@@ -330,7 +330,7 @@ T -Id 'priv-consumer' -Cat $V -Name 'Disable Start/lock-screen ads and suggested
       Rg "$CV\UserProfileEngagement" 'ScoobeSystemSettingEnabled' 0
   )
 
-T -Id 'priv-websearch' -Cat $V -Name 'Disable Bing web results in Start search' -Tags safe, privacy, max `
+T -Id 'priv-websearch' -Cat $V -Name 'Disable Bing web results in Start search' -Tags safe, privacy, max, deai `
   -Desc 'Start search only searches your PC. Faster and nothing you type goes to Bing.' `
   -Reg @(
       Rg "$CV\Search" 'BingSearchEnabled' 0
@@ -338,7 +338,7 @@ T -Id 'priv-websearch' -Cat $V -Name 'Disable Bing web results in Start search' 
       Rg 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\Explorer' 'DisableSearchBoxSuggestions' 1
   )
 
-T -Id 'priv-ai' -Cat $V -Name 'Disable Copilot, Recall and Click to Do' -Tags safe, privacy, max `
+T -Id 'priv-ai' -Cat $V -Name 'Disable Copilot, Recall and Click to Do' -Tags safe, privacy, max, deai `
   -Desc 'Turns off the Windows AI features and the Copilot taskbar button via policy.' `
   -Reg @(
       Rg 'HKCU:\Software\Policies\Microsoft\Windows\WindowsCopilot' 'TurnOffWindowsCopilot' 1
@@ -387,7 +387,7 @@ T -Id 'priv-remoteassist' -Cat $V -Name 'Disable Remote Assistance' -Tags safe, 
 
 # ======================================================================= DEBLOAT
 $D = 'Debloat'
-T -Id 'debloat-edge' -Cat $D -Name 'Edge: disable nags, telemetry and background mode' -Tags safe, privacy, max `
+T -Id 'debloat-edge' -Cat $D -Name 'Edge: disable nags, telemetry and background mode' -Tags safe, privacy, max, deai `
   -Desc 'Edge policies: no startup boost, no background running, no shopping/rewards/recommendation clutter, no diagnostic data.' `
   -Reg @(
       Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' 'StartupBoostEnabled' 0
@@ -406,7 +406,7 @@ T -Id 'debloat-edge' -Cat $D -Name 'Edge: disable nags, telemetry and background
       Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' 'SpotlightExperiencesAndRecommendationsEnabled' 0
   )
 
-T -Id 'debloat-widgets' -Cat $D -Name 'Remove Widgets and Chat taskbar buttons' -Tags safe, max -Explorer `
+T -Id 'debloat-widgets' -Cat $D -Name 'Remove Widgets and Chat taskbar buttons' -Tags safe, max, deai -Explorer `
   -Desc 'Hides the Widgets board and Teams Chat, and stops the news feed.' `
   -Reg @( Rg $EXA 'TaskbarDa' 0; Rg $EXA 'TaskbarMn' 0; Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Dsh' 'AllowNewsAndInterests' 0 )
 

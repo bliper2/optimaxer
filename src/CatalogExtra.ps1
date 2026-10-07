@@ -204,3 +204,103 @@ T -Id 'ui-ducking' -Cat $I -Name 'Do not lower sounds during calls' `
 T -Id 'ui-verbose' -Cat $I -Name 'Verbose startup, shutdown and sign-in messages' `
   -Desc 'Shows what Windows is doing instead of "Please wait".' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'VerboseStatus' 1 )
+
+# ======================================================================= AI & COPILOT (tag deai = "Remove AI / debloat" preset)
+$AI = 'AI & Copilot'
+$WAI = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'
+$EDGEP = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
+
+T -Id 'ai-recall' -Cat $AI -Name 'Turn off Recall and AI data analysis' -Tags safe, privacy, max, deai -Restart `
+  -Desc 'Policy blocks Recall snapshots and AI data analysis for you and the machine; the Recall Windows feature is switched off where it exists (Copilot+ PCs).' `
+  -Reg @(
+      Rg $WAI 'DisableAIDataAnalysis' 1
+      Rg $WAI 'AllowRecallEnablement' 0
+      Rg 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI' 'DisableAIDataAnalysis' 1
+  ) `
+  -Apply {
+      $f = Get-WindowsOptionalFeature -Online -FeatureName Recall -ErrorAction SilentlyContinue
+      if ($f -and $f.State -eq 'Enabled') { Disable-WindowsOptionalFeature -Online -FeatureName Recall -NoRestart -ErrorAction SilentlyContinue | Out-Null; @{ WasEnabled = $true } } else { @{ WasEnabled = $false } }
+  } `
+  -Undo { param($d) if ($d -and $d.WasEnabled) { Enable-WindowsOptionalFeature -Online -FeatureName Recall -NoRestart -ErrorAction SilentlyContinue | Out-Null } }
+
+T -Id 'ai-clicktodo' -Cat $AI -Name 'Turn off Click to Do and AI search suggestions' -Tags safe, privacy, max, deai `
+  -Desc 'Disables the Click to Do overlay and dynamic search-box highlights in the taskbar.' `
+  -Reg @(
+      Rg $WAI 'DisableClickToDo' 1
+      Rg 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI' 'DisableClickToDo' 1
+      Rg "$CV\SearchSettings" 'IsDynamicSearchBoxEnabled' 0
+  )
+
+T -Id 'ai-copilot-button' -Cat $AI -Name 'Hide Copilot button and block Copilot policy' -Tags safe, privacy, max, deai -Explorer `
+  -Desc 'Removes the Copilot taskbar button and sets the TurnOffWindowsCopilot policy for the user and the machine.' `
+  -Reg @(
+      Rg $EXA 'ShowCopilotButton' 0
+      Rg 'HKCU:\Software\Policies\Microsoft\Windows\WindowsCopilot' 'TurnOffWindowsCopilot' 1
+      Rg "$POL\WindowsCopilot" 'TurnOffWindowsCopilot' 1
+  )
+
+T -Id 'ai-apps' -Cat $AI -Name 'Notepad, Paint and Photos: turn off AI features' -Tags safe, privacy, max, deai `
+  -Desc 'Group-policy switches that hide Notepad AI (Rewrite/Summarize), Paint Cocreator, Generative Fill and Image Creator. Which switches apply depends on the app version.' `
+  -Reg @(
+      Rg 'HKLM:\SOFTWARE\Policies\WindowsNotepad' 'DisableAIFeatures' 1
+      Rg "$POL\Paint" 'DisableCocreator' 1
+      Rg "$POL\Paint" 'DisableGenerativeFill' 1
+      Rg "$POL\Paint" 'DisableImageCreator' 1
+  )
+
+T -Id 'ai-edge' -Cat $AI -Name 'Edge: turn off Copilot sidebar and page context' -Tags safe, privacy, max, deai `
+  -Desc 'Edge policies: hides the sidebar/Copilot hub, stops Copilot reading page content, hides the Microsoft 365 Copilot icon.' `
+  -Reg @(
+      Rg $EDGEP 'HubsSidebarEnabled' 0
+      Rg $EDGEP 'CopilotCDPPageContext' 0
+      Rg $EDGEP 'CopilotPageContext' 0
+      Rg $EDGEP 'Microsoft365CopilotChatIconEnabled' 0
+      Rg $EDGEP 'EdgeEntraCopilotPageContext' 0
+  )
+
+T -Id 'ai-remove-apps' -Cat $AI -Name 'Uninstall the Copilot app packages' -Tags max, deai -Risk Moderate `
+  -Desc 'Removes every installed *Copilot* app package for all users and from the provisioning list so new accounts do not get it. Undo cannot reinstall: use the Microsoft Store.' `
+  -Apply {
+      $names = @()
+      foreach ($p in Get-AppxPackage -AllUsers -Name '*Copilot*' -ErrorAction SilentlyContinue) {
+          $names += $p.Name
+          Remove-AppxPackage -Package $p.PackageFullName -AllUsers -ErrorAction SilentlyContinue
+      }
+      Get-AppxProvisionedPackage -Online | Where-Object DisplayName -like '*Copilot*' | Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Out-Null
+      , @($names | Select-Object -Unique)
+  } `
+  -Undo { Write-Log '  Copilot apps cannot be restored automatically: reinstall from the Microsoft Store if you want them back.' 'WARN' } `
+  -Test { -not (Get-AppxPackage -Name '*Copilot*' -ErrorAction SilentlyContinue) }
+
+# ======================================================================= MORE DEBLOAT
+T -Id 'debloat-spotlight' -Cat $D -Name 'Turn off Windows Spotlight and lock-screen promos' -Tags safe, privacy, max, deai `
+  -Desc 'No Spotlight desktop icon or lock-screen "fun facts", tips and promoted content.' `
+  -Reg @(
+      Rg "$POL\CloudContent" 'DisableWindowsSpotlightFeatures' 1
+      Rg "$POL\CloudContent" 'DisableSpotlightCollectionOnDesktop' 1
+      Rg "$POL\CloudContent" 'DisableThirdPartySuggestions' 1
+      Rg 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableWindowsSpotlightFeatures' 1
+  )
+
+T -Id 'debloat-teamsauto' -Cat $D -Name 'Stop Teams (Chat) from auto-installing' -Tags safe, max, deai `
+  -Desc 'Prevents Windows from silently installing the consumer Teams app on new sessions and updates.' `
+  -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Communications' 'ConfigureChatAutoInstall' 0 )
+
+T -Id 'debloat-oobeapps' -Cat $D -Name 'Block forced Outlook and Dev Home installs' -Tags safe, max, deai `
+  -Desc 'Deletes the Windows Update orchestrator entries that reinstall the new Outlook and Dev Home after feature updates.' `
+  -Apply {
+      $base = 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe'
+      $gone = @()
+      foreach ($n in 'OutlookUpdate', 'DevHomeUpdate') { if (Test-Path "$base\$n") { Remove-Item "$base\$n" -Recurse -Force -ErrorAction SilentlyContinue; $gone += $n } }
+      , $gone
+  } `
+  -Undo { Write-Log '  Orchestrator entries are recreated by Windows Update when needed.' } `
+  -Test { -not ((Test-Path 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\OutlookUpdate') -or (Test-Path 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\DevHomeUpdate')) }
+
+T -Id 'debloat-store' -Cat $D -Name 'Microsoft Store: no promoted apps or auto-updates of consumer apps' -Tags max, deai `
+  -Desc 'Stops the Store from pushing suggested apps and turns off automatic app updates (you can still update manually).' `
+  -Reg @( Rg 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore' 'AutoDownload' 2; Rg "$CV\ContentDeliveryManager" 'SubscribedContent-338388Enabled' 0 )
+
+T -Id 'debloat-feeds' -Cat $D -Name 'Turn off news, weather and interests feeds' -Tags safe, max, deai `
+  -Desc 'Removes the news-and-interests feed from the taskbar and the Widgets news board via policy.' `
+  -Reg @( Rg "$POL\Windows Feeds" 'EnableFeeds' 0; Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Dsh' 'AllowNewsAndInterests' 0 )
