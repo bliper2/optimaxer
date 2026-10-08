@@ -154,7 +154,7 @@ function Show-Page {
     $global:CurrentPage = $Name
     if (-not $Reload) {
         foreach ($k in @($UI.Keys)) { if ($k -like 'Page_*') { $UI[$k].Visibility = if ($k -eq "Page_$Name") { 'Visible' } else { 'Collapsed' } } }
-        $titles = @{ install = 'install'; dash = 'dashboard'; tweaks = 'optimize'; services = 'services'; startup = 'startup'; cleanup = 'cleaner'; debloat = 'debloat'; network = 'network'; features = 'features'; tools = 'tools'; rice = 'rice' }
+        $titles = @{ config = 'config'; install = 'install'; dash = 'dashboard'; tweaks = 'optimize'; services = 'services'; startup = 'startup'; cleanup = 'cleaner'; debloat = 'debloat'; network = 'network'; features = 'features'; tools = 'tools'; rice = 'rice' }
         $UI.BarTitle.Text = "~/$($titles[$Name])"
         Start-PageIn $UI["Page_$Name"]
     }
@@ -162,6 +162,7 @@ function Show-Page {
         if ($global:Busy) { $global:PendingPage = $Name; return }   # a job is running: load as soon as it finishes
         switch ($Name) {
             'install'  { Update-Installed }
+            'config'   { Update-ConfigSummary }
             'services' { Update-Services }
             'startup'  { Update-Startup }
             'features' { Update-Features }
@@ -251,7 +252,13 @@ function Initialize-Dashboard {
             Laptop = [bool](Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue)
             SSD = $ssd
             Disks = @(Get-PhysicalDisk | ForEach-Object { '{0} - {1}, {2} GB, {3}' -f $_.FriendlyName, $_.MediaType, [math]::Round($_.Size / 1GB), $_.HealthStatus })
-            Startup = @(Get-StartupItems).Count
+            Startup = @(Get-StartupItems -NoTasks).Count
+            Processes = @(Get-Process).Count
+            BootSec = $(try {
+                $ev = Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Diagnostics-Performance/Operational'; Id = 100 } -MaxEvents 1 -ErrorAction Stop
+                $bt = ([xml]$ev.ToXml()).Event.EventData.Data | Where-Object { $_.Name -eq 'BootTime' }
+                [math]::Round([double]$bt.'#text' / 1000, 1)
+            } catch { 0 })
         }
     } -OnDone {
         param($res)
@@ -264,7 +271,7 @@ function Initialize-Dashboard {
                 , @('CPU', $i.CPU)
                 , @('GPU', $i.GPU)
                 , @('Memory', "$($i.RAM) GB")
-            ) + @($i.Disks | ForEach-Object { , @('Disk', $_) }) + @(, @('Startup', "$($i.Startup) items"))
+            ) + @($i.Disks | ForEach-Object { , @('Disk', $_) }) + @(, @('Startup', "$($i.Startup) items")) + @(, @('Processes', "$($i.Processes) running")) + $(if ($i.BootSec -gt 0) { , @('Boot time', "$($i.BootSec) s (last boot)") })
             $UI.SysInfo.Inlines.Clear()
             foreach ($pr in $pairs) {
                 $k = New-Object Windows.Documents.Run(($pr[0] + ': '))
@@ -606,6 +613,61 @@ $UI.BtnUpgradeAll.Add_Click({
     } -OnDone { Update-Installed })
 })
 
+# ================================================================ config page (export / import / shortcut)
+function Update-ConfigSummary {
+    $t = @($global:TwRows | Where-Object IsChecked).Count
+    $n = @($global:AppRows | Where-Object IsChecked).Count
+    $UI.CfgSummary.Text = "Currently ticked: $t tweak(s), $n app(s)"
+    $script = Join-Path $global:OptiRoot 'Optimaxer.ps1'
+    $UI.CfgHelp.Text = "powershell -ExecutionPolicy Bypass -File `"$script`" -Silent -Preset safe`n" +
+                       "powershell -ExecutionPolicy Bypass -File `"$script`" -Silent -Config my-setup.json`n`n" +
+                       "Presets: safe | gaming | privacy | deai | max.  Add -NoRestorePoint to skip the restore point.`n" +
+                       "A config file lists tweak ids and WinGet app ids (use Export selection to create one)."
+    $global:Loaded['config'] = $true
+}
+$global:CfgExampleCmd = $null
+
+$UI.BtnCfgExport.Add_Click({
+    $dlg = New-Object Microsoft.Win32.SaveFileDialog -Property @{ Filter = 'Optimaxer config (*.json)|*.json'; FileName = 'optimaxer-config.json'; Title = 'Export selection' }
+    if ($dlg.ShowDialog() -ne $true) { return }
+    $obj = [ordered]@{
+        optimaxer = 1; version = $global:OptiVersionText; created = (Get-Date).ToString('s')
+        tweaks = @($global:TwRows | Where-Object IsChecked | ForEach-Object Id)
+        apps = @($global:AppRows | Where-Object IsChecked | ForEach-Object Id)
+    }
+    $obj | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $dlg.FileName -Encoding UTF8
+    Write-Log "Exported $($obj.tweaks.Count) tweak(s) and $($obj.apps.Count) app(s) to $($dlg.FileName)" 'OK'
+})
+$UI.BtnCfgImport.Add_Click({
+    $dlg = New-Object Microsoft.Win32.OpenFileDialog -Property @{ Filter = 'Optimaxer config (*.json)|*.json'; Title = 'Import selection' }
+    if ($dlg.ShowDialog() -ne $true) { return }
+    try { $cfg = Get-Content -LiteralPath $dlg.FileName -Raw | ConvertFrom-Json } catch { Write-Log "Not a valid config file: $($_.Exception.Message)" 'ERROR'; return }
+    if (-not $cfg.optimaxer) { Write-Log 'That file is not an Optimaxer config.' 'ERROR'; return }
+    $tw = @($cfg.tweaks); $ap = @($cfg.apps)
+    $unknown = @()
+    foreach ($r in $global:TwRows) { $r.IsChecked = $tw -contains $r.Id }
+    foreach ($r in $global:AppRows) { $r.IsChecked = $ap -contains $r.Id }
+    $unknown += @($tw | Where-Object { $id = $_; -not ($global:TwRows | Where-Object { $_.Id -eq $id }) })
+    $unknown += @($ap | Where-Object { $id = $_; -not ($global:AppRows | Where-Object { $_.Id -eq $id }) })
+    Write-Log "Imported selection: $($tw.Count) tweak(s), $($ap.Count) app(s)$(if ($unknown.Count) { '; ignored unknown ids: ' + ($unknown -join ', ') })" 'OK'
+    Update-ConfigSummary
+})
+$UI.BtnCfgClear.Add_Click({
+    foreach ($r in $global:TwRows) { $r.IsChecked = $false }
+    foreach ($r in $global:AppRows) { $r.IsChecked = $false }
+    Update-ConfigSummary
+})
+$UI.BtnShortcut.Add_Click({
+    try {
+        $desktop = [Environment]::GetFolderPath('Desktop')
+        $script = Join-Path $global:OptiRoot 'Optimaxer.ps1'
+        New-OptiShortcut -Path (Join-Path $desktop 'Optimaxer.lnk') -Target (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+            -Arguments "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$script`"" -WorkDir $global:OptiRoot -Icon (Join-Path $global:OptiRoot 'assets\optimaxer.ico') -RunAsAdmin
+        Write-Log "Shortcut created on the desktop: $(Join-Path $desktop 'Optimaxer.lnk')" 'OK'
+    } catch { Write-Log "Could not create the shortcut: $($_.Exception.Message)" 'ERROR' }
+})
+$UI.BtnCfgCopyCmd.Add_Click({ [Windows.Clipboard]::SetText("powershell -ExecutionPolicy Bypass -File `"$(Join-Path $global:OptiRoot 'Optimaxer.ps1')`" -Silent -Preset safe") })
+
 # ================================================================ services page
 $global:SvRows = Initialize-List $UI.SvList 'sv'
 Connect-Search $UI.SvSearch 'sv' $global:SvRows
@@ -663,8 +725,8 @@ function Update-Startup {
         param($res)
         $global:StRows.Clear()
         foreach ($i in $res) {
-            $item = @{ Name = [string]$i.Name; Approved = [string]$i.Approved }
-            $global:StRows.Add((New-Row "$($i.Scope)|$($i.Name)" $i.Name $i.Cmd $i.Scope '' $(if ($i.Enabled) { 'Enabled' } else { 'Disabled' }) $false $item))
+            $item = @{ Name = [string]$i.Name; Approved = [string]$i.Approved; Kind = [string]$i.Kind; TaskPath = [string]$i.TaskPath }
+            $global:StRows.Add((New-Row "$($i.Scope)|$($i.TaskPath)$($i.Name)" $i.Name $i.Cmd $i.Scope '' $(if ($i.Enabled) { 'Enabled' } else { 'Disabled' }) $false $item))
         }
         $global:Loaded['startup'] = $true
         Write-Log "Found $($global:StRows.Count) startup items."
@@ -675,7 +737,7 @@ function Set-StartupJob {
     param([bool]$Enable)
     $sel = @($global:StRows | Where-Object IsChecked)
     if (-not $sel.Count) { Write-Log 'No startup items selected.' 'WARN'; return }
-    $items = @($sel | ForEach-Object { @{ Name = $_.Tag.Name; Approved = $_.Tag.Approved } })
+    $items = @($sel | ForEach-Object { @{ Name = $_.Tag.Name; Approved = $_.Tag.Approved; Kind = $_.Tag.Kind; TaskPath = $_.Tag.TaskPath } })
     [void](Start-OptiJob "$(if ($Enable) { 'Enable' } else { 'Disable' }) startup items" -ArgList @($items, $Enable) -Script {
         param($items, $enable)
         foreach ($i in $items) { Set-StartupItem $i $enable; Write-Log "  $($i.Name): $(if ($enable) { 'enabled' } else { 'disabled' })" }
@@ -981,7 +1043,7 @@ $UI.TileBar.Add_MouseLeftButtonDown({
     else { $global:Win.DragMove() }
 })
 
-foreach ($n in 'NavDash', 'NavTweaks', 'NavServices', 'NavStartup', 'NavCleanup', 'NavDebloat', 'NavNetwork', 'NavFeatures', 'NavTools', 'NavRice', 'NavInstall') {
+foreach ($n in 'NavDash', 'NavTweaks', 'NavServices', 'NavStartup', 'NavCleanup', 'NavDebloat', 'NavNetwork', 'NavFeatures', 'NavTools', 'NavRice', 'NavInstall', 'NavConfig') {
     $UI[$n].Add_Checked({ param($s, $e) Show-Page $s.Tag })
 }
 

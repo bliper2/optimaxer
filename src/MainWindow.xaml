@@ -428,6 +428,7 @@
           <RadioButton x:Name="NavDash"     Tag="dash"     Style="{StaticResource Ws}" GroupName="ws" Content="Dashboard" IsChecked="True"/>
           <RadioButton x:Name="NavInstall"  Tag="install"  Style="{StaticResource Ws}" GroupName="ws" Content="Install"/>
           <RadioButton x:Name="NavTweaks"   Tag="tweaks"   Style="{StaticResource Ws}" GroupName="ws" Content="Tweaks"/>
+          <RadioButton x:Name="NavConfig"   Tag="config"   Style="{StaticResource Ws}" GroupName="ws" Content="Config"/>
           <RadioButton x:Name="NavServices" Tag="services" Style="{StaticResource Ws}" GroupName="ws" Content="Services"/>
           <RadioButton x:Name="NavStartup"  Tag="startup"  Style="{StaticResource Ws}" GroupName="ws" Content="Startup"/>
           <RadioButton x:Name="NavCleanup"  Tag="cleanup"  Style="{StaticResource Ws}" GroupName="ws" Content="Cleaner"/>
@@ -526,6 +527,27 @@
                 <StackPanel x:Name="TwCol2" Grid.Column="1" Margin="0,0,16,0"/>
                 <StackPanel x:Name="TwCol3" Grid.Column="2"/>
               </Grid>
+            </ScrollViewer>
+          </Grid>
+
+          <!-- config -->
+          <Grid x:Name="Page_config" Visibility="Collapsed">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+              <StackPanel Margin="0,10,10,10">
+                <TextBlock Style="{StaticResource PageTitle}" Text="Config"/>
+                <TextBlock Style="{StaticResource Comment}" Text="Save what is ticked on the Install and Tweaks tabs, load it on another PC, or run it unattended."/>
+                <TextBlock x:Name="CfgSummary" Style="{StaticResource Dim}" Margin="0,0,0,10"/>
+                <WrapPanel Margin="0,0,0,20">
+                  <Button x:Name="BtnCfgExport" Style="{StaticResource BtnAccent}" Content="Export selection..."/>
+                  <Button x:Name="BtnCfgImport" Content="Import selection..."/>
+                  <Button x:Name="BtnCfgClear" Content="Clear all selections"/>
+                </WrapPanel>
+                <TextBlock Text="Shortcut" Style="{StaticResource ColHead}" Margin="0,0,0,6"/>
+                <WrapPanel Margin="0,0,0,20"><Button x:Name="BtnShortcut" Content="Create desktop shortcut (runs as administrator)"/></WrapPanel>
+                <TextBlock Text="Run unattended" Style="{StaticResource ColHead}" Margin="0,0,0,6"/>
+                <Border Background="{DynamicResource Surface}" CornerRadius="4" Padding="12,10"><TextBlock x:Name="CfgHelp" FontFamily="Consolas" FontSize="12" Foreground="{DynamicResource Muted}" TextWrapping="Wrap"/></Border>
+                <Button x:Name="BtnCfgCopyCmd" Content="Copy example command" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+              </StackPanel>
             </ScrollViewer>
           </Grid>
 

@@ -715,3 +715,61 @@ T -Id 'debloat-apparchive' -Cat $D -Name 'Do not auto-archive Store apps' -Tags 
 T -Id 'wu-nag' -Cat $D -Name 'Windows Update: remove "update and shut down" nag' -Tags safe, max `
   -Desc 'The power menu defaults to plain Shut down and the "Get the latest updates" link is hidden.' `
   -Reg @( Rg "$WU\AU" 'NoAUAsDefaultShutdownOption' 1; Rg 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' 'HideMCTLink' 1 )
+
+# ======================================================================= v2: WINDOWS UPDATE CONTROL + HOSTS TELEMETRY BLOCK
+$WUX = 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings'
+
+T -Id 'wu-security' -Cat $D -Name 'Windows Update: security updates first, delay feature updates 1 year' -Risk Moderate `
+  -Desc 'Quality (security) updates arrive after 4 days; feature updates (24H2, 25H2...) are held back for 365 days so new builds settle first. Updates are never disabled.' `
+  -Reg @(
+      Rg $WU 'DeferFeatureUpdates' 1
+      Rg $WU 'DeferFeatureUpdatesPeriodInDays' 365
+      Rg $WU 'DeferQualityUpdates' 1
+      Rg $WU 'DeferQualityUpdatesPeriodInDays' 4
+  )
+
+T -Id 'wu-nodrivers' -Cat $D -Name 'Windows Update: do not install drivers automatically' -Tags max -Risk Moderate `
+  -Desc 'Windows Update stops swapping your GPU/chipset drivers for its own versions. Install drivers from the vendor instead.' `
+  -Reg @(
+      Rg $WU 'ExcludeWUDriversInQualityUpdate' 1
+      Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching' 'SearchOrderConfig' 0
+  )
+
+T -Id 'wu-pause' -Cat $D -Name 'Windows Update: pause all updates for 35 days' -Tags optin -Risk Moderate `
+  -Desc 'Uses the same pause Settings offers (maximum 35 days). Updates resume automatically afterwards. Undo resumes immediately.' `
+  -Apply {
+      $now = [DateTime]::UtcNow
+      $start = $now.ToString('yyyy-MM-ddTHH:mm:ssZ'); $end = $now.AddDays(35).ToString('yyyy-MM-ddTHH:mm:ssZ')
+      foreach ($n in 'PauseFeatureUpdatesStartTime', 'PauseQualityUpdatesStartTime', 'PauseUpdatesStartTime') { Set-RegEntry 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' $n $start 'String' }
+      foreach ($n in 'PauseFeatureUpdatesEndTime', 'PauseQualityUpdatesEndTime', 'PauseUpdatesExpiryTime') { Set-RegEntry 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' $n $end 'String' }
+      $null
+  } `
+  -Undo {
+      foreach ($n in 'PauseFeatureUpdatesStartTime', 'PauseQualityUpdatesStartTime', 'PauseUpdatesStartTime', 'PauseFeatureUpdatesEndTime', 'PauseQualityUpdatesEndTime', 'PauseUpdatesExpiryTime') { Remove-RegEntry 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' $n }
+  } `
+  -Test {
+      $e = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' -ErrorAction SilentlyContinue).PauseUpdatesExpiryTime
+      [bool]$e -and ([DateTime]::Parse($e).ToUniversalTime() -gt [DateTime]::UtcNow)
+  }
+
+T -Id 'net-hosts-spy' -Cat $N -Name 'Block Windows telemetry and ad servers in the hosts file' -Tags optin -Risk Advanced `
+  -Desc 'Downloads the WindowsSpyBlocker "spy" list (MIT, github.com/crazy-max/WindowsSpyBlocker), drops entries that would break developer tooling, and adds the rest to your hosts file between marker lines. The file is backed up first and undo removes only that block. Windows Defender may flag hosts-file edits that block Microsoft domains.' `
+  -Apply {
+      $hosts = "$env:SystemRoot\System32\drivers\etc\hosts"
+      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+      $raw = (Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/crazy-max/WindowsSpyBlocker/master/data/hosts/spy.txt' -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop).Content
+      $entries = @($raw -split "`n" | ForEach-Object { if ($_ -match '^\s*0\.0\.0\.0\s+([a-z0-9][a-z0-9\.\-]+)\s*$') { $Matches[1] } } |
+                   Where-Object { $_ -notmatch 'blob\.core\.windows\.net$|visualstudio|nuget|dotnet' } | Sort-Object -Unique)
+      if ($entries.Count -lt 50) { throw "blocklist looked wrong ($($entries.Count) entries), hosts file left untouched" }
+      $backup = Join-Path $OptiBackupDir ('hosts-{0}.bak' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+      Copy-Item -LiteralPath $hosts -Destination $backup -Force
+      Add-HostsBlock -Path $hosts -Entries $entries
+      ipconfig /flushdns | Out-Null
+      @{ Backup = $backup; Count = $entries.Count }
+  } `
+  -Undo {
+      $hosts = "$env:SystemRoot\System32\drivers\etc\hosts"
+      Remove-HostsBlock -Path $hosts
+      ipconfig /flushdns | Out-Null
+  } `
+  -Test { ([IO.File]::ReadAllText("$env:SystemRoot\System32\drivers\etc\hosts")) -match '# BEGIN Optimaxer telemetry block' }

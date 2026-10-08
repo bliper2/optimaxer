@@ -2,35 +2,50 @@
 
 # Optimaxer
 
-Windows 10/11 performance, privacy and cleanup suite. WPF GUI in Windows PowerShell 5.1.
-Inspired by the module layout of [Chris Titus Tech's WinUtil](https://github.com/ChrisTitusTech/winutil) (MIT), rebuilt with undo support and more tweaks.
+Windows 10/11 performance, privacy, debloat and app-install toolkit. WPF GUI in Windows PowerShell 5.1, inspired by the layout of [Chris Titus Tech's WinUtil](https://github.com/ChrisTitusTech/winutil) (MIT), rebuilt with undo support, verification and a lot more tweaks.
 
-## Run
-Double-click `Launch.bat` (asks for admin). Nothing is installed.
+## Get it
+**One line** (installs to `%LOCALAPPDATA%\Optimaxer`, adds desktop and Start menu shortcuts, starts the app; run again to update):
+
+```powershell
+irm https://raw.githubusercontent.com/bliper2/optimaxer/main/install.ps1 | iex
+```
+
+Or download the zip from [Releases](https://github.com/bliper2/optimaxer/releases), extract it and double-click `Launch.bat` (asks for administrator rights).
 
 ## What it does
-- **Install**: 260+ apps in 10 categories (the WinUtil list plus more) (browsers, communications, development, documents, games, Microsoft tools, multimedia, utilities, self-hosted) installed, upgraded or uninstalled through WinGet; tiles show each app's icon (favicon fetched once by homepage domain from Google's favicon service, with DuckDuckGo's icon service as fallback and GitHub avatars for GitHub-hosted projects, cached in `%ProgramData%\Optimaxer\icons2`); "Show installed" marks what you already have; "Upgrade all" updates everything WinGet manages.
-- **Optimize**: 100+ tweaks (performance, gaming, network, privacy, debloat, interface), presets (Recommended / Gaming / Privacy / Maximum). Original values are snapshotted per tweak (`%ProgramData%\Optimaxer\state.json`), so each tweak and "Undo ALL" restore real prior values. Optional restore point first.
-- **Services**: ~240 services, recommended Manual/Disable lists, protected core services hidden, JSON backup before every change + restore.
-- **Startup apps**: enable/disable registry and folder startup items (same mechanism as Task Manager).
-- **Cleaner**: scan then clean temp, update cache, shader caches, browser caches, dumps, logs, Recycle Bin, component store.
-- **Debloat apps**: curated Appx removal with safety levels.
-- **Network**: DNS provider switch (+DoH), latency benchmark, stack reset.
-- **Features**: Hyper-V, WSL, Sandbox, .NET 3.5, etc.
-- **Tools**: free RAM, TRIM/defrag, disk health, SFC, DISM, reset Windows Update, icon cache, Store cache, System Restore.
+- **Install**: 260+ apps in 10 categories through WinGet (the WinUtil list plus more), with real app icons, "Show installed", upgrade-all, and a verification step after every install or uninstall.
+- **Tweaks**: 170+ tweaks (performance, gaming, network, privacy, AI/Copilot removal, browser debloat, Windows Update control, interface) with presets. The original value of everything a tweak touches is saved, so each tweak, and "Undo ALL", restores your real prior settings. Optional restore point first.
+- **Config**: export/import what you ticked on Install and Tweaks, create a desktop shortcut, and run unattended (see below).
+- **Services**: ~240 services with recommended Manual/Disable lists, protected core services hidden, JSON backup before every change.
+- **Startup**: registry, startup-folder **and scheduled-task** entries that run at logon/boot; enable or disable without uninstalling.
+- **Cleaner**: scan, then clean temp files, update/shader/browser/dev-tool caches (npm, pip, NuGet, VS Code...), dumps, logs, event logs, font cache, Recycle Bin, component store and Windows.old.
+- **Debloat**: curated Appx removal (Microsoft, OEM and game bloat) with safety levels.
+- **Network**: DNS provider switch (+DoH), latency benchmark, stack reset; opt-in hosts-file telemetry block.
+- **Features**: Hyper-V, WSL, Sandbox, .NET 3.5 and more.
+- **Tools**: free RAM, TRIM/defrag, disk health, SFC, DISM, Windows Update reset, icon/Store cache, performance counters, registry backup, update check, System Restore.
+- **Appearance**: themes (dark default, light and 8 more), optional animated wallpaper effects, layout and animation controls.
 
-## Look
-Classic WinUtil-style layout: tab strip on top (Dashboard, Tweaks, Services, Startup, Cleaner, Debloat, Network, Features, Tools, Appearance), tweaks in three category columns with hover descriptions, and a log pane at the bottom. Dark by default; the Appearance tab adds a light theme, 8 more themes, optional animated wallpaper effects, gaps/rounding and a hyprland.conf-style preview. Saved to `%ProgramData%\Optimaxer\settings.json`.
+## Run unattended
+```powershell
+powershell -ExecutionPolicy Bypass -File Optimaxer.ps1 -Silent -Preset safe          # safe | gaming | privacy | deai | max
+powershell -ExecutionPolicy Bypass -File Optimaxer.ps1 -Silent -Config my-setup.json # from Config > Export selection
+```
+Add `-NoRestorePoint` to skip the restore point. Exit code 0 = everything verified, 1 = something was not applied, 2 = bad arguments.
 
-Log: `%ProgramData%\Optimaxer\optimaxer.log`. Tweaks tagged opt-in (VBS off, OneDrive removal, search indexing off, reserved storage) never appear in presets.
-
-Dev: `Optimaxer.ps1 -NoElevate -Screenshot <dir>` renders every page to PNG.
-
-## Credits
-Tweak ideas draw on [Win11Debloat](https://github.com/Raphire/Win11Debloat) (MIT) and [WinUtil](https://github.com/ChrisTitusTech/winutil) (MIT), plus general knowledge of AtlasOS-style tuning (AtlasOS is GPL-3.0; no code copied). All tweaks are implemented here with snapshot/undo.
-
-### App icons
-Install-tab icons are fetched at runtime (never bundled) from open icon packs served by jsDelivr, then cached in `%ProgramData%\Optimaxer\icons4`: [selfh.st icons](https://selfh.st/icons/) (CC BY 4.0, attribution: selfh.st), [Dashboard Icons](https://github.com/homarr-labs/dashboard-icons) (Apache-2.0) and [Simple Icons](https://simpleicons.org) (CC0). Apps without a pack icon fall back to the favicon of their product page (Google favicon service, as WinUtil does). Logos remain the trademarks of their owners.
+## Safety model
+- Every tweak snapshots the prior registry values, service start types and task states (`%ProgramData%\Optimaxer\state.json`). Several tweaks sharing a setting still undo correctly in any order.
+- Tweaks that remove keys (context-menu entries) export them to a `.reg` backup first. The hosts block lives between marker lines and the file is backed up.
+- Anything risky or irreversible is tagged Moderate/Advanced, and opt-in tweaks never appear in presets.
+- Logs: `%ProgramData%\Optimaxer\optimaxer.log`. Settings: `%ProgramData%\Optimaxer\settings.json`.
 
 ## Updates
-Optimaxer checks GitHub Releases once per launch (Appearance > Updates, or Tools > Check for updates). When a newer release exists an **Update to vX** button appears in the title bar. Updating downloads the release zip, verifies its published SHA-256 checksum, unpacks it, backs up the current files to `%ProgramData%\Optimaxerackupspp-<version>-<time>`, swaps them in after the app closes and restarts it. A git checkout is never overwritten (use `git pull`). For a private fork set the `OPTIMAXER_TOKEN` environment variable to a GitHub token with read access.
+Optimaxer checks GitHub Releases once per launch (Appearance > Updates, or Tools > Check for updates). A newer release shows an **Update to vX** button in the title bar. Updating downloads the zip, verifies its published SHA-256, backs up the current files to `%ProgramData%\Optimaxer\backups\app-<version>-<time>`, swaps them in after the app closes and restarts. A git checkout is never overwritten (use `git pull`). For a private fork set `OPTIMAXER_TOKEN` to a GitHub token with read access.
+
+## Development
+`Optimaxer.ps1 -NoElevate -Screenshot <dir>` renders every page to PNG. `tools/make-logo.ps1` regenerates the logo files from `assets/logo.xaml`. Bump `VERSION` and include it in the release zip so the updater sees new releases.
+
+## Credits
+Tweak ideas draw on [Win11Debloat](https://github.com/Raphire/Win11Debloat) (MIT) and [WinUtil](https://github.com/ChrisTitusTech/winutil) (MIT), plus general knowledge of AtlasOS-style tuning (AtlasOS is GPL-3.0; no code copied). The telemetry hosts list is [WindowsSpyBlocker](https://github.com/crazy-max/WindowsSpyBlocker) (MIT), fetched at apply time.
+
+App icons are fetched at runtime (never bundled) from open icon packs served by jsDelivr and cached in `%ProgramData%\Optimaxer\icons4`: [selfh.st icons](https://selfh.st/icons/) (CC BY 4.0, attribution: selfh.st), [Dashboard Icons](https://github.com/homarr-labs/dashboard-icons) (Apache-2.0) and [Simple Icons](https://simpleicons.org) (CC0). Apps without a pack icon fall back to their product page's favicon (Google favicon service, as WinUtil does). Logos remain the trademarks of their owners.

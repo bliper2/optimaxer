@@ -17,6 +17,7 @@ function Write-Log {
     param([string]$Message, [string]$Level = 'INFO')
     $line = '[{0}] {1,-5} {2}' -f (Get-Date -Format 'HH:mm:ss'), $Level, $Message
     if ($global:OptiLogQueue) { $global:OptiLogQueue.Enqueue($line) }
+    if ($global:OptiConsole) { Write-Host $line }
     try { Add-Content -LiteralPath $global:OptiLogPath -Value $line -Encoding UTF8 } catch {}
 }
 
@@ -369,6 +370,7 @@ function Invoke-TweakUndo {
 
 # ---------------------------------------------------------------- startup items
 function Get-StartupItems {
+    param([switch]$NoTasks)
     $apr = 'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved'
     $defs = @(
         @{ Scope = 'Registry (user)';    Path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run';              Approved = "HKCU:\$apr\Run" },
@@ -380,7 +382,7 @@ function Get-StartupItems {
         $props = Get-ItemProperty -LiteralPath $d.Path
         foreach ($p in $props.PSObject.Properties) {
             if ($p.Name -like 'PS*') { continue }
-            @{ Name = $p.Name; Cmd = [string]$p.Value; Scope = $d.Scope; Approved = $d.Approved; Enabled = (Test-StartupEnabled $d.Approved $p.Name) }
+            @{ Name = $p.Name; Cmd = [string]$p.Value; Scope = $d.Scope; Approved = $d.Approved; Enabled = (Test-StartupEnabled $d.Approved $p.Name); Kind = 'Reg'; TaskPath = '' }
         }
     }
     $folders = @(
@@ -391,7 +393,17 @@ function Get-StartupItems {
         if (-not (Test-Path -LiteralPath $f.Path)) { continue }
         foreach ($i in Get-ChildItem -LiteralPath $f.Path -File -Force -ErrorAction SilentlyContinue) {
             if ($i.Name -eq 'desktop.ini') { continue }
-            @{ Name = $i.Name; Cmd = $i.FullName; Scope = $f.Scope; Approved = $f.Approved; Enabled = (Test-StartupEnabled $f.Approved $i.Name) }
+            @{ Name = $i.Name; Cmd = $i.FullName; Scope = $f.Scope; Approved = $f.Approved; Enabled = (Test-StartupEnabled $f.Approved $i.Name); Kind = 'Reg'; TaskPath = '' }
+        }
+    }
+    if (-not $NoTasks) {
+        # third-party scheduled tasks that run at logon or boot (Microsoft's own tasks are left out)
+        foreach ($t in Get-ScheduledTask -ErrorAction SilentlyContinue) {
+            if ($t.TaskPath -like '\Microsoft\*') { continue }
+            $hit = @($t.Triggers | Where-Object { $_.CimClass.CimClassName -in 'MSFT_TaskLogonTrigger', 'MSFT_TaskBootTrigger' })
+            if (-not $hit.Count) { continue }
+            $cmd = (@($t.Actions | ForEach-Object { ("$($_.Execute) $($_.Arguments)").Trim() }) -join '; ')
+            @{ Name = $t.TaskName; Cmd = $cmd; Scope = 'Scheduled task (logon/boot)'; Approved = ''; Enabled = ($t.State -ne 'Disabled'); Kind = 'Task'; TaskPath = $t.TaskPath }
         }
     }
 }
@@ -406,6 +418,11 @@ function Test-StartupEnabled {
 
 function Set-StartupItem {
     param($Item, [bool]$Enable)
+    if ($Item.Kind -eq 'Task') {
+        if ($Enable) { Enable-ScheduledTask -TaskPath $Item.TaskPath -TaskName $Item.Name -ErrorAction Stop | Out-Null }
+        else { Disable-ScheduledTask -TaskPath $Item.TaskPath -TaskName $Item.Name -ErrorAction Stop | Out-Null }
+        return
+    }
     $bytes = New-Object byte[] 12
     if ($Enable) { $bytes[0] = 2 }
     else {
@@ -472,7 +489,7 @@ function Get-CleanupSize {
         try { $sh = New-Object -ComObject Shell.Application; foreach ($i in $sh.Namespace(0xA).Items()) { $size += $i.Size } } catch {}
         return $size
     }
-    if ($Target.Special) { return -1.0 }
+    if ($Target.Special -and $Target.Special -notin 'eventlogs', 'winold') { return -1.0 }
     $size = 0.0
     foreach ($p in $Target.Paths) { $size += Get-PathSize $p }
     return $size
@@ -483,6 +500,20 @@ function Invoke-CleanupTarget {
     switch ($Target.Special) {
         'recycle'   { $before = Get-CleanupSize $Target; Clear-RecycleBin -Force -ErrorAction SilentlyContinue; return $before }
         'component' { Dism.exe /Online /Cleanup-Image /StartComponentCleanup | Out-Null; return 0.0 }
+        'eventlogs' {
+            $before = Get-CleanupSize $Target
+            foreach ($log in (wevtutil.exe el)) { wevtutil.exe cl $log 2>&1 | Out-Null }
+            return $before
+        }
+        'winold' {
+            $dir = $Target.Paths[0]
+            if (-not (Test-Path -LiteralPath $dir)) { return 0.0 }
+            $before = Get-CleanupSize $Target
+            takeown.exe /F $dir /R /A /D Y 2>&1 | Out-Null
+            icacls.exe $dir /grant 'Administrators:F' /T /C /Q 2>&1 | Out-Null
+            cmd.exe /c rd /s /q "$dir" 2>&1 | Out-Null
+            return $(if (Test-Path -LiteralPath $dir) { 0.0 } else { $before })
+        }
     }
     $wasRunning = @()
     if ($Target.Services) { foreach ($s in $Target.Services) { if ((Get-Service -Name $s -ErrorAction SilentlyContinue).Status -eq 'Running') { $wasRunning += $s }; Stop-Service -Name $s -Force -ErrorAction SilentlyContinue } }
@@ -654,5 +685,60 @@ if ($Relaunch -eq '1') {
     $p = Start-Process -FilePath powershell.exe -ArgumentList ($helperArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -WindowStyle Hidden -PassThru
     Write-Log "Update staged; Optimaxer will restart as v$Version. Previous files are backed up in $backup" 'OK'
     return $true
+}
+
+# ---------------------------------------------------------------- hosts file block (marker-delimited, reversible)
+$global:OptiHostsBegin = '# BEGIN Optimaxer telemetry block'
+$global:OptiHostsEnd   = '# END Optimaxer telemetry block'
+
+function Remove-HostsBlock {
+    param([string]$Path)
+    $text = [IO.File]::ReadAllText($Path)
+    $text = [regex]::Replace($text, '(?s)\r?\n?# BEGIN Optimaxer telemetry block.*?# END Optimaxer telemetry block\r?\n?', "`r`n")
+    [IO.File]::WriteAllText($Path, $text.TrimEnd() + "`r`n", [Text.Encoding]::ASCII)
+}
+
+function Add-HostsBlock {
+    param([string]$Path, [string[]]$Entries)
+    Remove-HostsBlock -Path $Path   # never stack blocks
+    $block = "$global:OptiHostsBegin (WindowsSpyBlocker, MIT)`r`n" + (($Entries | ForEach-Object { "0.0.0.0 $_" }) -join "`r`n") + "`r`n$global:OptiHostsEnd`r`n"
+    [IO.File]::WriteAllText($Path, ([IO.File]::ReadAllText($Path)).TrimEnd() + "`r`n" + $block, [Text.Encoding]::ASCII)
+}
+
+# ---------------------------------------------------------------- presets (shared by the GUI buttons and unattended mode)
+function Get-SystemTraits {
+    $laptop = [bool](Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue)
+    $ssd = $true
+    try {
+        $dn = (Get-Partition -DriveLetter $env:SystemDrive[0] -ErrorAction Stop).DiskNumber
+        if ((Get-PhysicalDisk | Where-Object { $_.DeviceId -eq "$dn" }).MediaType -eq 'HDD') { $ssd = $false }
+    } catch {}
+    return @{ Laptop = $laptop; SSD = $ssd }
+}
+
+function Get-PresetTweakIds {
+    param([string]$Preset, $Traits)
+    foreach ($t in $global:OptiCatalog) {
+        if ($t.DesktopOnly -and $Traits.Laptop) { continue }
+        if ($t.SSDOnly -and -not $Traits.SSD) { continue }
+        if ($t.Tags -contains $Preset) { $t.Id }
+    }
+}
+
+# ---------------------------------------------------------------- desktop shortcut (optionally "Run as administrator")
+function New-OptiShortcut {
+    param([string]$Path, [string]$Target, [string]$Arguments, [string]$WorkDir, [string]$Icon, [switch]$RunAsAdmin)
+    $sh = New-Object -ComObject WScript.Shell
+    $lnk = $sh.CreateShortcut($Path)
+    $lnk.TargetPath = $Target; $lnk.Arguments = $Arguments; $lnk.WorkingDirectory = $WorkDir
+    $lnk.WindowStyle = 7
+    if ($Icon -and (Test-Path -LiteralPath $Icon)) { $lnk.IconLocation = $Icon }
+    $lnk.Description = 'Optimaxer'
+    $lnk.Save()
+    if ($RunAsAdmin) {
+        $bytes = [IO.File]::ReadAllBytes($Path)
+        $bytes[0x15] = $bytes[0x15] -bor 0x20      # SLDF_RUNAS_USER flag
+        [IO.File]::WriteAllBytes($Path, $bytes)
+    }
 }
 
