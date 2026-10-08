@@ -1,0 +1,3 @@
+linux/** text eol=lf
+*.sh text eol=lf
+linux/optimaxer.py text eol=lf

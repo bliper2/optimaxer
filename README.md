@@ -26,6 +26,21 @@ Or download the zip from [Releases](https://github.com/bliper2/optimaxer/release
 - **Tools**: free RAM, TRIM/defrag, disk health, SFC, DISM, Windows Update reset, icon/Store cache, performance counters, registry backup, update check, System Restore.
 - **Appearance**: themes (dark default, light and 8 more), optional animated wallpaper effects, layout and animation controls.
 
+## Linux (Manjaro / Arch)
+A separate, dependency-free Python edition lives in [`linux/`](linux/optimaxer.py). It works on Manjaro and other pacman-based distributions (EndeavourOS, Arch, Garuda...).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bliper2/optimaxer/main/linux/install.sh | bash
+optimaxer --dry-run     # explore the menu, nothing is changed
+optimaxer               # real run (asks for sudo)
+```
+
+Menu sections: **Install apps** (96 apps from the official repos, the AUR through yay/paru, and Flatpak, each verified after install), **Tweaks** with presets and undo (zram, memory/swappiness, TRIM, I/O scheduler, journal limit, fast shutdown, earlyoom, BBR, pacman parallel downloads, paccache, hardening sysctls, optional ufw firewall...), **Cleaner** (pacman cache, orphans, journal, caches of browsers/pip/npm/Go/Cargo, Trash, unused Flatpak runtimes), **Services**, **Startup** (autostart entries), **Debloat packages**, **Network/DNS** (NetworkManager) and **Tools** (system info, update, Manjaro mirror ranking, failed units, .pacnew files, SMART health).
+
+Non-interactive: `optimaxer tweaks list | apply --preset safe | undo --all`, `optimaxer apps install firefox brave-bin`, `optimaxer clean scan | run`, `optimaxer dns cloudflare | restore`, `optimaxer update`. Add `--dry-run` to see every command and file change first, `-y` to skip confirmations.
+
+Safety: every change records the original state in `/var/lib/optimaxer/state.json` (files, config lines, service states, DNS), so `tweaks undo` restores it; edited config files are also copied to `/var/lib/optimaxer/backups`. Package installs by a tweak are kept on undo. Tested here with a simulated system (36 automated tests, `python -m unittest discover -s linux/tests`); I could not run it on a real Manjaro install, so start with `--dry-run`.
+
 ## Run unattended
 ```powershell
 powershell -ExecutionPolicy Bypass -File Optimaxer.ps1 -Silent -Preset safe          # safe | gaming | privacy | deai | max
@@ -43,6 +58,7 @@ Add `-NoRestorePoint` to skip the restore point. Exit code 0 = everything verifi
 Optimaxer checks GitHub Releases once per launch (Appearance > Updates, or Tools > Check for updates). A newer release shows an **Update to vX** button in the title bar. Updating downloads the zip, verifies its published SHA-256, backs up the current files to `%ProgramData%\Optimaxer\backups\app-<version>-<time>`, swaps them in after the app closes and restarts. A git checkout is never overwritten (use `git pull`). For a private fork set `OPTIMAXER_TOKEN` to a GitHub token with read access.
 
 ## Development
+Linux edition tests: `python -m unittest discover -s linux/tests` (runs on any OS with a fake system).
 `Optimaxer.ps1 -NoElevate -Screenshot <dir>` renders every page to PNG. `tools/make-logo.ps1` regenerates the logo files from `assets/logo.xaml`. Bump `VERSION` and include it in the release zip so the updater sees new releases.
 
 ## Credits
