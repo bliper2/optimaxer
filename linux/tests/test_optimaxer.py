@@ -216,7 +216,7 @@ class Catalog(unittest.TestCase):
             self.assertTrue(t.name and t.desc and t.cat, t.id)
             self.assertIn(t.risk, ("safe", "moderate", "advanced"))
             for path in t.files:
-                self.assertTrue(path.startswith("/etc/"), (t.id, path))
+                self.assertTrue(path.startswith(("/etc/", "/usr/lib/firefox/distribution/")), (t.id, path))
             for cmd in t.post + t.cmds + t.undo_post:
                 self.assertIsInstance(cmd, list, t.id)
             self.assertFalse(t.tags - {"safe", "perf", "privacy", "max"}, t.id)
@@ -405,8 +405,11 @@ class BrowserDebloat(Base):
         ff = json.loads(self.get("/etc/firefox/policies/policies.json"))
         self.assertTrue(ff["policies"]["DisableTelemetry"])
         self.assertIs(ff["policies"]["Preferences"]["browser.ml.chat.enabled"]["Value"], False)
+        self.assertEqual(self.get("/usr/lib/firefox/distribution/policies.json"), self.get("/etc/firefox/policies/policies.json"))
+        self.assertIs(ff["policies"]["Preferences"]["browser.newtabpage.activity-stream.showWeather"]["Value"], False)
         self.assertTrue(t.undo())
         self.assertIn("example.org", self.get("/etc/firefox/policies/policies.json"))
+        self.assertIsNone(self.get("/usr/lib/firefox/distribution/policies.json"))
         for tid, path, key in (("browser-chromium", "/etc/chromium/policies/managed/optimaxer.json", "MetricsReportingEnabled"),
                                ("browser-brave", "/etc/brave/policies/managed/optimaxer.json", "BraveRewardsDisabled")):
             self.assertTrue(ox.tweak_by_id(tid).apply())

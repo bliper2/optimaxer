@@ -19,7 +19,7 @@ import tempfile
 import time
 import urllib.request
 
-__version__ = "2.3.0"
+__version__ = "2.3.1"
 REPO = "bliper2/optimaxer"
 STATE_FILE = "/var/lib/optimaxer/state.json"
 BACKUP_DIR = "/var/lib/optimaxer/backups"
@@ -457,13 +457,18 @@ _FIREFOX = {
     "DisableTelemetry": True, "DisableFirefoxStudies": True, "DisablePocket": True, "DisableFeedbackCommands": True, "DontCheckDefaultBrowser": True,
     "OverrideFirstRunPage": "", "OverridePostUpdatePage": "",
     "FirefoxSuggest": {"WebSuggestions": False, "SponsoredSuggestions": False, "ImproveSuggest": False},
-    "FirefoxHome": {"SponsoredTopSites": False, "SponsoredPocket": False, "Snippets": False},
+    "FirefoxHome": {"SponsoredTopSites": False, "SponsoredPocket": False, "Pocket": False, "Stories": False, "SponsoredStories": False, "Snippets": False},
     "UserMessaging": {"ExtensionRecommendations": False, "FeatureRecommendations": False, "UrlbarInterventions": False, "SkipOnboarding": True, "MoreFromMozilla": False},
     "EnableTrackingProtection": {"Value": True, "Cryptomining": True, "Fingerprinting": True, "EmailTracking": True},
     "Preferences": {k: {"Value": False, "Status": "default"} for k in (
         "browser.ml.chat.enabled", "browser.ml.chat.sidebar", "browser.ml.linkPreview.enabled", "browser.tabs.groups.smart.enabled",
         "datareporting.healthreport.uploadEnabled", "app.shield.optoutstudies.enabled", "browser.newtabpage.activity-stream.feeds.telemetry",
-        "browser.newtabpage.activity-stream.telemetry", "browser.discovery.enabled")},
+        "browser.newtabpage.activity-stream.telemetry", "browser.discovery.enabled", "browser.newtabpage.activity-stream.showWeather",
+        "browser.newtabpage.activity-stream.system.showWeather", "browser.newtabpage.activity-stream.showSponsored",
+        "browser.newtabpage.activity-stream.showSponsoredTopSites", "browser.newtabpage.activity-stream.feeds.section.topstories",
+        "browser.newtabpage.activity-stream.feeds.system.topstories", "browser.newtabpage.activity-stream.widgets.system.enabled",
+        "browser.newtabpage.activity-stream.widgets.enabled", "browser.newtabpage.activity-stream.feeds.weatherfeed",
+        "browser.newtabpage.activity-stream.discoverystream.sponsoredCollections.enabled")},
 }
 _POLICY_NOTE = " The browser shows 'managed by your organization'; any policy file you already have is saved and restored on undo."
 
@@ -532,8 +537,9 @@ TWEAKS = [
     Tweak("priv-avahi", "Disable mDNS/Avahi network discovery", "Stops the machine announcing itself on the LAN. Network printer and Chromecast auto-discovery stops working.", "Privacy",
           risk="moderate", tags={"privacy", "max"}, disable=["avahi-daemon.service", "avahi-daemon.socket"], needs=["/usr/lib/systemd/system/avahi-daemon.service"]),
     # ---- browser debloat (managed policies: they apply to every profile and survive browser updates)
-    Tweak("browser-firefox", "Firefox: telemetry, studies, Pocket, sponsored content, AI chat", "Turns off telemetry, Shield studies, Pocket, sponsored tiles and suggestions, first-run pages, the AI chatbot and link previews; enables strict tracking protection." + _POLICY_NOTE,
-          "Browsers", tags={"privacy", "max"}, files={"/etc/firefox/policies/policies.json": _policy(_FIREFOX, wrap=True)}, needs=["firefox"]),
+    Tweak("browser-firefox", "Firefox: telemetry, studies, Pocket, sponsored content, AI chat", "Turns off telemetry, Shield studies, Pocket, sponsored tiles and suggestions, first-run pages, the AI chatbot and link previews; enables strict tracking protection. Also hides the new-tab weather, widgets, stories and sponsored tiles. Restart Firefox, then check about:policies." + _POLICY_NOTE,
+          "Browsers", tags={"privacy", "max"}, files={"/usr/lib/firefox/distribution/policies.json": _policy(_FIREFOX, wrap=True),
+                                                  "/etc/firefox/policies/policies.json": _policy(_FIREFOX, wrap=True)}, needs=["firefox"]),
     Tweak("browser-chromium", "Chromium: reporting, ads API, prediction, AI features", "Turns off usage reporting, Privacy Sandbox ad APIs, the spelling web service, search suggestions, network prediction and generative-AI features; WebRTC no longer leaks the local IP." + _POLICY_NOTE,
           "Browsers", tags={"privacy", "max"}, files={"/etc/chromium/policies/managed/optimaxer.json": _policy(_CHROMIUM_PRIVACY)}, needs=["chromium"]),
     Tweak("browser-chrome", "Google Chrome: reporting, ads API, prediction, AI features", "Turns off usage reporting, Privacy Sandbox ad APIs, the spelling web service, search suggestions, network prediction, background mode and Gemini/generative-AI features." + _POLICY_NOTE,
