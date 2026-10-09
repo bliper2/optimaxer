@@ -216,7 +216,7 @@ class Catalog(unittest.TestCase):
             self.assertTrue(t.name and t.desc and t.cat, t.id)
             self.assertIn(t.risk, ("safe", "moderate", "advanced"))
             for path in t.files:
-                self.assertTrue(path.startswith(("/etc/", "/usr/lib/firefox/distribution/")), (t.id, path))
+                self.assertTrue(path.startswith(("/etc/", "/usr/lib/firefox/")), (t.id, path))
             for cmd in t.post + t.cmds + t.undo_post:
                 self.assertIsInstance(cmd, list, t.id)
             self.assertFalse(t.tags - {"safe", "perf", "privacy", "max"}, t.id)
@@ -407,7 +407,12 @@ class BrowserDebloat(Base):
         self.assertIs(ff["policies"]["Preferences"]["browser.ml.chat.enabled"]["Value"], False)
         self.assertEqual(self.get("/usr/lib/firefox/distribution/policies.json"), self.get("/etc/firefox/policies/policies.json"))
         self.assertIs(ff["policies"]["Preferences"]["browser.newtabpage.activity-stream.showWeather"]["Value"], False)
+        cfg = self.get("/usr/lib/firefox/optimaxer.cfg")
+        self.assertTrue(cfg.startswith("//"))
+        self.assertIn('lockPref("browser.newtabpage.activity-stream.widgets.enabled", false);', cfg)
+        self.assertIn("optimaxer.cfg", self.get("/usr/lib/firefox/defaults/pref/optimaxer-autoconfig.js"))
         self.assertTrue(t.undo())
+        self.assertIsNone(self.get("/usr/lib/firefox/optimaxer.cfg"))
         self.assertIn("example.org", self.get("/etc/firefox/policies/policies.json"))
         self.assertIsNone(self.get("/usr/lib/firefox/distribution/policies.json"))
         for tid, path, key in (("browser-chromium", "/etc/chromium/policies/managed/optimaxer.json", "MetricsReportingEnabled"),

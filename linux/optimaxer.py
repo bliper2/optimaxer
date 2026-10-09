@@ -19,7 +19,7 @@ import tempfile
 import time
 import urllib.request
 
-__version__ = "2.3.1"
+__version__ = "2.3.2"
 REPO = "bliper2/optimaxer"
 STATE_FILE = "/var/lib/optimaxer/state.json"
 BACKUP_DIR = "/var/lib/optimaxer/backups"
@@ -470,6 +470,21 @@ _FIREFOX = {
         "browser.newtabpage.activity-stream.widgets.enabled", "browser.newtabpage.activity-stream.feeds.weatherfeed",
         "browser.newtabpage.activity-stream.discoverystream.sponsoredCollections.enabled")},
 }
+# Firefox's "Preferences" policy only accepts a short allow-list of settings and silently ignores the rest (the new-tab widgets, weather and
+# sponsored stories are not on it). An autoconfig file has no such limit, so the new-tab and telemetry settings are locked this way.
+_FF_NEWTAB = ("browser.newtabpage.activity-stream." + n for n in (
+    "showSponsored", "showSponsoredTopSites", "system.showSponsored", "showWeather", "system.showWeather", "feeds.weatherfeed",
+    "feeds.section.topstories", "feeds.system.topstories", "widgets.enabled", "widgets.system.enabled", "widgets.lists.enabled",
+    "widgets.focusTimer.enabled", "discoverystream.enabled", "discoverystream.sponsoredCollections.enabled", "feeds.telemetry", "telemetry"))
+_FF_LOCKED = tuple(_FF_NEWTAB) + (
+    "browser.ml.chat.enabled", "browser.ml.chat.sidebar", "browser.ml.linkPreview.enabled", "browser.tabs.groups.smart.enabled",
+    "extensions.pocket.enabled", "app.normandy.enabled", "app.shield.optoutstudies.enabled", "toolkit.telemetry.enabled",
+    "toolkit.telemetry.unified", "toolkit.telemetry.archive.enabled", "datareporting.healthreport.uploadEnabled",
+    "datareporting.policy.dataSubmissionEnabled", "browser.discovery.enabled", "browser.urlbar.suggest.quicksuggest.sponsored",
+    "browser.urlbar.suggest.quicksuggest.nonsponsored")
+_FF_AUTOCONFIG = 'pref("general.config.filename", "optimaxer.cfg");\npref("general.config.obscure_value", 0);\n'
+_FF_CFG = "// Optimaxer: locked Firefox preferences. Undo the tweak in Optimaxer to remove this file.\n" + "".join(
+    f'lockPref("{k}", false);\n' for k in _FF_LOCKED)
 _POLICY_NOTE = " The browser shows 'managed by your organization'; any policy file you already have is saved and restored on undo."
 
 TWEAKS = [
@@ -537,9 +552,11 @@ TWEAKS = [
     Tweak("priv-avahi", "Disable mDNS/Avahi network discovery", "Stops the machine announcing itself on the LAN. Network printer and Chromecast auto-discovery stops working.", "Privacy",
           risk="moderate", tags={"privacy", "max"}, disable=["avahi-daemon.service", "avahi-daemon.socket"], needs=["/usr/lib/systemd/system/avahi-daemon.service"]),
     # ---- browser debloat (managed policies: they apply to every profile and survive browser updates)
-    Tweak("browser-firefox", "Firefox: telemetry, studies, Pocket, sponsored content, AI chat", "Turns off telemetry, Shield studies, Pocket, sponsored tiles and suggestions, first-run pages, the AI chatbot and link previews; enables strict tracking protection. Also hides the new-tab weather, widgets, stories and sponsored tiles. Restart Firefox, then check about:policies." + _POLICY_NOTE,
+    Tweak("browser-firefox", "Firefox: telemetry, studies, Pocket, sponsored content, AI chat", "Turns off telemetry, Shield studies, Pocket, sponsored tiles and suggestions, first-run pages, the AI chatbot and link previews; enables strict tracking protection. Also locks the new-tab weather, widgets, stories and sponsored tiles off through an autoconfig file in /usr/lib/firefox. Close every Firefox window and reopen it; about:policies should list the policies." + _POLICY_NOTE,
           "Browsers", tags={"privacy", "max"}, files={"/usr/lib/firefox/distribution/policies.json": _policy(_FIREFOX, wrap=True),
-                                                  "/etc/firefox/policies/policies.json": _policy(_FIREFOX, wrap=True)}, needs=["firefox"]),
+                                                  "/etc/firefox/policies/policies.json": _policy(_FIREFOX, wrap=True),
+                                                  "/usr/lib/firefox/defaults/pref/optimaxer-autoconfig.js": _FF_AUTOCONFIG,
+                                                  "/usr/lib/firefox/optimaxer.cfg": _FF_CFG}, needs=["firefox"]),
     Tweak("browser-chromium", "Chromium: reporting, ads API, prediction, AI features", "Turns off usage reporting, Privacy Sandbox ad APIs, the spelling web service, search suggestions, network prediction and generative-AI features; WebRTC no longer leaks the local IP." + _POLICY_NOTE,
           "Browsers", tags={"privacy", "max"}, files={"/etc/chromium/policies/managed/optimaxer.json": _policy(_CHROMIUM_PRIVACY)}, needs=["chromium"]),
     Tweak("browser-chrome", "Google Chrome: reporting, ads API, prediction, AI features", "Turns off usage reporting, Privacy Sandbox ad APIs, the spelling web service, search suggestions, network prediction, background mode and Gemini/generative-AI features." + _POLICY_NOTE,
