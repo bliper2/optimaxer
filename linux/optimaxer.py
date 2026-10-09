@@ -19,7 +19,7 @@ import tempfile
 import time
 import urllib.request
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 REPO = "bliper2/optimaxer"
 STATE_FILE = "/var/lib/optimaxer/state.json"
 BACKUP_DIR = "/var/lib/optimaxer/backups"
@@ -35,6 +35,7 @@ class Ctx:
     user = None
     home = None
     quiet = False
+    log_hook = None    # the GUI sets this to receive log lines
 
 
 CTX = Ctx()
@@ -47,7 +48,9 @@ def P(path: str) -> str:
 
 def log(msg: str, level: str = "INFO") -> None:
     line = f"[{time.strftime('%H:%M:%S')}] {level:<5} {msg}"
-    if not CTX.quiet:
+    if CTX.log_hook:
+        CTX.log_hook(line, level)
+    elif not CTX.quiet:
         print(line)
     if not CTX.dry_run and not CTX.root:
         try:
@@ -1328,6 +1331,745 @@ def interactive() -> None:
             sections[int(c) - 1][1]()
 
 
+# ======================================================================================================== graphical interface
+
+LOGO_PNG_B64 = "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"
+
+THEMES = {
+    "Dark":      dict(bg="#1e1f22", panel="#2b2d30", fg="#dfe1e5", dim="#8c909a", accent="#3592c4", sel="#2f65ca", ok="#5fb878", warn="#e0a030", err="#e05d5d"),
+    "Light":     dict(bg="#f2f2f2", panel="#ffffff", fg="#1e1e1e", dim="#666666", accent="#1f6feb", sel="#b8d4f5", ok="#1a7f37", warn="#9a6700", err="#cf222e"),
+    "Manjaro":   dict(bg="#181c1b", panel="#232a28", fg="#e0e6e3", dim="#86908c", accent="#35bf5c", sel="#1f6b3a", ok="#35bf5c", warn="#e0a030", err="#e05d5d"),
+    "Nord":      dict(bg="#2e3440", panel="#3b4252", fg="#eceff4", dim="#9aa5b8", accent="#88c0d0", sel="#4c566a", ok="#a3be8c", warn="#ebcb8b", err="#bf616a"),
+    "Dracula":   dict(bg="#282a36", panel="#343746", fg="#f8f8f2", dim="#8a8fa8", accent="#bd93f9", sel="#44475a", ok="#50fa7b", warn="#f1fa8c", err="#ff5555"),
+    "Gruvbox":   dict(bg="#282828", panel="#3c3836", fg="#ebdbb2", dim="#a89984", accent="#d79921", sel="#504945", ok="#b8bb26", warn="#fabd2f", err="#fb4934"),
+    "Solarized": dict(bg="#002b36", panel="#073642", fg="#93a1a1", dim="#657b83", accent="#268bd2", sel="#0b4a5a", ok="#859900", warn="#b58900", err="#dc322f"),
+}
+
+
+def settings_path() -> str:
+    return os.path.join(P(real_home()), ".config", "optimaxer", "settings.json")
+
+
+def load_settings() -> dict:
+    try:
+        with open(settings_path(), encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(data: dict) -> None:
+    path = settings_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        if hasattr(os, "geteuid") and os.geteuid() == 0 and not CTX.root:   # keep the file owned by the real user
+            import pwd
+            u = pwd.getpwnam(real_user())
+            os.chown(os.path.dirname(path), u.pw_uid, u.pw_gid)
+            os.chown(path, u.pw_uid, u.pw_gid)
+    except (OSError, KeyError, ImportError):
+        pass
+
+
+def config_dict(tweak_ids: list, app_pkgs: list) -> dict:
+    return {"optimaxer": __version__, "tweaks": sorted(tweak_ids), "apps": sorted(app_pkgs)}
+
+
+def apply_config(data: dict) -> bool:
+    """Apply an exported selection: the tweaks first, then the apps. Same result codes as the command line."""
+    ok = True
+    for tid in data.get("tweaks", []):
+        t = tweak_by_id(tid)
+        if not t:
+            log(f"Unknown tweak {tid}", "WARN")
+            ok = False
+        elif not t.apply():
+            ok = False
+    by_pkg = {a["pkg"]: a for a in APPS}
+    for pkg in data.get("apps", []):
+        if not install_app(by_pkg.get(pkg) or {"cat": "", "name": pkg, "src": "P", "pkg": pkg}):
+            ok = False
+    return ok
+
+
+def desktop_entry() -> str:
+    exe = os.path.realpath(sys.argv[0]) if sys.argv and sys.argv[0] else "optimaxer"
+    return ("[Desktop Entry]\nType=Application\nName=Optimaxer\nComment=Tweaks, apps and cleanup for Manjaro / Arch\n"
+            f"Exec={sys.executable} {exe} gui\nIcon=optimaxer\nTerminal=false\nCategories=System;Settings;\n")
+
+
+def create_launcher() -> list:
+    """Write an application-menu entry (and a copy on the Desktop if there is one). Returns the paths written."""
+    import base64
+    home = P(real_home())
+    made = []
+    icon_dir = os.path.join(home, ".local", "share", "icons", "hicolor", "64x64", "apps")
+    os.makedirs(icon_dir, exist_ok=True)
+    with open(os.path.join(icon_dir, "optimaxer.png"), "wb") as fh:
+        fh.write(base64.b64decode(LOGO_PNG_B64))
+    for folder in (os.path.join(home, ".local", "share", "applications"), os.path.join(home, "Desktop")):
+        if folder.endswith("Desktop") and not os.path.isdir(folder):
+            continue
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "optimaxer.desktop")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(desktop_entry())
+        os.chmod(path, 0o755)
+        made.append(path)
+    if hasattr(os, "geteuid") and os.geteuid() == 0 and not CTX.root:
+        try:
+            import pwd
+            u = pwd.getpwnam(real_user())
+            for path in made + [os.path.join(icon_dir, "optimaxer.png")]:
+                os.chown(path, u.pw_uid, u.pw_gid)
+        except (KeyError, ImportError, OSError):
+            pass
+    return made
+
+
+def tk_available() -> bool:
+    try:
+        import tkinter  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+class Gui:
+    """Tk window with the same sections as the menu. Long work runs in a thread; log() lines go to the log pane."""
+
+    SECTIONS = ("Home", "Install", "Tweaks", "Cleaner", "Services", "Startup", "Debloat", "Network", "Tools", "Config", "Appearance")
+
+    def __init__(self, root, sync: bool = False):
+        import queue
+        import threading
+        import tkinter as tk
+        from tkinter import ttk
+        self.tk, self.ttk, self.root, self.sync = tk, ttk, root, sync
+        self._queue, self._threading = queue.Queue(), threading
+        self.busy = False
+        self.settings = load_settings()
+        self.rows = {}                      # page -> backing rows
+        self.lists = {}                     # page -> Checklist
+        self.loaded = set()
+        self.theme_name = self.settings.get("theme", "Dark") if self.settings.get("theme") in THEMES else "Dark"
+        root.title(f"Optimaxer {__version__}")
+        root.geometry("1040x700")
+        root.minsize(820, 560)
+        try:
+            self._icon = tk.PhotoImage(data=LOGO_PNG_B64)
+            root.iconphoto(True, self._icon)
+        except tk.TclError:
+            pass
+        self.style = ttk.Style(root)
+        try:
+            self.style.theme_use("clam")
+        except tk.TclError:
+            pass
+        self._build()
+        self.apply_theme(self.theme_name)
+        CTX.log_hook = lambda line, level: self._queue.put(("log", line, level))
+        CTX.assume_yes = True               # the window asks its own questions
+        root.after(60, self._pump)
+        self.refresh("Home")
+
+    # ---- layout
+    def _build(self):
+        tk, ttk = self.tk, self.ttk
+        top = ttk.Frame(self.root)
+        top.pack(side="top", fill="x")
+        ttk.Label(top, text="Optimaxer", style="Title.TLabel").pack(side="left", padx=(12, 8), pady=8)
+        self.distro_lbl = ttk.Label(top, text=distro().get("PRETTY_NAME", "Linux"), style="Dim.TLabel")
+        self.distro_lbl.pack(side="left")
+        self.dry_var = tk.BooleanVar(value=CTX.dry_run)
+        ttk.Checkbutton(top, text="Dry run (change nothing)", variable=self.dry_var, command=self._dry_toggled).pack(side="right", padx=12)
+
+        self.paned = ttk.PanedWindow(self.root, orient="vertical")
+        self.paned.pack(fill="both", expand=True)
+        self.nb = ttk.Notebook(self.paned)
+        self.paned.add(self.nb, weight=4)
+        self.pages = {}
+        for name in self.SECTIONS:
+            f = ttk.Frame(self.nb, padding=8)
+            self.pages[name] = f
+            self.nb.add(f, text=f"  {name}  ")
+            getattr(self, f"_page_{name.lower()}")(f)
+        self.nb.bind("<<NotebookTabChanged>>", lambda _e: self.refresh(self.current()))
+
+        logf = ttk.Frame(self.paned)
+        self.paned.add(logf, weight=1)
+        self.log_text = tk.Text(logf, height=7, wrap="word", state="disabled", relief="flat", borderwidth=0, font=("monospace", 9))
+        sb = ttk.Scrollbar(logf, command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        self.log_text.pack(side="left", fill="both", expand=True)
+        for lvl in ("OK", "WARN", "ERROR", "DRY"):
+            self.log_text.tag_configure(lvl)
+
+        bar = ttk.Frame(self.root)
+        bar.pack(side="bottom", fill="x")
+        self.status = ttk.Label(bar, text="Ready", style="Dim.TLabel")
+        self.status.pack(side="left", padx=12, pady=4)
+        self.progress = ttk.Progressbar(bar, mode="indeterminate", length=160)
+        self.progress.pack(side="right", padx=12)
+
+    def current(self) -> str:
+        return self.SECTIONS[self.nb.index(self.nb.select())]
+
+    # ---- theme
+    def apply_theme(self, name: str):
+        c = THEMES[name]
+        self.theme_name, self.colors = name, c
+        s = self.style
+        self.root.configure(background=c["bg"])
+        s.configure(".", background=c["bg"], foreground=c["fg"], fieldbackground=c["panel"], bordercolor=c["panel"], lightcolor=c["panel"],
+                    darkcolor=c["panel"], troughcolor=c["panel"], focuscolor=c["accent"], font=("sans-serif", 10))
+        s.configure("TLabel", background=c["bg"], foreground=c["fg"])
+        s.configure("Title.TLabel", font=("sans-serif", 15, "bold"), foreground=c["accent"])
+        s.configure("Dim.TLabel", foreground=c["dim"])
+        s.configure("TButton", background=c["panel"], foreground=c["fg"], padding=(10, 5), borderwidth=1)
+        s.map("TButton", background=[("active", c["sel"]), ("disabled", c["bg"])], foreground=[("disabled", c["dim"])])
+        s.configure("Accent.TButton", background=c["accent"], foreground="#ffffff" if name != "Light" else "#ffffff")
+        s.map("Accent.TButton", background=[("active", c["sel"]), ("disabled", c["bg"])])
+        s.configure("TCheckbutton", background=c["bg"], foreground=c["fg"])
+        s.map("TCheckbutton", background=[("active", c["bg"])])
+        s.configure("TNotebook", background=c["bg"], borderwidth=0)
+        s.configure("TNotebook.Tab", background=c["panel"], foreground=c["dim"], padding=(6, 4))
+        s.map("TNotebook.Tab", background=[("selected", c["bg"])], foreground=[("selected", c["accent"])])
+        s.configure("Treeview", background=c["panel"], foreground=c["fg"], fieldbackground=c["panel"], rowheight=24, borderwidth=0)
+        s.map("Treeview", background=[("selected", c["sel"])], foreground=[("selected", c["fg"])])
+        s.configure("Treeview.Heading", background=c["bg"], foreground=c["dim"], relief="flat")
+        s.configure("TEntry", fieldbackground=c["panel"], foreground=c["fg"])
+        s.configure("TCombobox", fieldbackground=c["panel"], foreground=c["fg"], background=c["panel"], arrowcolor=c["fg"])
+        s.map("TCombobox", fieldbackground=[("readonly", c["panel"])], foreground=[("readonly", c["fg"])],
+              selectbackground=[("readonly", c["panel"])], selectforeground=[("readonly", c["fg"])])
+        self.root.option_add("*TCombobox*Listbox.background", c["panel"])
+        self.root.option_add("*TCombobox*Listbox.foreground", c["fg"])
+        self.root.option_add("*TCombobox*Listbox.selectBackground", c["sel"])
+        s.configure("TProgressbar", background=c["accent"], troughcolor=c["panel"])
+        s.configure("TPanedwindow", background=c["bg"])
+        s.configure("TFrame", background=c["bg"])
+        s.configure("TScrollbar", background=c["panel"], arrowcolor=c["dim"])
+        self.log_text.configure(background=c["panel"], foreground=c["fg"], insertbackground=c["fg"])
+        for lvl, key in (("OK", "ok"), ("WARN", "warn"), ("ERROR", "err"), ("DRY", "dim")):
+            self.log_text.tag_configure(lvl, foreground=c[key])
+
+    # ---- background work
+    def _pump(self):
+        try:
+            while True:
+                item = self._queue.get_nowait()
+                if item[0] == "log":
+                    self._append_log(item[1], item[2])
+                elif item[0] == "call":
+                    item[1]()
+        except Exception:      # queue.Empty
+            pass
+        try:
+            self.root.after(60, self._pump)
+        except self.tk.TclError:
+            pass
+
+    def drain(self):
+        """Run everything queued so far (used by tests and sync mode)."""
+        import queue
+        while True:
+            try:
+                item = self._queue.get_nowait()
+            except queue.Empty:
+                return
+            if item[0] == "log":
+                self._append_log(item[1], item[2])
+            else:
+                item[1]()
+
+    def _append_log(self, line, level):
+        t = self.log_text
+        t.configure(state="normal")
+        t.insert("end", line + "\n", level if level in ("OK", "WARN", "ERROR", "DRY") else ())
+        t.see("end")
+        t.configure(state="disabled")
+
+    def work(self, label, fn, done=None):
+        """Run fn off the UI thread. done(result) runs back on the UI thread."""
+        if self.busy:
+            self.say("Another task is still running.")
+            return
+        self.busy = True
+        self.status.configure(text=label + "...")
+        self.progress.start(12)
+
+        def finish(result, err):
+            self.busy = False
+            self.progress.stop()
+            self.status.configure(text="Ready" if not err else f"Failed: {err}")
+            if err:
+                log(f"{label}: {err}", "ERROR")
+            elif done:
+                done(result)
+
+        def body():
+            res, err = None, None
+            try:
+                res = fn()
+            except Exception as exc:      # keep the window alive; the cause goes to the log pane
+                err = f"{type(exc).__name__}: {exc}"
+            self._queue.put(("call", lambda: finish(res, err)))
+
+        if self.sync:
+            body()
+            self.drain()
+        else:
+            self._threading.Thread(target=body, daemon=True).start()
+
+    def say(self, text):
+        self.status.configure(text=text)
+        log(text, "INFO")
+
+    def ask_yes(self, question) -> bool:
+        if self.sync:
+            return True
+        from tkinter import messagebox
+        return messagebox.askyesno("Optimaxer", question, parent=self.root)
+
+    def _dry_toggled(self):
+        CTX.dry_run = bool(self.dry_var.get())
+        self.say("Dry run on: commands are shown, nothing changes." if CTX.dry_run else "Dry run off: changes are real.")
+
+    # ---- checklist widget
+    def checklist(self, parent, key, columns, with_filter=True, checks=True):
+        """Treeview with a check column, filter box and select all/none. Rows are set with self.fill(key, rows)."""
+        tk, ttk = self.tk, self.ttk
+        frame = ttk.Frame(parent)
+        bar = ttk.Frame(frame)
+        bar.pack(fill="x", pady=(0, 4))
+        fv = tk.StringVar()
+        if with_filter:
+            ttk.Label(bar, text="Filter").pack(side="left")
+            e = ttk.Entry(bar, textvariable=fv, width=26)
+            e.pack(side="left", padx=6)
+        cols = (["chk"] if checks else []) + [c[0] for c in columns]
+        tree = ttk.Treeview(frame, columns=cols, show="headings", selectmode="browse" if not checks else "extended")
+        if checks:
+            tree.heading("chk", text="")
+            tree.column("chk", width=34, stretch=False, anchor="center")
+        for cid, head, width in columns:
+            tree.heading(cid, text=head)
+            tree.column(cid, width=width, anchor="w", stretch=(cid == columns[-1][0]))
+        vs = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vs.set)
+        info = {"frame": frame, "tree": tree, "cols": cols, "filter": fv, "checked": set(), "data": [], "checks": checks, "bar": bar, "iids": {}}
+        if checks:
+            ttk.Button(bar, text="Select all", command=lambda: self.check_all(key, True)).pack(side="right")
+            ttk.Button(bar, text="Select none", command=lambda: self.check_all(key, False)).pack(side="right", padx=6)
+            tree.bind("<Button-1>", lambda ev: self._click(key, ev))
+            tree.bind("<space>", lambda ev: self._space(key))
+        fv.trace_add("write", lambda *_: self.render(key))
+        vs.pack(side="right", fill="y")
+        tree.pack(side="left", fill="both", expand=True)
+        self.lists[key] = info
+        return frame
+
+    def fill(self, key, data, keep=True):
+        """data: list of (id, tuple_of_values, tag). Keeps the ticks of rows that still exist."""
+        info = self.lists[key]
+        ids = {d[0] for d in data}
+        info["checked"] = (info["checked"] & ids) if keep else set()
+        info["data"] = data
+        self.render(key)
+
+    def render(self, key):
+        info = self.lists[key]
+        tree, flt = info["tree"], info["filter"].get().strip().lower()
+        tree.delete(*tree.get_children())
+        info["iids"] = {}
+        for rid, vals, tag in info["data"]:
+            if flt and flt not in " ".join(str(v) for v in vals).lower():
+                continue
+            row = ((("☑" if rid in info["checked"] else "☐"),) if info["checks"] else ()) + tuple(vals)
+            iid = tree.insert("", "end", values=row, tags=(tag,) if tag else ())
+            info["iids"][iid] = rid
+        c = getattr(self, "colors", THEMES["Dark"])
+        tree.tag_configure("on", foreground=c["ok"])
+        tree.tag_configure("warn", foreground=c["warn"])
+        tree.tag_configure("dim", foreground=c["dim"])
+
+    def _toggle(self, key, rid):
+        info = self.lists[key]
+        info["checked"] ^= {rid}
+        for iid, r in info["iids"].items():
+            if r == rid:
+                info["tree"].set(iid, "chk", "☑" if rid in info["checked"] else "☐")
+
+    def _click(self, key, ev):
+        tree = self.lists[key]["tree"]
+        if tree.identify_region(ev.x, ev.y) == "cell" and tree.identify_column(ev.x) == "#1":
+            iid = tree.identify_row(ev.y)
+            if iid:
+                self._toggle(key, self.lists[key]["iids"][iid])
+                return "break"
+
+    def _space(self, key):
+        info = self.lists[key]
+        for iid in info["tree"].selection():
+            self._toggle(key, info["iids"][iid])
+        return "break"
+
+    def check_all(self, key, on):
+        info = self.lists[key]
+        shown = set(info["iids"].values())
+        info["checked"] = (info["checked"] | shown) if on else (info["checked"] - shown)
+        self.render(key)
+
+    def ticked(self, key) -> list:
+        info = self.lists[key]
+        return [d[0] for d in info["data"] if d[0] in info["checked"]]
+
+    def tick(self, key, ids):
+        info = self.lists[key]
+        info["checked"] = {i for i in ids if any(d[0] == i for d in info["data"])}
+        self.render(key)
+
+    # ---- pages
+    def _buttons(self, parent, specs):
+        ttk = self.ttk
+        bar = ttk.Frame(parent)
+        bar.pack(fill="x", pady=(6, 0))
+        for text, cmd, accent in specs:
+            ttk.Button(bar, text=text, command=cmd, style="Accent.TButton" if accent else "TButton").pack(side="left", padx=(0, 6))
+        return bar
+
+    def _page_home(self, f):
+        ttk = self.ttk
+        ttk.Label(f, text="This system", style="Title.TLabel").pack(anchor="w")
+        self.summary = ttk.Label(f, text="", style="Dim.TLabel", justify="left")
+        self.summary.pack(anchor="w", pady=(2, 8))
+        self.checklist(f, "home", [("k", "Item", 160), ("v", "Value", 600)], with_filter=False, checks=False).pack(fill="both", expand=True)
+        self._buttons(f, [("Apply the Safe preset", lambda: self.run_tweaks(preset_ids("safe"), True), True),
+                          ("Update the system", lambda: self.work("Updating the system", tool_update_system, lambda _r: self.refresh("Home")), False),
+                          ("Undo everything", self.undo_everything, False)])
+
+    def _page_install(self, f):
+        self.checklist(f, "apps", [("name", "App", 220), ("cat", "Category", 120), ("src", "Source", 70), ("pkg", "Package", 190), ("st", "Status", 90)]).pack(fill="both", expand=True)
+        self._buttons(f, [("Install selected", lambda: self.run_apps(True), True), ("Remove selected", lambda: self.run_apps(False), False),
+                          ("Upgrade everything", lambda: self.work("Updating the system", tool_update_system), False), ("Refresh", lambda: self.refresh("Install", True), False)])
+
+    def _page_tweaks(self, f):
+        ttk, tk = self.ttk, self.tk
+        bar = ttk.Frame(f)
+        bar.pack(fill="x", pady=(0, 6))
+        ttk.Label(bar, text="Preset").pack(side="left")
+        self.preset_var = tk.StringVar(value=PRESETS[0])
+        ttk.Combobox(bar, textvariable=self.preset_var, values=list(PRESETS), state="readonly", width=10).pack(side="left", padx=6)
+        ttk.Button(bar, text="Select preset", command=self.select_preset).pack(side="left")
+        self.checklist(f, "tweaks", [("name", "Tweak", 300), ("cat", "Category", 110), ("risk", "Risk", 70), ("st", "Status", 80), ("desc", "What it does", 500)]).pack(fill="both", expand=True)
+        self.tweak_info = ttk.Label(f, text="", style="Dim.TLabel", wraplength=900, justify="left")
+        self.tweak_info.pack(anchor="w", pady=(4, 0))
+        self.lists["tweaks"]["tree"].bind("<<TreeviewSelect>>", self._tweak_selected)
+        self._buttons(f, [("Apply selected", lambda: self.run_tweaks(self.ticked("tweaks"), True), True), ("Undo selected", lambda: self.run_tweaks(self.ticked("tweaks"), False), False),
+                          ("Refresh", lambda: self.refresh("Tweaks", True), False)])
+
+    def _page_cleaner(self, f):
+        ttk = self.ttk
+        self.clean_total = ttk.Label(f, text="", style="Dim.TLabel")
+        self.clean_total.pack(anchor="w")
+        self.checklist(f, "clean", [("name", "Item", 360), ("risk", "Risk", 80), ("size", "Size", 110)], with_filter=False).pack(fill="both", expand=True)
+        self._buttons(f, [("Clean selected", self.run_clean, True), ("Scan again", lambda: self.refresh("Cleaner", True), False)])
+
+    def _page_services(self, f):
+        self.checklist(f, "services", [("unit", "Service", 240), ("st", "State", 80), ("run", "Running", 80), ("note", "Notes", 520)]).pack(fill="both", expand=True)
+        self._buttons(f, [("Disable selected", lambda: self.run_services("disable"), True), ("Enable selected", lambda: self.run_services("enable"), False),
+                          ("Restore saved state", lambda: self.run_services("restore"), False)])
+
+    def _page_startup(self, f):
+        self.checklist(f, "startup", [("name", "Entry", 240), ("scope", "Scope", 70), ("st", "State", 80), ("exec", "Command", 520)]).pack(fill="both", expand=True)
+        self._buttons(f, [("Disable selected", lambda: self.run_startup(False), True), ("Enable selected", lambda: self.run_startup(True), False)])
+
+    def _page_debloat(self, f):
+        ttk = self.ttk
+        ttk.Label(f, text="Optional packages you may not need. Nothing is selected for you.", style="Dim.TLabel").pack(anchor="w")
+        self.checklist(f, "debloat", [("label", "Package", 300), ("pkg", "Name", 180), ("size", "Size", 100)], with_filter=False).pack(fill="both", expand=True)
+        self._buttons(f, [("Remove selected", self.run_debloat, True)])
+
+    def _page_network(self, f):
+        ttk = self.ttk
+        ttk.Label(f, text="DNS provider. Applies to the active NetworkManager connections; Restore returns to the saved settings.", style="Dim.TLabel").pack(anchor="w")
+        self.checklist(f, "dns", [("name", "Provider", 220), ("addr", "Servers", 480)], with_filter=False, checks=False).pack(fill="both", expand=True)
+        self._buttons(f, [("Use selected provider", self.run_dns, True), ("Restore previous DNS", lambda: self.work("Restoring DNS", restore_dns), False)])
+
+    def _page_tools(self, f):
+        ttk = self.ttk
+        ttk.Label(f, text="Results appear in the log pane below.", style="Dim.TLabel").pack(anchor="w", pady=(0, 6))
+
+        def show(lines):
+            for l in lines:
+                log(l, "INFO")
+        tools = [("System information", lambda: self.work("System information", sysinfo, lambda r: show(f"{k:<10} {v}" for k, v in r))),
+                 ("Update the system (pacman -Syu)", lambda: self.work("Updating the system", tool_update_system)),
+                 ("Rank mirrors (Manjaro fasttrack)", lambda: self.work("Ranking mirrors", tool_rank_mirrors)),
+                 ("Show failed systemd units", lambda: self.work("Checking units", tool_failed_units, lambda r: show(r or ["No failed units."]))),
+                 ("Find .pacnew / .pacsave files", lambda: self.work("Searching", tool_pacnew, lambda r: show(r or ["None found."]))),
+                 ("Disk health (SMART)", lambda: self.work("Reading SMART data", tool_smart, lambda r: show(r))),
+                 ("Check for an Optimaxer update", lambda: self.work("Checking for updates", self_update))]
+        for text, cmd in tools:
+            ttk.Button(f, text=text, command=cmd, width=36).pack(anchor="w", pady=2)
+
+    def _page_config(self, f):
+        ttk = self.ttk
+        ttk.Label(f, text="Export the tweaks and apps you ticked, load them on another machine, or add Optimaxer to the application menu.", style="Dim.TLabel",
+                  wraplength=900, justify="left").pack(anchor="w", pady=(0, 8))
+        for text, cmd in (("Export ticked tweaks and apps...", self.export_config), ("Import a saved selection...", self.import_config),
+                          ("Create application menu / desktop launcher", self.make_launcher)):
+            ttk.Button(f, text=text, command=cmd, width=40).pack(anchor="w", pady=3)
+        ttk.Label(f, text="Unattended: optimaxer tweaks apply --preset safe     optimaxer config apply my-setup.json", style="Dim.TLabel").pack(anchor="w", pady=(14, 0))
+
+    def _page_appearance(self, f):
+        ttk, tk = self.ttk, self.tk
+        ttk.Label(f, text="Theme").pack(anchor="w")
+        self.theme_var = tk.StringVar(value=self.theme_name)
+        cb = ttk.Combobox(f, textvariable=self.theme_var, values=list(THEMES), state="readonly", width=18)
+        cb.pack(anchor="w", pady=6)
+        cb.bind("<<ComboboxSelected>>", lambda _e: self.set_theme(self.theme_var.get()))
+        ttk.Label(f, text=f"Optimaxer {__version__}  -  github.com/bliper2/optimaxer  -  MIT license", style="Dim.TLabel").pack(anchor="w", pady=(16, 0))
+
+    def set_theme(self, name):
+        if name in THEMES:
+            self.apply_theme(name)
+            self.settings["theme"] = name
+            save_settings(self.settings)
+            for k in self.lists:
+                self.render(k)
+
+    # ---- loading
+    def refresh(self, page, force=False):
+        if page in self.loaded and not force:
+            return
+        loader = {"Home": self.load_home, "Install": self.load_apps, "Tweaks": self.load_tweaks, "Cleaner": self.load_clean, "Services": self.load_services,
+                  "Startup": self.load_startup, "Debloat": self.load_debloat, "Network": self.load_dns}.get(page)
+        if not loader:
+            return
+        self.loaded.add(page)
+        compute, show = loader()
+        self.work(f"Reading {page.lower()}", compute, show)
+
+    def reload(self, *pages):
+        for p in pages:
+            self.loaded.discard(p)
+        self.refresh(self.current())
+
+    def load_home(self):
+        def compute():
+            state = load_state()
+            return sysinfo(), len([k for k in state if tweak_by_id(k)]), len([t for t in TWEAKS if t.available()]), tool_failed_units()
+
+        def show(r):
+            info, applied, total, failed = r
+            self.fill("home", [(k, (k, v), None) for k, v in info], keep=False)
+            self.summary.configure(text=f"{applied} of {total} tweaks applied    {len(failed)} failed systemd unit(s)")
+        return compute, show
+
+    def load_apps(self):
+        src = {"P": "Repo", "A": "AUR", "F": "Flatpak"}
+        return (lambda: {a["pkg"]: app_installed(a) for a in APPS},
+                lambda r: self.fill("apps", [(a["pkg"], (a["name"], a["cat"], src.get(a["src"], a["src"]), a["pkg"], "Installed" if r[a["pkg"]] else ""), "on" if r[a["pkg"]] else None)
+                                             for a in APPS]))
+
+    def load_tweaks(self):
+        def compute():
+            rows = [t for t in TWEAKS if t.available()]
+            return [(t, t.is_applied()) for t in rows]
+        return compute, lambda r: self.fill("tweaks", [(t.id, (t.name, t.cat, t.risk, "Applied" if ap else "", t.desc), "on" if ap else ("warn" if t.risk != "safe" else None)) for t, ap in r])
+
+    def load_clean(self):
+        def show(r):
+            self.fill("clean", [(t["id"], (t["name"], t["risk"], "on demand" if r[t["id"]] < 0 else fmt_size(r[t["id"]])), None) for t in CLEAN_TARGETS], keep=False)
+            self.clean_total.configure(text=f"Reclaimable: {fmt_size(sum(v for v in r.values() if v > 0))}")
+        return (lambda: {t["id"]: target_size(t) for t in CLEAN_TARGETS}), show
+
+    def load_services(self):
+        return service_rows, lambda r: self.fill("services", [(x["unit"], (x["unit"], "enabled" if x["enabled"] else "disabled", "yes" if x["active"] else "", f"{x['label']}: {x['hint']}"), None) for x in r])
+
+    def load_startup(self):
+        def show(r):
+            self.rows["startup"] = {f"{x['scope']}:{x['name']}": x for x in r}
+            self.fill("startup", [(f"{x['scope']}:{x['name']}", (x["name"], x["scope"], "enabled" if x["enabled"] else "disabled", x["exec"]), None if x["enabled"] else "dim") for x in r])
+        return autostart_items, show
+
+    def load_debloat(self):
+        return installed_debloat, lambda r: self.fill("debloat", [(x["pkg"], (x["label"], x["pkg"], fmt_size(x["size"])), None) for x in r])
+
+    def load_dns(self):
+        def show(_r):
+            self.fill("dns", [(k, (DNS[k][0], ", ".join(DNS[k][1]) or "router default"), None) for k in DNS], keep=False)
+        return (lambda: None), show
+
+    # ---- actions
+    def select_preset(self):
+        self.tick("tweaks", preset_ids(self.preset_var.get()))
+        self.say(f"Preset '{self.preset_var.get()}' selects {len(self.ticked('tweaks'))} tweaks. Press Apply selected to run them.")
+
+    def _tweak_selected(self, _e):
+        info = self.lists["tweaks"]
+        sel = info["tree"].selection()
+        t = tweak_by_id(info["iids"].get(sel[0])) if sel else None
+        self.tweak_info.configure(text=f"{t.name} [{t.risk}]: {t.desc}" if t else "")
+
+    def run_tweaks(self, ids, apply):
+        if not ids:
+            return self.say("Nothing selected.")
+        if not self.ask_yes(f"{'Apply' if apply else 'Undo'} {len(ids)} tweak(s)?"):
+            return
+
+        def go():
+            res = [(tweak_by_id(i).apply() if apply else tweak_by_id(i).undo()) for i in ids if tweak_by_id(i)]
+            log(f"{'Applied' if apply else 'Undone'}: {sum(res)} ok, {len(res) - sum(res)} failed", "OK" if all(res) else "WARN")
+        self.work("Applying tweaks" if apply else "Undoing tweaks", go, lambda _r: self.reload("Tweaks", "Home"))
+
+    def run_apps(self, install):
+        by = {a["pkg"]: a for a in APPS}
+        chosen = [by[i] for i in self.ticked("apps")]
+        if not chosen:
+            return self.say("Nothing selected.")
+        if not self.ask_yes(f"{'Install' if install else 'Remove'} {len(chosen)} app(s)?"):
+            return
+
+        def go():
+            res = [install_app(a) if install else remove_app(a) for a in chosen]
+            log(f"{'Install' if install else 'Remove'} finished: {sum(res)} ok, {len(res) - sum(res)} failed", "OK" if all(res) else "WARN")
+        self.work("Installing" if install else "Removing", go, lambda _r: self.reload("Install"))
+
+    def run_clean(self):
+        ids = self.ticked("clean")
+        if not ids:
+            return self.say("Nothing selected.")
+        if not self.ask_yes(f"Clean {len(ids)} item(s)? This cannot be undone."):
+            return
+        by = {t["id"]: t for t in CLEAN_TARGETS}
+
+        def go():
+            log(f"Total freed: {fmt_size(sum(clean_target(by[i]) for i in ids))}", "OK")
+        self.work("Cleaning", go, lambda _r: self.reload("Cleaner"))
+
+    def run_services(self, what):
+        units = self.ticked("services")
+        if not units:
+            return self.say("Nothing selected.")
+        if not self.ask_yes(f"{what.capitalize()} {len(units)} service(s)?"):
+            return
+
+        def go():
+            for u in units:
+                {"enable": lambda: set_service(u, True), "disable": lambda: set_service(u, False), "restore": lambda: restore_service(u)}[what]()
+        self.work("Changing services", go, lambda _r: self.reload("Services"))
+
+    def run_startup(self, enable):
+        keys = self.ticked("startup")
+        if not keys:
+            return self.say("Nothing selected.")
+
+        def go():
+            for k in keys:
+                set_autostart(self.rows["startup"][k], enable)
+        self.work("Changing startup entries", go, lambda _r: self.reload("Startup"))
+
+    def run_debloat(self):
+        pkgs = self.ticked("debloat")
+        if not pkgs:
+            return self.say("Nothing selected.")
+        if not self.ask_yes(f"Remove {len(pkgs)} package(s) with pacman -Rns?"):
+            return
+
+        def go():
+            for p in pkgs:
+                ok = run(["pacman", "-Rns", "--noconfirm", p], write=True)[0] == 0
+                log(f"{p}: {'removed' if ok else 'not removed (other packages depend on it?)'}", "OK" if ok else "WARN")
+        self.work("Removing packages", go, lambda _r: self.reload("Debloat"))
+
+    def run_dns(self):
+        info = self.lists["dns"]
+        sel = info["tree"].selection()
+        if not sel:
+            return self.say("Pick a provider first.")
+        key = info["iids"][sel[0]]
+        self.work("Setting DNS", lambda: set_dns(key))
+
+    def undo_everything(self):
+        if self.ask_yes("Undo every tweak, service change and DNS change Optimaxer made?"):
+            self.work("Undoing everything", undo_all, lambda _r: self.reload("Tweaks", "Services", "Home"))
+
+    def export_config(self):
+        data = config_dict(self.ticked("tweaks"), self.ticked("apps"))
+        if self.sync:
+            path = self.settings.get("_test_path")
+        else:
+            from tkinter import filedialog
+            path = filedialog.asksaveasfilename(parent=self.root, defaultextension=".json", initialfile="optimaxer-setup.json", filetypes=[("JSON", "*.json")])
+        if path:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, indent=2)
+            self.say(f"Saved {len(data['tweaks'])} tweaks and {len(data['apps'])} apps to {path}")
+
+    def import_config(self):
+        if self.sync:
+            path = self.settings.get("_test_path")
+        else:
+            from tkinter import filedialog
+            path = filedialog.askopenfilename(parent=self.root, filetypes=[("JSON", "*.json")])
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError) as exc:
+            return self.say(f"Could not read that file: {exc}")
+        self.refresh("Tweaks")
+        self.refresh("Install")
+        self.tick("tweaks", data.get("tweaks", []))
+        self.tick("apps", data.get("apps", []))
+        self.say(f"Selected {len(self.ticked('tweaks'))} tweaks and {len(self.ticked('apps'))} apps. Review them in the Tweaks and Install tabs, then apply.")
+
+    def make_launcher(self):
+        try:
+            made = create_launcher()
+        except OSError as exc:
+            return self.say(f"Could not create the launcher: {exc}")
+        self.say("Launcher created: " + ", ".join(made))
+
+
+def run_gui() -> int:
+    if not tk_available():
+        print("The graphical interface needs Tk. Install it with:  sudo pacman -S tk", file=sys.stderr)
+        return 2
+    import tkinter as tk
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        print(f"No display available ({exc}). Use the text menu: optimaxer", file=sys.stderr)
+        return 2
+    CTX.quiet = True
+    Gui(root)
+    root.mainloop()
+    return 0
+
+
+def ensure_root_gui(argv: list) -> None:
+    """A window must be opened as the user, then elevated with the display variables kept. pkexec drops them, so pass them back."""
+    if CTX.root or CTX.dry_run or not hasattr(os, "geteuid") or os.geteuid() == 0:
+        return
+    keep = [f"{k}={os.environ[k]}" for k in ("DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS") if os.environ.get(k)]
+    keep.append("SUDO_USER=" + (os.environ.get("USER") or "root"))
+    script = os.path.realpath(sys.argv[0])
+    if have("pkexec"):
+        print("Optimaxer needs administrator rights; asking for your password...")
+        os.execvp("pkexec", ["pkexec", "env"] + keep + [sys.executable, script] + argv)
+    if have("sudo"):
+        os.execvp("sudo", ["sudo", "-E", "env"] + keep + [sys.executable, script] + argv)
+    sys.exit("Optimaxer needs root: install polkit (pkexec) or sudo, or tick Dry run by starting with --dry-run.")
+
+
 # ======================================================================================================== command line
 
 def ensure_root(argv: list) -> None:
@@ -1361,6 +2103,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("debloat", help="list removable optional packages")
     d = sub.add_parser("dns", help="set DNS provider")
     d.add_argument("provider", choices=list(DNS) + ["restore"])
+    cf = sub.add_parser("config", help="apply a saved selection (exported from the GUI)")
+    cf.add_argument("action", choices=["apply"])
+    cf.add_argument("file")
+    sub.add_parser("launcher", help="add Optimaxer to the application menu (and Desktop)")
+    sub.add_parser("gui", help="open the graphical interface (needs Tk: sudo pacman -S tk)")
     sub.add_parser("update", help="update Optimaxer itself")
     sub.add_parser("info", help="system information")
     return p
@@ -1373,12 +2120,29 @@ def main(argv: list | None = None) -> int:
     if not is_arch_family() and not CTX.runner:
         print("This edition targets Manjaro and other Arch-based distributions (pacman).", file=sys.stderr)
         return 2
-    mutating = args.cmd in ("tweaks", "apps", "clean", "dns", None) and not (
+    mutating = args.cmd in ("tweaks", "apps", "clean", "dns", "config", None) and not (
         (args.cmd == "tweaks" and args.action == "list") or (args.cmd == "apps" and args.action == "list") or (args.cmd == "clean" and args.action == "scan"))
-    if mutating:
+    if args.cmd == "gui":
+        if not tk_available() and not CTX.dry_run and hasattr(os, "geteuid") and os.geteuid() != 0 and have("pkexec"):
+            print("Tk is missing. Install it with:  sudo pacman -S tk", file=sys.stderr)
+            return 2
+        ensure_root_gui(argv)
+    elif mutating:
         ensure_root(argv)
     rc = 0
-    if args.cmd is None:
+    if args.cmd == "gui":
+        rc = run_gui()
+    elif args.cmd == "launcher":
+        for path in create_launcher():
+            print("Created", path)
+    elif args.cmd == "config":
+        try:
+            with open(args.file, encoding="utf-8") as fh:
+                rc = 0 if apply_config(json.load(fh)) else 1
+        except (OSError, ValueError) as exc:
+            print(f"Cannot read {args.file}: {exc}", file=sys.stderr)
+            rc = 2
+    elif args.cmd is None:
         interactive()
     elif args.cmd == "info":
         for k, v in sysinfo():

@@ -33,15 +33,18 @@ A separate, dependency-free Python edition lives in [`linux/`](linux/optimaxer.p
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bliper2/optimaxer/main/linux/install.sh | bash
-optimaxer --dry-run     # explore the menu, nothing is changed
-optimaxer               # real run (asks for sudo)
+optimaxer gui           # graphical window (needs Tk: sudo pacman -S tk); asks for your password
+optimaxer --dry-run     # text menu, nothing is changed
+optimaxer               # text menu, real run (asks for sudo)
 ```
 
-Menu sections: **Install apps** (96 apps from the official repos, the AUR through yay/paru, and Flatpak, each verified after install), **Tweaks** with presets and undo (zram, memory/swappiness, TRIM, I/O scheduler, journal limit, fast shutdown, earlyoom, BBR, pacman parallel downloads, paccache, hardening sysctls, optional ufw firewall...), **Cleaner** (pacman cache, orphans, journal, caches of browsers/pip/npm/Go/Cargo, Trash, unused Flatpak runtimes), **Services**, **Startup** (autostart entries), **Debloat packages**, **Network/DNS** (NetworkManager) and **Tools** (system info, update, Manjaro mirror ranking, failed units, .pacnew files, SMART health).
+The window (tkinter, no extra Python packages) has the same tabs as the Windows app: Home, Install, Tweaks with presets, Cleaner, Services, Startup, Debloat, Network, Tools, Config (export/import a selection, add an application-menu launcher) and Appearance (7 themes), plus a Dry run switch and a live log. `install.sh` adds Optimaxer to your application menu.
 
-Non-interactive: `optimaxer tweaks list | apply --preset safe | undo --all`, `optimaxer apps install firefox brave-bin`, `optimaxer clean scan | run`, `optimaxer dns cloudflare | restore`, `optimaxer update`. Add `--dry-run` to see every command and file change first, `-y` to skip confirmations.
+Sections: **Install apps** (96 apps from the official repos, the AUR through yay/paru, and Flatpak, each verified after install), **Tweaks** with presets and undo (zram, memory/swappiness, TRIM, I/O scheduler, journal limit, fast shutdown, earlyoom, BBR, pacman parallel downloads, paccache, hardening sysctls, optional ufw firewall...), **Cleaner** (pacman cache, orphans, journal, caches of browsers/pip/npm/Go/Cargo, Trash, unused Flatpak runtimes), **Services**, **Startup** (autostart entries), **Debloat packages**, **Network/DNS** (NetworkManager) and **Tools** (system info, update, Manjaro mirror ranking, failed units, .pacnew files, SMART health).
 
-Safety: every change records the original state in `/var/lib/optimaxer/state.json` (files, config lines, service states, DNS), so `tweaks undo` restores it; edited config files are also copied to `/var/lib/optimaxer/backups`. Package installs by a tweak are kept on undo. Tested here with a simulated system (36 automated tests, `python -m unittest discover -s linux/tests`); I could not run it on a real Manjaro install, so start with `--dry-run`.
+Non-interactive: `optimaxer tweaks list | apply --preset safe | undo --all`, `optimaxer apps install firefox brave-bin`, `optimaxer clean scan | run`, `optimaxer dns cloudflare | restore`, `optimaxer config apply my-setup.json`, `optimaxer launcher`, `optimaxer update`. Add `--dry-run` to see every command and file change first, `-y` to skip confirmations.
+
+Safety: every change records the original state in `/var/lib/optimaxer/state.json` (files, config lines, service states, DNS), so `tweaks undo` restores it; edited config files are also copied to `/var/lib/optimaxer/backups`. Package installs by a tweak are kept on undo. Tested here with a simulated system (43 automated tests, including the window, `python -m unittest discover -s linux/tests`); I could not run it on a real Manjaro install, so start with `--dry-run`.
 
 ## Run unattended
 ```powershell

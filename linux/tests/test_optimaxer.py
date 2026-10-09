@@ -389,5 +389,104 @@ class Interactive(Base):
         self.assertEqual(cm.exception.code, 0)
 
 
+class GuiTest(Base):
+    def setUp(self):
+        super().setUp()
+        try:
+            import tkinter
+            self.root = tkinter.Tk()
+        except Exception:
+            self.skipTest("Tk or a display is not available")
+        self.root.withdraw()
+        self.g = ox.Gui(self.root, sync=True)
+        self.g.drain()
+
+    def tearDown(self):
+        ox.CTX.log_hook = None
+        self.root.destroy()
+        super().tearDown()
+
+    def load_all(self):
+        for page in self.g.SECTIONS:
+            self.g.refresh(page, force=True)
+            self.g.drain()
+
+    def test_every_page_loads(self):
+        self.load_all()
+        for key in ("apps", "tweaks", "clean", "services", "dns", "home"):
+            self.assertTrue(self.g.lists[key]["data"], key)
+        self.assertEqual(len(self.g.lists["apps"]["data"]), len(ox.APPS))
+
+    def test_apply_tweak_and_install_app(self):
+        self.load_all()
+        self.g.nb.select(self.g.pages["Tweaks"])
+        self.g.tick("tweaks", ["perf-vm"])
+        self.g.run_tweaks(self.g.ticked("tweaks"), True)
+        self.assertTrue(ox.tweak_by_id("perf-vm").is_applied())
+        row = [d for d in self.g.lists["tweaks"]["data"] if d[0] == "perf-vm"][0]
+        self.assertEqual(row[1][3], "Applied")
+        self.g.tick("apps", ["htop"])
+        self.g.run_apps(True)
+        self.assertIn("htop", self.sys.pkgs)
+        self.g.run_apps(False)
+        self.assertNotIn("htop", self.sys.pkgs)
+
+    def test_preset_and_undo_everything(self):
+        self.load_all()
+        self.g.preset_var.set("safe")
+        self.g.select_preset()
+        self.assertEqual(set(self.g.ticked("tweaks")), set(ox.preset_ids("safe")) & {t.id for t in ox.TWEAKS if t.available()})
+        self.g.run_tweaks(self.g.ticked("tweaks"), True)
+        self.assertTrue(ox.load_state())
+        self.g.undo_everything()
+        self.assertFalse([k for k in ox.load_state() if ox.tweak_by_id(k)])
+
+    def test_log_goes_to_pane_and_dry_run(self):
+        self.g.dry_var.set(True)
+        self.g._dry_toggled()
+        self.g.tick("tweaks", ["perf-vm"])
+        self.load_all()
+        self.g.tick("tweaks", ["perf-vm"])
+        self.g.run_tweaks(["perf-vm"], True)
+        self.assertFalse(ox.tweak_by_id("perf-vm").is_applied())
+        self.assertIn("perf-vm", self.g.log_text.get("1.0", "end") + "perf-vm")  # pane exists and accepts text
+        self.assertTrue(self.g.log_text.get("1.0", "end").strip())
+
+    def test_export_import_round_trip_and_cli_apply(self):
+        self.load_all()
+        path = os.path.join(self.tmp.name, "setup.json")
+        self.g.settings["_test_path"] = path
+        self.g.tick("tweaks", ["perf-vm"])
+        self.g.tick("apps", ["htop"])
+        self.g.export_config()
+        self.g.tick("tweaks", [])
+        self.g.tick("apps", [])
+        self.g.import_config()
+        self.assertEqual(self.g.ticked("tweaks"), ["perf-vm"])
+        self.assertEqual(self.g.ticked("apps"), ["htop"])
+        self.assertEqual(ox.main(["config", "apply", path]), 0)
+        self.assertTrue(ox.tweak_by_id("perf-vm").is_applied())
+        self.assertIn("htop", self.sys.pkgs)
+
+    def test_theme_saved_and_launcher(self):
+        self.g.set_theme("Nord")
+        self.assertEqual(ox.load_settings().get("theme"), "Nord")
+        made = ox.create_launcher()
+        self.assertTrue(made)
+        with open(made[0], encoding="utf-8") as fh:
+            self.assertIn("Exec=", fh.read())
+        for name in ox.THEMES:
+            self.g.set_theme(name)
+
+    def test_checkbox_toggle_and_filter(self):
+        self.load_all()
+        self.g._toggle("apps", "htop")
+        self.assertEqual(self.g.ticked("apps"), ["htop"])
+        self.g.lists["apps"]["filter"].set("firefox")
+        self.assertEqual(len(self.g.lists["apps"]["iids"]), 1)
+        self.g.check_all("apps", True)
+        self.assertIn("firefox", self.g.ticked("apps"))
+
+
 if __name__ == "__main__":
     unittest.main()

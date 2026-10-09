@@ -49,3 +49,6 @@ esac
 echo
 echo "Try:  optimaxer --dry-run        (interactive menu, nothing is changed)"
 echo "      optimaxer                  (interactive menu; asks for sudo when needed)"
+echo "      optimaxer gui              (graphical window; also in your application menu as Optimaxer)"
+"$DEST/optimaxer" launcher >/dev/null 2>&1 || true
+python3 -c 'import tkinter' >/dev/null 2>&1 || echo "Note: the graphical window needs Tk:  sudo pacman -S tk"
