@@ -19,7 +19,7 @@ import tempfile
 import time
 import urllib.request
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 REPO = "bliper2/optimaxer"
 STATE_FILE = "/var/lib/optimaxer/state.json"
 BACKUP_DIR = "/var/lib/optimaxer/backups"
@@ -433,6 +433,40 @@ class Tweak:
 
 SYSCTL = ["sysctl", "--system"]
 
+def _policy(policies: dict, wrap: bool = False) -> str:
+    """JSON text for a browser managed-policy file. Firefox wraps the policies in a top-level "policies" key."""
+    return json.dumps({"policies": policies} if wrap else policies, indent=2) + "\n"
+
+
+# Policies understood by every Chromium-based browser (Chrome, Chromium, Brave, Edge). A browser ignores keys it does not know.
+_CHROMIUM_PRIVACY = {
+    "MetricsReportingEnabled": False, "SafeBrowsingExtendedReportingEnabled": False, "UrlKeyedAnonymizedDataCollectionEnabled": False,
+    "SpellCheckServiceEnabled": False, "AlternateErrorPagesEnabled": False, "SearchSuggestEnabled": False, "BackgroundModeEnabled": False,
+    "PromotionalTabsEnabled": False, "ShoppingListEnabled": False, "DefaultBrowserSettingEnabled": False, "NetworkPredictionOptions": 2,
+    "PrivacySandboxPromptEnabled": False, "PrivacySandboxAdTopicsEnabled": False, "PrivacySandboxSiteEnabledAdsEnabled": False,
+    "PrivacySandboxAdMeasurementEnabled": False, "WebRtcIPHandlingPolicy": "default_public_interface_only",
+    "GenAiDefaultSettings": 2, "HelpMeWriteSettings": 2, "TabCompareSettings": 2, "HistorySearchSettings": 2, "GeminiSettings": 1,
+}
+_BRAVE = dict(_CHROMIUM_PRIVACY, BraveRewardsDisabled=True, BraveWalletDisabled=True, BraveVPNDisabled=True, BraveAIChatEnabled=False,
+              BraveNewsDisabled=True, BraveTalkDisabled=True, BraveP3AEnabled=False, BraveStatsPingEnabled=False, BraveWebDiscoveryEnabled=False)
+_EDGE = dict(_CHROMIUM_PRIVACY, DiagnosticData=0, EdgeShoppingAssistantEnabled=False, HubsSidebarEnabled=False, EdgeFollowEnabled=False,
+             ShowRecommendationsEnabled=False, PersonalizationReportingEnabled=False, StartupBoostEnabled=False, NewTabPageContentEnabled=False,
+             SpotlightExperiencesAndRecommendationsEnabled=False, EdgeWorkspacesEnabled=False, ShowMicrosoftRewards=False, UserFeedbackAllowed=False,
+             Microsoft365CopilotChatIconEnabled=False)
+_FIREFOX = {
+    "DisableTelemetry": True, "DisableFirefoxStudies": True, "DisablePocket": True, "DisableFeedbackCommands": True, "DontCheckDefaultBrowser": True,
+    "OverrideFirstRunPage": "", "OverridePostUpdatePage": "",
+    "FirefoxSuggest": {"WebSuggestions": False, "SponsoredSuggestions": False, "ImproveSuggest": False},
+    "FirefoxHome": {"SponsoredTopSites": False, "SponsoredPocket": False, "Snippets": False},
+    "UserMessaging": {"ExtensionRecommendations": False, "FeatureRecommendations": False, "UrlbarInterventions": False, "SkipOnboarding": True, "MoreFromMozilla": False},
+    "EnableTrackingProtection": {"Value": True, "Cryptomining": True, "Fingerprinting": True, "EmailTracking": True},
+    "Preferences": {k: {"Value": False, "Status": "default"} for k in (
+        "browser.ml.chat.enabled", "browser.ml.chat.sidebar", "browser.ml.linkPreview.enabled", "browser.tabs.groups.smart.enabled",
+        "datareporting.healthreport.uploadEnabled", "app.shield.optoutstudies.enabled", "browser.newtabpage.activity-stream.feeds.telemetry",
+        "browser.newtabpage.activity-stream.telemetry", "browser.discovery.enabled")},
+}
+_POLICY_NOTE = " The browser shows 'managed by your organization'; any policy file you already have is saved and restored on undo."
+
 TWEAKS = [
     # ---- performance
     Tweak("perf-vm", "Memory tuning (swappiness 20, cache pressure 50)", "Keeps apps in RAM longer and flushes dirty pages sooner: snappier desktop, smoother large copies.",
@@ -497,6 +531,17 @@ TWEAKS = [
           post=[["ufw", "--force", "enable"]], undo_post=[["ufw", "--force", "disable"]], test_cmd=["sh", "-c", "ufw status | grep -q 'Status: active'"]),
     Tweak("priv-avahi", "Disable mDNS/Avahi network discovery", "Stops the machine announcing itself on the LAN. Network printer and Chromecast auto-discovery stops working.", "Privacy",
           risk="moderate", tags={"privacy", "max"}, disable=["avahi-daemon.service", "avahi-daemon.socket"], needs=["/usr/lib/systemd/system/avahi-daemon.service"]),
+    # ---- browser debloat (managed policies: they apply to every profile and survive browser updates)
+    Tweak("browser-firefox", "Firefox: telemetry, studies, Pocket, sponsored content, AI chat", "Turns off telemetry, Shield studies, Pocket, sponsored tiles and suggestions, first-run pages, the AI chatbot and link previews; enables strict tracking protection." + _POLICY_NOTE,
+          "Browsers", tags={"privacy", "max"}, files={"/etc/firefox/policies/policies.json": _policy(_FIREFOX, wrap=True)}, needs=["firefox"]),
+    Tweak("browser-chromium", "Chromium: reporting, ads API, prediction, AI features", "Turns off usage reporting, Privacy Sandbox ad APIs, the spelling web service, search suggestions, network prediction and generative-AI features; WebRTC no longer leaks the local IP." + _POLICY_NOTE,
+          "Browsers", tags={"privacy", "max"}, files={"/etc/chromium/policies/managed/optimaxer.json": _policy(_CHROMIUM_PRIVACY)}, needs=["chromium"]),
+    Tweak("browser-chrome", "Google Chrome: reporting, ads API, prediction, AI features", "Turns off usage reporting, Privacy Sandbox ad APIs, the spelling web service, search suggestions, network prediction, background mode and Gemini/generative-AI features." + _POLICY_NOTE,
+          "Browsers", tags={"privacy", "max"}, files={"/etc/opt/chrome/policies/managed/optimaxer.json": _policy(_CHROMIUM_PRIVACY)}, needs=["google-chrome-stable"]),
+    Tweak("browser-brave", "Brave: Rewards, Wallet, VPN, AI chat, News, Talk, telemetry", "Turns off Brave Rewards, Wallet, VPN, Leo AI chat, News, Talk, P3A and the stats ping, plus the shared Chromium privacy policies." + _POLICY_NOTE,
+          "Browsers", tags={"privacy", "max"}, files={"/etc/brave/policies/managed/optimaxer.json": _policy(_BRAVE)}, needs=["brave"]),
+    Tweak("browser-edge", "Microsoft Edge: diagnostics, shopping, sidebar, Copilot, rewards", "Turns off diagnostic data, the shopping assistant, sidebar, Copilot icon, recommendations, startup boost, workspaces and Rewards, plus the shared Chromium privacy policies." + _POLICY_NOTE,
+          "Browsers", tags={"privacy", "max"}, files={"/etc/opt/edge/policies/managed/optimaxer.json": _policy(_EDGE)}, needs=["microsoft-edge-stable"]),
 ]
 
 PRESETS = ("safe", "perf", "privacy", "max")

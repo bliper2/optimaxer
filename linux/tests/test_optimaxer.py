@@ -389,6 +389,32 @@ class Interactive(Base):
         self.assertEqual(cm.exception.code, 0)
 
 
+class BrowserDebloat(Base):
+    def test_unavailable_without_browser(self):
+        self.assertFalse(ox.tweak_by_id("browser-brave").available())
+        self.assertNotIn("browser-brave", ox.preset_ids("privacy"))
+
+    def test_firefox_and_chromium_policies(self):
+        import json
+        self.sys.have |= {"firefox", "chromium", "brave"}
+        self.assertIn("browser-firefox", ox.preset_ids("privacy"))
+        self.assertNotIn("browser-firefox", ox.preset_ids("safe"))
+        self.put("/etc/firefox/policies/policies.json", '{"policies": {"Homepage": {"URL": "https://example.org"}}}')
+        t = ox.tweak_by_id("browser-firefox")
+        self.assertTrue(t.apply())
+        ff = json.loads(self.get("/etc/firefox/policies/policies.json"))
+        self.assertTrue(ff["policies"]["DisableTelemetry"])
+        self.assertIs(ff["policies"]["Preferences"]["browser.ml.chat.enabled"]["Value"], False)
+        self.assertTrue(t.undo())
+        self.assertIn("example.org", self.get("/etc/firefox/policies/policies.json"))
+        for tid, path, key in (("browser-chromium", "/etc/chromium/policies/managed/optimaxer.json", "MetricsReportingEnabled"),
+                               ("browser-brave", "/etc/brave/policies/managed/optimaxer.json", "BraveRewardsDisabled")):
+            self.assertTrue(ox.tweak_by_id(tid).apply())
+            self.assertIs(json.loads(self.get(path))[key], key == "BraveRewardsDisabled")
+            self.assertTrue(ox.tweak_by_id(tid).undo())
+            self.assertIsNone(self.get(path))
+
+
 class GuiTest(Base):
     def setUp(self):
         super().setUp()
