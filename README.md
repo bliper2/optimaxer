@@ -2,7 +2,7 @@
 
 # Optimaxer
 
-Website: https://bliper2.github.io/optimaxer/ ([privacy](https://bliper2.github.io/optimaxer/privacy.html), [terms](https://bliper2.github.io/optimaxer/terms.html)). Licensed MIT.
+**[Website](https://bliper2.github.io/optimaxer/)** · [Download](https://github.com/bliper2/optimaxer/releases/latest) · [Privacy](https://bliper2.github.io/optimaxer/privacy.html) · [Terms](https://bliper2.github.io/optimaxer/terms.html) · MIT licensed
 
 Windows 10/11 performance, privacy, debloat and app-install toolkit. WPF GUI in Windows PowerShell 5.1, inspired by the layout of [Chris Titus Tech's WinUtil](https://github.com/ChrisTitusTech/winutil) (MIT), rebuilt with undo support, verification and a lot more tweaks.
 
