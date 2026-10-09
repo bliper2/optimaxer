@@ -1,0 +1,23 @@
+:root { --bg: #ffffff; --text: #222; --dim: #666; --link: #0b5cad; --line: #ccc; --code: #f3f3f1; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #1a1a1a; --text: #ddd; --dim: #999; --link: #6cb0f5; --line: #3a3a3a; --code: #242424; }
+}
+body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.55 Georgia, "Times New Roman", serif; }
+.page { max-width: 42rem; margin: 0 auto; padding: 24px 16px 48px; }
+a { color: var(--link); }
+header { display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 24px; flex-wrap: wrap; }
+header .name { font: bold 20px "Segoe UI", Arial, sans-serif; color: var(--text); text-decoration: none; }
+header .name img { width: 22px; height: 22px; vertical-align: -4px; margin-right: 6px; }
+header nav { margin-left: auto; font: 15px "Segoe UI", Arial, sans-serif; }
+header nav a { margin-left: 14px; }
+h1 { font: bold 26px "Segoe UI", Arial, sans-serif; margin: 0 0 12px; }
+h2 { font: bold 19px "Segoe UI", Arial, sans-serif; margin: 28px 0 6px; }
+p, ul { margin: 0 0 12px; }
+ul { padding-left: 22px; }
+li { margin-bottom: 4px; }
+pre, code { font-family: Consolas, "Courier New", monospace; }
+pre { background: var(--code); border: 1px solid var(--line); padding: 8px 10px; overflow-x: auto; font-size: 14px; margin: 0 0 12px; }
+code { font-size: 15px; background: var(--code); padding: 0 3px; }
+pre code { background: none; padding: 0; }
+.meta { color: var(--dim); font-size: 15px; }
+footer { border-top: 1px solid var(--line); margin-top: 36px; padding-top: 10px; color: var(--dim); font-size: 14px; }

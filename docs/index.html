@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Optimaxer</title>
+<meta name="description" content="Free, open-source tweaking, debloat and app-install tool for Windows 10/11 and Manjaro/Arch Linux.">
+<link rel="icon" href="favicon.ico">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+<header>
+  <a class="name" href="index.html"><img src="logo.png" alt="">Optimaxer</a>
+  <nav><a href="https://github.com/bliper2/optimaxer/releases/latest">Download</a><a href="https://github.com/bliper2/optimaxer">Source</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a></nav>
+</header>
+
+<h1>Optimaxer</h1>
+<p>Optimaxer is a free tool that tweaks, debloats and cleans Windows 10/11, and installs apps. There is also a command-line edition for Manjaro and other Arch-based Linux. It is open source (MIT). The Windows version is a WPF window written in PowerShell, laid out like Chris Titus Tech's WinUtil; the Linux version is one Python file.</p>
+<p>Every tweak saves the value it replaces, so a single tweak, or all of them, can be undone later. It has no telemetry and no account.</p>
+
+<h2>Windows</h2>
+<p>In PowerShell:</p>
+<pre><code>irm https://raw.githubusercontent.com/bliper2/optimaxer/main/install.ps1 | iex</code></pre>
+<p>That installs to <code>%LOCALAPPDATA%\Optimaxer</code>, checks the SHA-256 of the download against the one GitHub publishes, adds shortcuts and starts it. If you would rather read the code first, get the zip from <a href="https://github.com/bliper2/optimaxer/releases/latest">Releases</a>, look through the scripts, and run <code>Launch.bat</code>.</p>
+<p>What is in it:</p>
+<ul>
+<li>Install: 260+ apps through WinGet, with a check after each install.</li>
+<li>Tweaks: 170+, covering performance, gaming, network, privacy, Copilot/AI removal and browser debloat. Presets are available.</li>
+<li>Services, startup entries (including scheduled tasks), cleaner, Appx debloat, DNS, Windows features, tools.</li>
+<li>Config export/import and an unattended mode for scripts.</li>
+</ul>
+
+<h2>Linux (Manjaro / Arch)</h2>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/bliper2/optimaxer/main/linux/install.sh | bash
+optimaxer --dry-run</code></pre>
+<p>Needs only Python 3. Covers 96 apps (official repos, AUR, Flatpak), 18 tweaks with undo, the cleaner, services, autostart entries, debloat, DNS and some maintenance tools. So far it has been tested against a simulated system, not real hardware, which is why the example above starts with <code>--dry-run</code>.</p>
+
+<h2>Before you use it</h2>
+<p>It changes system settings and needs administrator rights. Make a restore point or snapshot first, and read the <a href="terms.html">terms</a>. What it sends over the network is listed in the <a href="privacy.html">privacy policy</a>. Bugs and requests go to the <a href="https://github.com/bliper2/optimaxer/issues">issue tracker</a>.</p>
+
+<footer>Optimaxer is MIT licensed. App names and icons belong to their owners.</footer>
+</div>
+</body>
+</html>
