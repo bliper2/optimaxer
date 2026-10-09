@@ -19,7 +19,7 @@ import tempfile
 import time
 import urllib.request
 
-__version__ = "2.3.2"
+__version__ = "2.3.3"
 REPO = "bliper2/optimaxer"
 STATE_FILE = "/var/lib/optimaxer/state.json"
 BACKUP_DIR = "/var/lib/optimaxer/backups"
@@ -587,6 +587,7 @@ Browsers|Vivaldi|P|vivaldi
 Browsers|Falkon|P|falkon
 Browsers|Tor Browser|P|torbrowser-launcher
 Browsers|Brave|A|brave-bin
+Browsers|Helium|A|helium-browser-bin
 Browsers|Google Chrome|A|google-chrome
 Browsers|Zen Browser|A|zen-browser-bin
 Browsers|Floorp|A|floorp-bin
