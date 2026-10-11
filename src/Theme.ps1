@@ -23,6 +23,7 @@ $global:OptiThemes = [ordered]@{
     dracula    = New-Theme 'dracula'          '1e1f29' '282a36' '282a36' '343746' '44475a' '6272a4' 'f8f8f2' '6272a4' 'bd93f9' 'ff79c6' '50fa7b' 'f1fa8c' 'ff5555' '282a36'
     everforest = New-Theme 'everforest'       '232a2e' '2d353b' '2d353b' '343f44' '3d484d' '475258' 'd3c6aa' '859289' 'a7c080' '83c092' 'a7c080' 'dbbc7f' 'e67e80' '2d353b'
     hyprland   = New-Theme 'hyprland default' '0a0a12' '11111b' '11111b' '1b1b2b' '27273d' '3a3a55' 'e6e6f0' '777790' '33ccff' '00ff99' '00ff99' 'ffd166' 'ff5c5c' '0a0a12'
+    ayu        = New-Theme 'ayu dark'         '0a0e14' '0b0e14' '0d1017' '131721' '1a1f2b' '273747' 'b3b1ad' '5c6773' 'ffb454' '39bae6' 'aad94c' 'ffb454' 'f07178' '0a0e14'
 }
 
 $global:OptiFxModes = [ordered]@{ none = 'none'; aurora = 'aurora'; stars = 'starfield'; rain = 'rain'; embers = 'embers' }
@@ -36,6 +37,7 @@ $global:OptiRices = [ordered]@{
     'tty minimal'  = @{ Theme = 'nord';       Fx = 'none';   GapIn = 0;  GapOut = 0;  Round = 0;  Border = 1 }
     'forest'       = @{ Theme = 'everforest'; Fx = 'stars';  GapIn = 8;  GapOut = 14; Round = 14; Border = 2 }
     'cyber'        = @{ Theme = 'hyprland';   Fx = 'rain';   GapIn = 5;  GapOut = 8;  Round = 10; Border = 2 }
+    'sunset dune'  = @{ Theme = 'ayu';        Fx = 'embers'; GapIn = 4;  GapOut = 8;  Round = 8;  Border = 2 }
 }
 
 $global:Cfg = @{ Theme = 'winutil'; Fx = 'none'; GapIn = 0; GapOut = 0; Round = 0; Border = 1; Anim = $true; Speed = 1.0; AutoUpdate = $true; UiVersion = 3 }
