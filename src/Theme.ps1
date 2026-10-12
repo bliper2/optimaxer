@@ -1,99 +1,84 @@
-# Optimaxer look: themes, wallpaper effects, tiling-style layout, animations, settings. Needs $win and $UI from App.ps1.
+# Optimaxer look: palettes, accent colours, settings file, small animation helpers. Needs $win and $UI from App.ps1.
 
-function Add-Alpha { param([string]$Hex, [string]$Aa) return '#' + $Aa + $Hex.TrimStart('#') }
-
-function New-Theme {
-    param($Label, $Wall1, $Wall2, $Tile, $Surface, $Hi, $Line, $Text, $Muted, $A1, $A2, $Good, $Warn, $Bad, $On, [switch]$Solid)
-    $aT, $aS, $aH, $aL = if ($Solid) { 'FF', 'FF', 'FF', 'FF' } else { 'D2', '99', 'CC', '77' }
-    @{
-        Label = $Label; Wall1 = "#$Wall1"; Wall2 = "#$Wall2"
-        TileBg = Add-Alpha $Tile $aT; Surface = Add-Alpha $Surface $aS; SurfaceHi = Add-Alpha $Hi $aH; Line = Add-Alpha $Line $aL
-        Text = "#$Text"; Muted = "#$Muted"; Accent = "#$A1"; Accent2 = "#$A2"; Good = "#$Good"; Warn = "#$Warn"; Bad = "#$Bad"; OnAccent = "#$On"
-    }
+$global:OptiModes = [ordered]@{
+    dark  = @{ Label = 'Dark';  Bg = '1B1B1D'; Sidebar = '151517'; Card = '232326'; CardHi = '2B2B2F'; Line = '34343A'; Text = 'ECECEF'; Muted = '9B9BA4'; Good = '5FB878'; Warn = 'E0A93B'; Bad = 'E5645F' }
+    light = @{ Label = 'Light'; Bg = 'F5F5F7'; Sidebar = 'EDEDF0'; Card = 'FFFFFF'; CardHi = 'F0F0F3'; Line = 'DADADF'; Text = '1C1C1F'; Muted = '62626B'; Good = '2E8B4F'; Warn = '9A6700'; Bad = 'C4352F' }
 }
 
-$global:OptiThemes = [ordered]@{
-    winutil    = New-Theme 'dark (default)'   '1e1e1e' '1e1e1e' '262626' '333333' '404040' '4a4a4a' 'ffffff' 'a0a0a0' '2d7dd2' '4a9eff' '5cb85c' 'f0ad4e' 'd9534f' 'ffffff' -Solid
-    light      = New-Theme 'light'            'f3f3f3' 'f3f3f3' 'ffffff' 'ececec' 'dedede' 'cccccc' '1a1a1a' '666666' '0067c0' '2b88d8' '2e7d32' 'b26a00' 'c62828' 'ffffff' -Solid
-    catppuccin = New-Theme 'catppuccin mocha' '11111b' '1e1e2e' '181825' '313244' '45475a' '585b70' 'cdd6f4' '7f849c' 'cba6f7' '89b4fa' 'a6e3a1' 'f9e2af' 'f38ba8' '11111b'
-    tokyonight = New-Theme 'tokyo night'      '16161e' '1a1b26' '1a1b26' '24283b' '2f334d' '3b4261' 'c0caf5' '565f89' '7aa2f7' 'bb9af7' '9ece6a' 'e0af68' 'f7768e' '16161e'
-    gruvbox    = New-Theme 'gruvbox dark'     '1d2021' '282828' '282828' '3c3836' '504945' '665c54' 'ebdbb2' '928374' 'fe8019' 'fabd2f' 'b8bb26' 'fabd2f' 'fb4934' '1d2021'
-    rosepine   = New-Theme 'rose pine'        '110f1b' '191724' '191724' '1f1d2e' '26233a' '403d52' 'e0def4' '6e6a86' 'ebbcba' 'c4a7e7' '9ccfd8' 'f6c177' 'eb6f92' '191724'
-    nord       = New-Theme 'nord'             '242933' '2e3440' '2e3440' '3b4252' '434c5e' '4c566a' 'eceff4' '7b88a1' '88c0d0' '81a1c1' 'a3be8c' 'ebcb8b' 'bf616a' '2e3440'
-    dracula    = New-Theme 'dracula'          '1e1f29' '282a36' '282a36' '343746' '44475a' '6272a4' 'f8f8f2' '6272a4' 'bd93f9' 'ff79c6' '50fa7b' 'f1fa8c' 'ff5555' '282a36'
-    everforest = New-Theme 'everforest'       '232a2e' '2d353b' '2d353b' '343f44' '3d484d' '475258' 'd3c6aa' '859289' 'a7c080' '83c092' 'a7c080' 'dbbc7f' 'e67e80' '2d353b'
-    hyprland   = New-Theme 'hyprland default' '0a0a12' '11111b' '11111b' '1b1b2b' '27273d' '3a3a55' 'e6e6f0' '777790' '33ccff' '00ff99' '00ff99' 'ffd166' 'ff5c5c' '0a0a12'
-    ayu        = New-Theme 'ayu dark'         '0a0e14' '0b0e14' '0d1017' '131721' '1a1f2b' '273747' 'b3b1ad' '5c6773' 'ffb454' '39bae6' 'aad94c' 'ffb454' 'f07178' '0a0e14'
+# Each accent has a tone tuned for dark surfaces and one for light surfaces.
+$global:OptiAccents = [ordered]@{
+    teal   = @{ Label = 'Teal';   Dark = '2FA79A'; Light = '0F7B70' }
+    blue   = @{ Label = 'Blue';   Dark = '4C8BF5'; Light = '1F63D6' }
+    violet = @{ Label = 'Violet'; Dark = '9683F2'; Light = '6B4FD6' }
+    rose   = @{ Label = 'Rose';   Dark = 'E5648B'; Light = 'C23A66' }
+    amber  = @{ Label = 'Amber';  Dark = 'E0A93B'; Light = 'A86A00' }
+    green  = @{ Label = 'Green';  Dark = '5FB878'; Light = '2E8B4F' }
 }
 
-$global:OptiFxModes = [ordered]@{ none = 'none'; aurora = 'aurora'; stars = 'starfield'; rain = 'rain'; embers = 'embers' }
-
-# hyprland-style "rices": theme + wallpaper effect + gaps + rounding + border
-$global:OptiRices = [ordered]@{
-    'classic'      = @{ Theme = 'winutil';    Fx = 'none';   GapIn = 0;  GapOut = 0;  Round = 0;  Border = 1 }
-    'mauve night'  = @{ Theme = 'catppuccin'; Fx = 'aurora'; GapIn = 6;  GapOut = 12; Round = 12; Border = 2 }
-    'neon city'    = @{ Theme = 'tokyonight'; Fx = 'rain';   GapIn = 4;  GapOut = 10; Round = 8;  Border = 2 }
-    'retro warm'   = @{ Theme = 'gruvbox';    Fx = 'embers'; GapIn = 3;  GapOut = 6;  Round = 4;  Border = 3 }
-    'tty minimal'  = @{ Theme = 'nord';       Fx = 'none';   GapIn = 0;  GapOut = 0;  Round = 0;  Border = 1 }
-    'forest'       = @{ Theme = 'everforest'; Fx = 'stars';  GapIn = 8;  GapOut = 14; Round = 14; Border = 2 }
-    'cyber'        = @{ Theme = 'hyprland';   Fx = 'rain';   GapIn = 5;  GapOut = 8;  Round = 10; Border = 2 }
-    'sunset dune'  = @{ Theme = 'ayu';        Fx = 'embers'; GapIn = 4;  GapOut = 8;  Round = 8;  Border = 2 }
-}
-
-$global:Cfg = @{ Theme = 'winutil'; Fx = 'none'; GapIn = 0; GapOut = 0; Round = 0; Border = 1; Anim = $true; Speed = 1.0; AutoUpdate = $true; UiVersion = 3 }
+$global:Cfg = @{ Mode = 'system'; Accent = 'teal'; Anim = $true; AutoUpdate = $true; UiVersion = 4 }
 $global:CfgPath = Join-Path $global:OptiData 'settings.json'
 
 function Import-Cfg {
     if (-not (Test-Path -LiteralPath $global:CfgPath)) { return }
     try {
         $o = Get-Content -LiteralPath $global:CfgPath -Raw | ConvertFrom-Json
-        if ($o.UiVersion -ne 3) { return }
-        foreach ($p in $o.PSObject.Properties) { if ($global:Cfg.ContainsKey($p.Name)) { $global:Cfg[$p.Name] = $p.Value } }
-        if (-not $global:OptiThemes.Contains($global:Cfg.Theme)) { $global:Cfg.Theme = 'catppuccin' }
-        if (-not $global:OptiFxModes.Contains($global:Cfg.Fx)) { $global:Cfg.Fx = 'aurora' }
+        foreach ($k in 'Anim', 'AutoUpdate') { if ($null -ne $o.$k) { $global:Cfg[$k] = [bool]$o.$k } }
+        if ($o.UiVersion -eq 4) {
+            if ($global:OptiModes.Contains([string]$o.Mode) -or $o.Mode -eq 'system') { $global:Cfg.Mode = [string]$o.Mode }
+            if ($global:OptiAccents.Contains([string]$o.Accent)) { $global:Cfg.Accent = [string]$o.Accent }
+        } elseif ($o.Theme -eq 'light') { $global:Cfg.Mode = 'light' }
+        elseif ($o.Theme) { $global:Cfg.Mode = 'dark' }
     } catch {}
 }
 function Save-Cfg { try { $global:Cfg | ConvertTo-Json | Set-Content -LiteralPath $global:CfgPath -Encoding UTF8 } catch {} }
 
-# ---------------------------------------------------------------- animation helpers
-function Get-Dur { param([double]$Ms) return [TimeSpan]::FromMilliseconds($Ms / [math]::Max(0.2, [double]$global:Cfg.Speed)) }
+# ---------------------------------------------------------------- helpers
+function Get-Dur { param([double]$Ms) return [TimeSpan]::FromMilliseconds($Ms) }
 
 function Set-Res {
-    # bind a property to a theme resource so it follows theme changes
+    # bind a property to a palette brush so it follows theme changes
     param($Element, $Property, [string]$Key)
     $Element.SetResourceReference($Property, $Key)
 }
 
+function ConvertTo-Color { param([string]$Hex) return [Windows.Media.ColorConverter]::ConvertFromString($(if ($Hex.StartsWith('#')) { $Hex } else { "#$Hex" })) }
+
+function Mix-Color {
+    # blend A toward B by T (0 = A, 1 = B)
+    param([Windows.Media.Color]$A, [Windows.Media.Color]$B, [double]$T)
+    [Windows.Media.Color]::FromRgb(
+        [byte][math]::Round($A.R + ($B.R - $A.R) * $T),
+        [byte][math]::Round($A.G + ($B.G - $A.G) * $T),
+        [byte][math]::Round($A.B + ($B.B - $A.B) * $T))
+}
+
+function Get-Luminance {
+    param([Windows.Media.Color]$C)
+    $f = { param($v) $x = $v / 255.0; if ($x -le 0.03928) { $x / 12.92 } else { [math]::Pow(($x + 0.055) / 1.055, 2.4) } }
+    0.2126 * (& $f $C.R) + 0.7152 * (& $f $C.G) + 0.0722 * (& $f $C.B)
+}
+
+function Get-EffectiveMode {
+    if ($global:Cfg.Mode -in 'dark', 'light') { return $global:Cfg.Mode }
+    try {
+        $v = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name AppsUseLightTheme -ErrorAction Stop).AppsUseLightTheme
+        if ($v -eq 1) { return 'light' }
+    } catch {}
+    return 'dark'
+}
+
 function Swap-Brush {
-    # theme brushes are frozen once a Style seals them, so replace the resource with a fresh brush and ease it in.
+    # Palette brushes get frozen once a Style seals them, so replace the resource with a fresh brush and ease it in.
     # The animation must start BEFORE the brush goes into the dictionary, which would otherwise freeze it.
     param([string]$Key, [Windows.Media.Color]$To)
     $old = $win.Resources[$Key]
     $nb = New-Object Windows.Media.SolidColorBrush $To
     if ($global:Cfg.Anim -and $old.Color -ne $To) {
         try {
-            $a = New-Object Windows.Media.Animation.ColorAnimation($old.Color, $To, (Get-Dur 380))
+            $a = New-Object Windows.Media.Animation.ColorAnimation($old.Color, $To, (Get-Dur 220))
             $a.FillBehavior = 'Stop'
             $nb.BeginAnimation([Windows.Media.SolidColorBrush]::ColorProperty, $a)
         } catch {}
-    }
-    $win.Resources[$Key] = [Windows.Media.Brush]$nb
-}
-
-function Swap-Gradient {
-    param([string]$Key, [Windows.Media.Color[]]$To)
-    $nb = $win.Resources[$Key].CloneCurrentValue()
-    for ($i = 0; $i -lt $To.Count; $i++) {
-        $stop = $nb.GradientStops[$i]
-        $from = $stop.Color
-        $stop.Color = $To[$i]
-        if ($global:Cfg.Anim -and $from -ne $To[$i]) {
-            try {
-                $a = New-Object Windows.Media.Animation.ColorAnimation($from, $To[$i], (Get-Dur 380))
-                $a.FillBehavior = 'Stop'
-                $stop.BeginAnimation([Windows.Media.GradientStop]::ColorProperty, $a)
-            } catch {}
-        }
     }
     $win.Resources[$Key] = [Windows.Media.Brush]$nb
 }
@@ -103,7 +88,7 @@ function Set-Bar {
     $old = $Bar.Value
     $Bar.Value = $Value
     if ($global:Cfg.Anim -and $old -ne $Value) {
-        $a = New-Object Windows.Media.Animation.DoubleAnimation($old, $Value, (Get-Dur 450))
+        $a = New-Object Windows.Media.Animation.DoubleAnimation($old, $Value, (Get-Dur 350))
         $a.FillBehavior = 'Stop'
         $a.EasingFunction = New-Object Windows.Media.Animation.CubicEase
         $Bar.BeginAnimation([Windows.Controls.Primitives.RangeBase]::ValueProperty, $a)
@@ -113,236 +98,110 @@ function Set-Bar {
 function Start-PageIn {
     param($Page)
     if (-not $global:Cfg.Anim) { $Page.Opacity = 1; $Page.RenderTransform = $null; return }
-    $tt = New-Object Windows.Media.TranslateTransform(0, 16)
+    $tt = New-Object Windows.Media.TranslateTransform(0, 8)
     $Page.RenderTransform = $tt
     $ease = New-Object Windows.Media.Animation.CubicEase
     $ease.EasingMode = 'EaseOut'
-    $fade = New-Object Windows.Media.Animation.DoubleAnimation(0, 1, (Get-Dur 220))
-    $slide = New-Object Windows.Media.Animation.DoubleAnimation(16, 0, (Get-Dur 260))
+    $fade = New-Object Windows.Media.Animation.DoubleAnimation(0, 1, (Get-Dur 160))
+    $slide = New-Object Windows.Media.Animation.DoubleAnimation(8, 0, (Get-Dur 200))
     $slide.EasingFunction = $ease
     $Page.BeginAnimation([Windows.UIElement]::OpacityProperty, $fade)
     $tt.BeginAnimation([Windows.Media.TranslateTransform]::YProperty, $slide)
 }
 
-function Start-BorderSpin {
-    $rt = $win.Resources['ActiveBorder'].RelativeTransform
-    if ($global:Cfg.Anim) {
-        $a = New-Object Windows.Media.Animation.DoubleAnimation(0, 360, [TimeSpan]::FromSeconds(9 / [math]::Max(0.2, [double]$global:Cfg.Speed)))
-        $a.RepeatBehavior = [Windows.Media.Animation.RepeatBehavior]::Forever
-        $rt.BeginAnimation([Windows.Media.RotateTransform]::AngleProperty, $a)
-    } else { $rt.BeginAnimation([Windows.Media.RotateTransform]::AngleProperty, $null) }
+function Start-WindowIn {
+    if (-not $global:Cfg.Anim) { return }
+    $UI.Shell.BeginAnimation([Windows.UIElement]::OpacityProperty, (New-Object Windows.Media.Animation.DoubleAnimation(0, 1, (Get-Dur 200))))
 }
 
-# ---------------------------------------------------------------- theme / fx / layout
-function ConvertTo-Color { param([string]$Hex) return [Windows.Media.ColorConverter]::ConvertFromString($Hex) }
-
-function Set-Theme {
-    param([string]$Key, [bool]$Animate = $true)
-    $t = $global:OptiThemes[$Key]
-    $global:Cfg.Theme = $Key
+# ---------------------------------------------------------------- applying the palette
+function Set-Appearance {
+    param([bool]$Animate = $true)
+    $mode = $global:OptiModes[(Get-EffectiveMode)]
+    $isLight = (Get-EffectiveMode) -eq 'light'
+    $acc = $global:OptiAccents[$global:Cfg.Accent]
+    $accent = ConvertTo-Color $(if ($isLight) { $acc.Light } else { $acc.Dark })
+    $bg = ConvertTo-Color $mode.Bg
+    $hi = if ($isLight) { Mix-Color $accent ([Windows.Media.Colors]::Black) 0.14 } else { Mix-Color $accent ([Windows.Media.Colors]::White) 0.16 }
+    $on = if ((Get-Luminance $accent) -gt 0.4) { ConvertTo-Color '111111' } else { ConvertTo-Color 'FFFFFF' }
+    $colors = @{
+        Bg = $bg; Sidebar = (ConvertTo-Color $mode.Sidebar); Card = (ConvertTo-Color $mode.Card); CardHi = (ConvertTo-Color $mode.CardHi)
+        Line = (ConvertTo-Color $mode.Line); Text = (ConvertTo-Color $mode.Text); Muted = (ConvertTo-Color $mode.Muted)
+        Good = (ConvertTo-Color $mode.Good); Warn = (ConvertTo-Color $mode.Warn); Bad = (ConvertTo-Color $mode.Bad)
+        Accent = $accent; AccentHi = $hi; OnAccent = $on
+        Selected = (Mix-Color $bg $accent $(if ($isLight) { 0.12 } else { 0.18 }))
+    }
     $keep = $global:Cfg.Anim; if (-not $Animate) { $global:Cfg.Anim = $false }
-    foreach ($k in 'TileBg', 'Surface', 'SurfaceHi', 'Line', 'Text', 'Muted', 'Accent', 'Accent2', 'Good', 'Warn', 'Bad', 'OnAccent') { Swap-Brush $k (ConvertTo-Color $t[$k]) }
-    $a1 = ConvertTo-Color $t.Accent; $a2 = ConvertTo-Color $t.Accent2
-    Swap-Gradient 'WallGrad' @((ConvertTo-Color $t.Wall1), (ConvertTo-Color $t.Wall2))
-    Swap-Gradient 'AccentGrad' @($a1, $a2)
-    Swap-Gradient 'ActiveBorder' @($a1, $a2, $a1)
+    foreach ($k in $colors.Keys) { Swap-Brush $k $colors[$k] }
     $global:Cfg.Anim = $keep
-    $global:Fx.SetColors($a1, $a2)
-    Start-BorderSpin
-    Set-ActiveTile $global:ActiveTile
-    Save-Cfg
-    Update-Rice
+    Update-Appearance
 }
 
-function Set-Fx {
-    param([string]$Key)
-    $global:Cfg.Fx = $Key
-    $global:Fx.SetMode($Key)
-    Save-Cfg
-    Update-Rice
-}
+# ---------------------------------------------------------------- settings page
+$global:ChipSets = @{ mode = @{}; accent = @{}; anim = @{}; upd = @{} }
 
-function Set-Layout {
-    $gi = [double]$global:Cfg.GapIn; $go = [double]$global:Cfg.GapOut
-    $UI.Shell.Margin = [Windows.Thickness][math]::Max(0, $go - $gi / 2)
-    foreach ($tile in $global:Tiles) {
-        $tile.Margin = [Windows.Thickness]($gi / 2)
-        $tile.CornerRadius = [Windows.CornerRadius][double]$global:Cfg.Round
-        $tile.BorderThickness = [Windows.Thickness][double]$global:Cfg.Border
-    }
-}
-
-function Set-ActiveTile {
-    param($Tile)
-    $global:ActiveTile = $Tile
-    foreach ($t in $global:Tiles) { $t.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, 'Line') }
-}
-
-function Set-Rice {
-    param([string]$Name)
-    $r = $global:OptiRices[$Name]
-    foreach ($k in 'GapIn', 'GapOut', 'Round', 'Border') { $global:Cfg[$k] = $r[$k] }
-    Set-Layout
-    Set-Fx $r.Fx
-    Set-Theme $r.Theme
-}
-
-function Get-HyprConf {
-    $t = $global:OptiThemes[$global:Cfg.Theme]
-    $a = $t.Accent.TrimStart('#').ToLower(); $b = $t.Accent2.TrimStart('#').ToLower()
-    $l = $t.Line.TrimStart('#').ToLower().Substring(2)
-    @"
-# theme: $($t.Label)   wallpaper: $($global:OptiFxModes[$global:Cfg.Fx])
-general {
-    gaps_in = $($global:Cfg.GapIn)
-    gaps_out = $($global:Cfg.GapOut)
-    border_size = $($global:Cfg.Border)
-    col.active_border = rgba(${a}ff) rgba(${b}ff) 45deg
-    col.inactive_border = rgba(${l}aa)
-}
-decoration {
-    rounding = $($global:Cfg.Round)
-}
-animations {
-    enabled = $(if ($global:Cfg.Anim) { 'yes' } else { 'no' })
-    animation = borderangle, 1, $([int](30 / [math]::Max(0.2, [double]$global:Cfg.Speed))), default, loop
-}
-"@
-}
-
-# ---------------------------------------------------------------- appearance page
-$global:RiceButtons = @{ theme = @{}; fx = @{}; anim = @{}; upd = @{} }
-$global:LayoutValues = @{}
-
-function New-RiceButton {
-    param([string]$Text, $Swatches = @())
+function New-Chip {
+    param([string]$Text, [string]$Swatch = '')
     $b = New-Object Windows.Controls.Button
-    $b.Margin = '0,0,6,6'; $b.Padding = '10,6'
+    $b.Style = $win.FindResource('Chip')
+    $b.Margin = '0,0,8,0'
     $sp = New-Object Windows.Controls.StackPanel -Property @{ Orientation = 'Horizontal' }
-    foreach ($c in $Swatches) {
-        $r = New-Object Windows.Shapes.Rectangle -Property @{ Width = 9; Height = 14; Margin = '0,0,2,0'; RadiusX = 2; RadiusY = 2; Fill = (New-Object Windows.Media.SolidColorBrush (ConvertTo-Color $c)) }
-        [void]$sp.Children.Add($r)
+    if ($Swatch) {
+        $dot = New-Object Windows.Shapes.Ellipse -Property @{ Width = 10; Height = 10; Margin = '0,0,8,0'; VerticalAlignment = 'Center'; Fill = (New-Object Windows.Media.SolidColorBrush (ConvertTo-Color $Swatch)) }
+        [void]$sp.Children.Add($dot)
     }
-    $lead = if ($Swatches.Count) { '6,0,0,0' } else { '0' }
-    $tb = New-Object Windows.Controls.TextBlock -Property @{ Text = $Text; Margin = $lead }
-    Set-Res $tb ([Windows.Controls.TextBlock]::ForegroundProperty) 'Text'
-    [void]$sp.Children.Add($tb)
+    [void]$sp.Children.Add((New-Object Windows.Controls.TextBlock -Property @{ Text = $Text; VerticalAlignment = 'Center' }))
     $b.Content = $sp
     return $b
 }
 
-function Update-Rice {
-    $bp = [Windows.Controls.Control]::BorderBrushProperty
-    foreach ($k in $global:RiceButtons.theme.Keys) { Set-Res $global:RiceButtons.theme[$k] $bp $(if ($k -eq $global:Cfg.Theme) { 'Accent' } else { 'Line' }) }
-    foreach ($k in $global:RiceButtons.fx.Keys)    { Set-Res $global:RiceButtons.fx[$k]    $bp $(if ($k -eq $global:Cfg.Fx) { 'Accent' } else { 'Line' }) }
-    $speedKey = if ($global:Cfg.Speed -le 0.7) { 'slow' } elseif ($global:Cfg.Speed -ge 1.5) { 'fast' } else { 'normal' }
-    foreach ($k in $global:RiceButtons.anim.Keys) {
-        $on = if ($k -eq 'on') { $global:Cfg.Anim } elseif ($k -eq 'off') { -not $global:Cfg.Anim } else { $k -eq $speedKey }
-        Set-Res $global:RiceButtons.anim[$k] $bp $(if ($on) { 'Accent' } else { 'Line' })
-    }
-    foreach ($k in $global:RiceButtons.upd.Keys) { Set-Res $global:RiceButtons.upd[$k] $bp $(if (($k -eq 'on') -eq [bool]$global:Cfg.AutoUpdate) { 'Accent' } else { 'Line' }) }
-    foreach ($k in $global:LayoutValues.Keys) { $global:LayoutValues[$k].Text = [string]$global:Cfg[$k] }
-    $UI.ConfPreview.Text = Get-HyprConf
+function Set-ChipState {
+    param($Chip, [bool]$On)
+    Set-Res $Chip ([Windows.Controls.Control]::BorderBrushProperty) $(if ($On) { 'Accent' } else { 'Line' })
+    Set-Res $Chip ([Windows.Controls.Control]::BackgroundProperty) $(if ($On) { 'Selected' } else { 'Card' })
 }
 
-function Initialize-Rice {
-    foreach ($n in $global:OptiRices.Keys) {
-        $r = $global:OptiRices[$n]; $t = $global:OptiThemes[$r.Theme]
-        $b = New-RiceButton $n @($t.Accent, $t.Accent2, $t.Wall2)
-        $b.Tag = $n
-        $b.Add_Click({ param($s, $e) Set-Rice $s.Tag })
-        [void]$UI.RicePanel.Children.Add($b)
-    }
-    foreach ($k in $global:OptiThemes.Keys) {
-        $t = $global:OptiThemes[$k]
-        $b = New-RiceButton $t.Label @($t.Accent, $t.Accent2, $t.Wall2)
-        $b.Tag = $k
-        $b.Add_Click({ param($s, $e) Set-Theme $s.Tag })
-        $global:RiceButtons.theme[$k] = $b
+function Update-Appearance {
+    foreach ($k in $global:ChipSets.mode.Keys)   { Set-ChipState $global:ChipSets.mode[$k]   ($k -eq $global:Cfg.Mode) }
+    foreach ($k in $global:ChipSets.accent.Keys) { Set-ChipState $global:ChipSets.accent[$k] ($k -eq $global:Cfg.Accent) }
+    foreach ($k in $global:ChipSets.anim.Keys)   { Set-ChipState $global:ChipSets.anim[$k]   (($k -eq 'on') -eq [bool]$global:Cfg.Anim) }
+    foreach ($k in $global:ChipSets.upd.Keys)    { Set-ChipState $global:ChipSets.upd[$k]    (($k -eq 'on') -eq [bool]$global:Cfg.AutoUpdate) }
+}
+
+function Initialize-Settings {
+    foreach ($m in 'system', 'light', 'dark') {
+        $b = New-Chip $(if ($m -eq 'system') { 'Match Windows' } else { $global:OptiModes[$m].Label })
+        $b.Tag = $m
+        $b.Add_Click({ param($s, $e) $global:Cfg.Mode = $s.Tag; Save-Cfg; Set-Appearance })
+        $global:ChipSets.mode[$m] = $b
         [void]$UI.ThemePanel.Children.Add($b)
     }
-    foreach ($k in $global:OptiFxModes.Keys) {
-        $b = New-RiceButton $global:OptiFxModes[$k]
+    foreach ($k in $global:OptiAccents.Keys) {
+        $b = New-Chip $global:OptiAccents[$k].Label $global:OptiAccents[$k].Dark
         $b.Tag = $k
-        $b.Add_Click({ param($s, $e) Set-Fx $s.Tag })
-        $global:RiceButtons.fx[$k] = $b
-        [void]$UI.FxPanel.Children.Add($b)
+        $b.Add_Click({ param($s, $e) $global:Cfg.Accent = $s.Tag; Save-Cfg; Set-Appearance })
+        $global:ChipSets.accent[$k] = $b
+        [void]$UI.AccentPanel.Children.Add($b)
     }
-    $rows = @(
-        @{ Key = 'GapIn';  Label = 'gaps_in';     Min = 0; Max = 20; Step = 2 },
-        @{ Key = 'GapOut'; Label = 'gaps_out';    Min = 0; Max = 32; Step = 2 },
-        @{ Key = 'Round';  Label = 'rounding';    Min = 0; Max = 24; Step = 2 },
-        @{ Key = 'Border'; Label = 'border_size'; Min = 1; Max = 4;  Step = 1 }
-    )
-    foreach ($row in $rows) {
-        $dock = New-Object Windows.Controls.StackPanel -Property @{ Orientation = 'Horizontal'; Margin = '0,0,0,6' }
-        $lbl = New-Object Windows.Controls.TextBlock -Property @{ Text = $row.Label; Width = 110; VerticalAlignment = 'Center' }
-        Set-Res $lbl ([Windows.Controls.TextBlock]::ForegroundProperty) 'Muted'
-        [void]$dock.Children.Add($lbl)
-        foreach ($d in -1, 1) {
-            if ($d -eq 1) {
-                $v = New-Object Windows.Controls.TextBlock -Property @{ Width = 36; TextAlignment = 'Center'; VerticalAlignment = 'Center' }
-                Set-Res $v ([Windows.Controls.TextBlock]::ForegroundProperty) 'Accent'
-                $global:LayoutValues[$row.Key] = $v
-                [void]$dock.Children.Add($v)
-            }
-            $b = New-Object Windows.Controls.Button -Property @{ Content = $(if ($d -lt 0) { '-' } else { '+' }); Width = 28; Padding = '0,3'; Tag = @{ Row = $row; Dir = $d } }
-            $b.Add_Click({
-                param($s, $e)
-                $r = $s.Tag.Row
-                $n = [int]$global:Cfg[$r.Key] + $s.Tag.Dir * $r.Step
-                $global:Cfg[$r.Key] = [math]::Min($r.Max, [math]::Max($r.Min, $n))
-                Set-Layout; Save-Cfg; Update-Rice
-            })
-            [void]$dock.Children.Add($b)
-        }
-        [void]$UI.LayoutPanel.Children.Add($dock)
-    }
-    foreach ($k in 'on', 'off', 'slow', 'normal', 'fast') {
-        $b = New-RiceButton $k
+    foreach ($k in 'on', 'off') {
+        $b = New-Chip $(if ($k -eq 'on') { 'Animate' } else { 'Reduce motion' })
         $b.Tag = $k
-        $b.Add_Click({
-            param($s, $e)
-            switch ($s.Tag) {
-                'on' { $global:Cfg.Anim = $true } 'off' { $global:Cfg.Anim = $false }
-                'slow' { $global:Cfg.Speed = 0.6 } 'normal' { $global:Cfg.Speed = 1.0 } 'fast' { $global:Cfg.Speed = 1.8 }
-            }
-            Start-BorderSpin; Save-Cfg; Update-Rice
-        })
-        $global:RiceButtons.anim[$k] = $b
+        $b.Add_Click({ param($s, $e) $global:Cfg.Anim = ($s.Tag -eq 'on'); Save-Cfg; Update-Appearance })
+        $global:ChipSets.anim[$k] = $b
         [void]$UI.AnimPanel.Children.Add($b)
     }
     foreach ($k in 'on', 'off') {
-        $b = New-RiceButton $(if ($k -eq 'on') { 'check at startup' } else { 'never check' })
+        $b = New-Chip $(if ($k -eq 'on') { 'Check at startup' } else { 'Never check' })
         $b.Tag = $k
-        $b.Add_Click({ param($s, $e) $global:Cfg.AutoUpdate = ($s.Tag -eq 'on'); Save-Cfg; Update-Rice })
-        $global:RiceButtons.upd[$k] = $b
+        $b.Add_Click({ param($s, $e) $global:Cfg.AutoUpdate = ($s.Tag -eq 'on'); Save-Cfg; Update-Appearance })
+        $global:ChipSets.upd[$k] = $b
         [void]$UI.UpdPanel.Children.Add($b)
     }
-    $UI.BtnConfCopy.Add_Click({ [Windows.Clipboard]::SetText((Get-HyprConf)) })
 }
 
 function Initialize-Look {
     Import-Cfg
-    $global:Fx = New-Object OptiFx $UI.FxCanvas
-    $global:Tiles = @($UI.TileBar, $UI.TileMain, $UI.TileLog)
-    Initialize-Rice
-    Set-Layout
-    $global:ActiveTile = $UI.TileMain
-    Set-Fx $global:Cfg.Fx
-    Set-Theme $global:Cfg.Theme $false
-}
-
-function Start-WindowIn {
-    if (-not $global:Cfg.Anim) { return }
-    $UI.Shell.RenderTransformOrigin = New-Object Windows.Point(0.5, 0.5)
-    $st = New-Object Windows.Media.ScaleTransform(0.97, 0.97)
-    $UI.Shell.RenderTransform = $st
-    $ease = New-Object Windows.Media.Animation.CubicEase
-    $ease.EasingMode = 'EaseOut'
-    $sa = New-Object Windows.Media.Animation.DoubleAnimation(0.97, 1, (Get-Dur 420))
-    $sa.EasingFunction = $ease
-    $st.BeginAnimation([Windows.Media.ScaleTransform]::ScaleXProperty, $sa)
-    $st.BeginAnimation([Windows.Media.ScaleTransform]::ScaleYProperty, $sa)
-    $UI.Shell.BeginAnimation([Windows.UIElement]::OpacityProperty, (New-Object Windows.Media.Animation.DoubleAnimation(0, 1, (Get-Dur 380))))
+    $win.SetResourceReference([Windows.Window]::BackgroundProperty, 'Bg')
+    Initialize-Settings
+    Set-Appearance $false
 }
