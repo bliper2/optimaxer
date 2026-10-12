@@ -8,7 +8,7 @@ $global:OptiLogQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueue
 $global:Jobs    = New-Object System.Collections.ArrayList
 $global:Busy    = $false
 $global:Loaded  = @{}
-$global:Sys     = @{ Laptop = $false; SSD = $true }
+$global:Sys     = @{ Laptop = $false; SSD = $true; Vendor = '' }
 $global:OptiFilters = @{}
 
 # ================================================================ window
@@ -231,6 +231,7 @@ function Test-Applicable {
     param($T)
     if ($T.DesktopOnly -and $global:Sys.Laptop) { return $false }
     if ($T.SSDOnly -and -not $global:Sys.SSD) { return $false }
+    if ($T.Vendor -and $T.Vendor -ne $global:Sys.Vendor) { return $false }
     return $true
 }
 
@@ -251,6 +252,7 @@ function Initialize-Dashboard {
             RAM = [math]::Round($cs.TotalPhysicalMemory / 1GB, 1)
             Laptop = [bool](Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue)
             SSD = $ssd
+            Vendor = Get-SystemVendor
             Disks = @(Get-PhysicalDisk | ForEach-Object { '{0} - {1}, {2} GB, {3}' -f $_.FriendlyName, $_.MediaType, [math]::Round($_.Size / 1GB), $_.HealthStatus })
             Startup = @(Get-StartupItems -NoTasks).Count
             Processes = @(Get-Process).Count
@@ -264,14 +266,14 @@ function Initialize-Dashboard {
         param($res)
         $i = $res | Select-Object -First 1
         if ($i) {
-            $global:Sys.Laptop = [bool]$i.Laptop; $global:Sys.SSD = [bool]$i.SSD
+            $global:Sys.Laptop = [bool]$i.Laptop; $global:Sys.SSD = [bool]$i.SSD; $global:Sys.Vendor = [string]$i.Vendor
             $pairs = @(
                 , @('Host', "$($i.Machine) ($(if ($i.Laptop) { 'laptop' } else { 'desktop' }))")
                 , @('OS', $i.OS)
                 , @('CPU', $i.CPU)
                 , @('GPU', $i.GPU)
                 , @('Memory', "$($i.RAM) GB")
-            ) + @($i.Disks | ForEach-Object { , @('Disk', $_) }) + @(, @('Startup', "$($i.Startup) items")) + @(, @('Processes', "$($i.Processes) running")) + $(if ($i.BootSec -gt 0) { , @('Boot time', "$($i.BootSec) s (last boot)") })
+            ) + @($i.Disks | ForEach-Object { , @('Disk', $_) }) + @(, @('Startup', "$($i.Startup) items")) + @(, @('Processes', "$($i.Processes) running")) + $(if ($i.BootSec -gt 0) { , @('Boot time', "$($i.BootSec) s (last boot)") }) + $(if ($i.Vendor) { , @('Vendor', "$($i.Vendor) (driver center available in Tools)") })
             $UI.SysInfo.Inlines.Clear()
             foreach ($pr in $pairs) {
                 $k = New-Object Windows.Documents.Run(($pr[0] + ': '))
@@ -297,6 +299,7 @@ foreach ($t in $global:OptiCatalog) {
     $notes = @()
     if ($t.DesktopOnly) { $notes += 'desktop PCs' }
     if ($t.SSDOnly) { $notes += 'SSD only' }
+    if ($t.Vendor) { $notes += "$($t.Vendor) systems only" }
     if ($t.Restart) { $notes += 'restart needed' }
     if ($t.Tags -contains 'optin') { $notes += 'opt-in, never in presets' }
     $d = if ($notes) { "$($t.Desc)  [$($notes -join ', ')]" } else { $t.Desc }
@@ -909,6 +912,7 @@ $global:Tools = [ordered]@{
     update  = @{ Title = 'Check for updates';           Desc = 'Looks for a newer Optimaxer release on GitHub and offers to install it (checksum-verified, current files are backed up first).' }
     regbackup = @{ Title = 'Export registry backup';    Desc = 'Saves .reg exports of the policy, Explorer, memory and network keys that Optimaxer edits, to the backups folder.' }
     rstrui  = @{ Title = 'Open System Restore';         Desc = 'Roll your PC back to a restore point.' }
+    drivers = @{ Title = 'Vendor driver center';        Desc = 'Opens the official download page for your detected board/system vendor (MSI, Acer, Gigabyte) in your browser. Nothing is downloaded or installed by Optimaxer.' }
     revert  = @{ Title = 'Undo ALL Optimaxer tweaks';   Desc = 'Restores every setting changed by this tool to its original value.'; Danger = $true }
 }
 
@@ -1019,6 +1023,12 @@ function Invoke-Tool {
     param([string]$Key)
     if ($Key -eq 'rstrui') { Start-Process rstrui.exe; return }
     if ($Key -eq 'update') { Start-UpdateCheck -Manual; return }
+    if ($Key -eq 'drivers') {
+        $url = $global:OptiVendorDriverUrl[$global:Sys.Vendor]
+        if ($url) { Start-Process $url; Write-Log "Opened the $($global:Sys.Vendor) driver center in your browser." 'OK' }
+        else { Write-Log 'No MSI, Acer or Gigabyte board/system detected; open your PC maker''s support site manually.' 'WARN' }
+        return
+    }
     if (-not (Test-Elevated)) { return }
     if ($Key -eq 'defrag' -and -not (Confirm-Action 'Defragmenting hard disks can take an hour or more and the app stays busy until it finishes. Continue?')) { return }
     if ($Key -eq 'revert' -and -not (Confirm-Action 'Restore ALL settings changed by Optimaxer to their original values?')) { return }

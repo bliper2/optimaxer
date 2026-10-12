@@ -713,7 +713,29 @@ function Get-SystemTraits {
         $dn = (Get-Partition -DriveLetter $env:SystemDrive[0] -ErrorAction Stop).DiskNumber
         if ((Get-PhysicalDisk | Where-Object { $_.DeviceId -eq "$dn" }).MediaType -eq 'HDD') { $ssd = $false }
     } catch {}
-    return @{ Laptop = $laptop; SSD = $ssd }
+    return @{ Laptop = $laptop; SSD = $ssd; Vendor = Get-SystemVendor }
+}
+
+# Normalizes the board/system manufacturer string Windows reports to one of a few known brands, or ''.
+# Checked for informational display and to gate vendor-tagged catalog entries; never used to pick or fetch
+# a driver automatically (no network calls, no downloads) - that stays a manual, user-confirmed step.
+function Get-SystemVendor {
+    $names = @()
+    try { $names += (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).Manufacturer } catch {}
+    try { $names += (Get-CimInstance Win32_BaseBoard -ErrorAction Stop).Manufacturer } catch {}
+    $names = @($names | Where-Object { $_ }) -join ' '
+    if ($names -match 'MSI|Micro-Star') { return 'MSI' }
+    if ($names -match 'Acer') { return 'Acer' }
+    if ($names -match 'Gigabyte|Giga-Byte') { return 'Gigabyte' }
+    return ''
+}
+
+# URL of each detected vendor's own driver/support center. Opened in the default browser on request only;
+# Optimaxer never downloads or installs a driver itself.
+$global:OptiVendorDriverUrl = @{
+    MSI      = 'https://www.msi.com/support/download'
+    Acer     = 'https://www.acer.com/us-en/support/drivers-and-manuals'
+    Gigabyte = 'https://www.gigabyte.com/Support'
 }
 
 function Get-PresetTweakIds {
@@ -721,6 +743,7 @@ function Get-PresetTweakIds {
     foreach ($t in $global:OptiCatalog) {
         if ($t.DesktopOnly -and $Traits.Laptop) { continue }
         if ($t.SSDOnly -and -not $Traits.SSD) { continue }
+        if ($t.Vendor -and $t.Vendor -ne $Traits.Vendor) { continue }
         if ($t.Tags -contains $Preset) { $t.Id }
     }
 }

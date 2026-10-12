@@ -773,3 +773,39 @@ T -Id 'net-hosts-spy' -Cat $N -Name 'Block Windows telemetry and ad servers in t
       ipconfig /flushdns | Out-Null
   } `
   -Test { ([IO.File]::ReadAllText("$env:SystemRoot\System32\drivers\etc\hosts")) -match '# BEGIN Optimaxer telemetry block' }
+
+T -Id 'audio-loudnesseq' -Cat $P -Name 'Unhide "Loudness Equalization" on audio devices' -Tags optin -Risk Moderate `
+  -Desc 'Some audio drivers hide the Loudness Equalization checkbox (Sound > device Properties > Enhancements). Adds the FxProperties value that unhides it on every render endpoint; restarts the audio service. You still enable the checkbox yourself.' `
+  -Apply {
+      $base = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render'
+      $prop = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},3'
+      $prev = @()
+      foreach ($dev in Get-ChildItem -Path $base -ErrorAction SilentlyContinue) {
+          $fx = Join-Path $dev.PSPath 'FxProperties'
+          $had = Test-Path -LiteralPath $fx
+          $old = if ($had) { (Get-ItemProperty -LiteralPath $fx -Name $prop -ErrorAction SilentlyContinue).$prop } else { $null }
+          $prev += @{ Path = $fx; Had = $had; Old = $old }
+          try { Set-RegEntry -Path $fx -Name $prop -Value '{5860E1C5-F95C-4a7a-8EC8-8AEF24F379A1}' -Type String } catch {}
+      }
+      try { Restart-Service audiosrv -Force -ErrorAction Stop } catch {}
+      , $prev
+  } `
+  -Undo {
+      param($d)
+      $prop = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},3'
+      foreach ($p in @($d)) {
+          if (-not $p.Had) { Remove-RegEntry -Path $p.Path -Name $prop }
+          elseif ($null -ne $p.Old) { try { Set-RegEntry -Path $p.Path -Name $prop -Value $p.Old -Type String } catch {} }
+      }
+      try { Restart-Service audiosrv -Force -ErrorAction Stop } catch {}
+  } `
+  -Test {
+      $base = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render'
+      $prop = '{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},3'
+      $any = $false
+      foreach ($dev in Get-ChildItem -Path $base -ErrorAction SilentlyContinue) {
+          $fx = Join-Path $dev.PSPath 'FxProperties'
+          if ((Get-ItemProperty -LiteralPath $fx -Name $prop -ErrorAction SilentlyContinue).$prop -eq '{5860E1C5-F95C-4a7a-8EC8-8AEF24F379A1}') { $any = $true }
+      }
+      $any
+  }

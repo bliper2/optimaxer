@@ -19,7 +19,7 @@ import tempfile
 import time
 import urllib.request
 
-__version__ = "2.2.0"
+__version__ = "2.4.0"
 REPO = "bliper2/optimaxer"
 STATE_FILE = "/var/lib/optimaxer/state.json"
 BACKUP_DIR = "/var/lib/optimaxer/backups"
@@ -433,6 +433,60 @@ class Tweak:
 
 SYSCTL = ["sysctl", "--system"]
 
+def _policy(policies: dict, wrap: bool = False) -> str:
+    """JSON text for a browser managed-policy file. Firefox wraps the policies in a top-level "policies" key."""
+    return json.dumps({"policies": policies} if wrap else policies, indent=2) + "\n"
+
+
+# Policies understood by every Chromium-based browser (Chrome, Chromium, Brave, Edge). A browser ignores keys it does not know.
+_CHROMIUM_PRIVACY = {
+    "MetricsReportingEnabled": False, "SafeBrowsingExtendedReportingEnabled": False, "UrlKeyedAnonymizedDataCollectionEnabled": False,
+    "SpellCheckServiceEnabled": False, "AlternateErrorPagesEnabled": False, "SearchSuggestEnabled": False, "BackgroundModeEnabled": False,
+    "PromotionalTabsEnabled": False, "ShoppingListEnabled": False, "DefaultBrowserSettingEnabled": False, "NetworkPredictionOptions": 2,
+    "PrivacySandboxPromptEnabled": False, "PrivacySandboxAdTopicsEnabled": False, "PrivacySandboxSiteEnabledAdsEnabled": False,
+    "PrivacySandboxAdMeasurementEnabled": False, "WebRtcIPHandlingPolicy": "default_public_interface_only",
+    "GenAiDefaultSettings": 2, "HelpMeWriteSettings": 2, "TabCompareSettings": 2, "HistorySearchSettings": 2, "GeminiSettings": 1,
+}
+_BRAVE = dict(_CHROMIUM_PRIVACY, BraveRewardsDisabled=True, BraveWalletDisabled=True, BraveVPNDisabled=True, BraveAIChatEnabled=False,
+              BraveNewsDisabled=True, BraveTalkDisabled=True, BraveP3AEnabled=False, BraveStatsPingEnabled=False, BraveWebDiscoveryEnabled=False)
+_EDGE = dict(_CHROMIUM_PRIVACY, DiagnosticData=0, EdgeShoppingAssistantEnabled=False, HubsSidebarEnabled=False, EdgeFollowEnabled=False,
+             ShowRecommendationsEnabled=False, PersonalizationReportingEnabled=False, StartupBoostEnabled=False, NewTabPageContentEnabled=False,
+             SpotlightExperiencesAndRecommendationsEnabled=False, EdgeWorkspacesEnabled=False, ShowMicrosoftRewards=False, UserFeedbackAllowed=False,
+             Microsoft365CopilotChatIconEnabled=False)
+_FIREFOX = {
+    "DisableTelemetry": True, "DisableFirefoxStudies": True, "DisablePocket": True, "DisableFeedbackCommands": True, "DontCheckDefaultBrowser": True,
+    "OverrideFirstRunPage": "", "OverridePostUpdatePage": "",
+    "FirefoxSuggest": {"WebSuggestions": False, "SponsoredSuggestions": False, "ImproveSuggest": False},
+    "FirefoxHome": {"SponsoredTopSites": False, "SponsoredPocket": False, "Pocket": False, "Stories": False, "SponsoredStories": False, "Snippets": False},
+    "UserMessaging": {"ExtensionRecommendations": False, "FeatureRecommendations": False, "UrlbarInterventions": False, "SkipOnboarding": True, "MoreFromMozilla": False},
+    "EnableTrackingProtection": {"Value": True, "Cryptomining": True, "Fingerprinting": True, "EmailTracking": True},
+    "Preferences": {k: {"Value": False, "Status": "default"} for k in (
+        "browser.ml.chat.enabled", "browser.ml.chat.sidebar", "browser.ml.linkPreview.enabled", "browser.tabs.groups.smart.enabled",
+        "datareporting.healthreport.uploadEnabled", "app.shield.optoutstudies.enabled", "browser.newtabpage.activity-stream.feeds.telemetry",
+        "browser.newtabpage.activity-stream.telemetry", "browser.discovery.enabled", "browser.newtabpage.activity-stream.showWeather",
+        "browser.newtabpage.activity-stream.system.showWeather", "browser.newtabpage.activity-stream.showSponsored",
+        "browser.newtabpage.activity-stream.showSponsoredTopSites", "browser.newtabpage.activity-stream.feeds.section.topstories",
+        "browser.newtabpage.activity-stream.feeds.system.topstories", "browser.newtabpage.activity-stream.widgets.system.enabled",
+        "browser.newtabpage.activity-stream.widgets.enabled", "browser.newtabpage.activity-stream.feeds.weatherfeed",
+        "browser.newtabpage.activity-stream.discoverystream.sponsoredCollections.enabled")},
+}
+# Firefox's "Preferences" policy only accepts a short allow-list of settings and silently ignores the rest (the new-tab widgets, weather and
+# sponsored stories are not on it). An autoconfig file has no such limit, so the new-tab and telemetry settings are locked this way.
+_FF_NEWTAB = ("browser.newtabpage.activity-stream." + n for n in (
+    "showSponsored", "showSponsoredTopSites", "system.showSponsored", "showWeather", "system.showWeather", "feeds.weatherfeed",
+    "feeds.section.topstories", "feeds.system.topstories", "widgets.enabled", "widgets.system.enabled", "widgets.lists.enabled",
+    "widgets.focusTimer.enabled", "discoverystream.enabled", "discoverystream.sponsoredCollections.enabled", "feeds.telemetry", "telemetry"))
+_FF_LOCKED = tuple(_FF_NEWTAB) + (
+    "browser.ml.chat.enabled", "browser.ml.chat.sidebar", "browser.ml.linkPreview.enabled", "browser.tabs.groups.smart.enabled",
+    "extensions.pocket.enabled", "app.normandy.enabled", "app.shield.optoutstudies.enabled", "toolkit.telemetry.enabled",
+    "toolkit.telemetry.unified", "toolkit.telemetry.archive.enabled", "datareporting.healthreport.uploadEnabled",
+    "datareporting.policy.dataSubmissionEnabled", "browser.discovery.enabled", "browser.urlbar.suggest.quicksuggest.sponsored",
+    "browser.urlbar.suggest.quicksuggest.nonsponsored")
+_FF_AUTOCONFIG = 'pref("general.config.filename", "optimaxer.cfg");\npref("general.config.obscure_value", 0);\n'
+_FF_CFG = "// Optimaxer: locked Firefox preferences. Undo the tweak in Optimaxer to remove this file.\n" + "".join(
+    f'lockPref("{k}", false);\n' for k in _FF_LOCKED)
+_POLICY_NOTE = " The browser shows 'managed by your organization'; any policy file you already have is saved and restored on undo."
+
 TWEAKS = [
     # ---- performance
     Tweak("perf-vm", "Memory tuning (swappiness 20, cache pressure 50)", "Keeps apps in RAM longer and flushes dirty pages sooner: snappier desktop, smoother large copies.",
@@ -474,6 +528,19 @@ TWEAKS = [
           edits=[LineEdit("/etc/default/grub", "GRUB_TIMEOUT", "2", sep="=")], needs=["/etc/default/grub"],
           post=[["sh", "-c", "command -v update-grub >/dev/null && update-grub || grub-mkconfig -o /boot/grub/grub.cfg"]],
           undo_post=[["sh", "-c", "command -v update-grub >/dev/null && update-grub || grub-mkconfig -o /boot/grub/grub.cfg"]]),
+    Tweak("perf-inotify", "Raise inotify watch limit (524288)", "IDEs, file managers and sync tools stop failing with 'no space left on device' (ENOSPC) on big folders.", "Performance",
+          tags={"safe", "perf", "max"}, files={"/etc/sysctl.d/99-optimaxer-inotify.conf": "fs.inotify.max_user_watches = 524288\nfs.inotify.max_user_instances = 1024\n"}, post=[SYSCTL]),
+    Tweak("perf-mapcount", "Raise vm.max_map_count (1048576)", "Needed by many Proton/Wine games and some engines that crash with the old 65530 limit.", "Gaming",
+          tags={"perf", "max"}, files={"/etc/sysctl.d/99-optimaxer-mapcount.conf": "vm.max_map_count = 1048576\n"}, post=[SYSCTL]),
+    Tweak("perf-netbuf", "Larger network buffers, TCP Fast Open and MTU probing", "16 MB socket buffer ceilings, Fast Open for client and server, and MTU probing: better throughput on fast links and fewer stalls behind broken routers.",
+          "Network", tags={"perf", "max"},
+          files={"/etc/sysctl.d/99-optimaxer-netbuf.conf": "net.core.rmem_max = 16777216\nnet.core.wmem_max = 16777216\nnet.core.netdev_max_backlog = 16384\nnet.ipv4.tcp_fastopen = 3\nnet.ipv4.tcp_mtu_probing = 1\nnet.ipv4.tcp_slow_start_after_idle = 0\n"}, post=[SYSCTL]),
+    Tweak("perf-gamemode", "GameMode (on-demand game performance)", "Installs gamemode: games started with `gamemoderun %command%` get the performance CPU governor and higher priority only while running.", "Gaming",
+          tags={"perf", "max"}, pkgs=["gamemode"]),
+    Tweak("perf-irqbalance", "irqbalance (spread hardware interrupts across cores)", "Installs and enables irqbalance: smoother network and disk throughput on multi-core CPUs.", "Performance",
+          tags={"max"}, pkgs=["irqbalance"], enable=["irqbalance.service"]),
+    Tweak("perf-networkd-wait", "Faster boot: mask systemd-networkd-wait-online", "Stops boot waiting on systemd-networkd-wait-online; harmless on NetworkManager systems.", "Performance",
+          risk="moderate", tags={"max"}, disable=["systemd-networkd-wait-online.service"], needs=["/usr/lib/systemd/system/systemd-networkd-wait-online.service"]),
     # ---- package manager
     Tweak("pm-pacman", "pacman: parallel downloads and colour", "ParallelDownloads = 5 and Color in /etc/pacman.conf: much faster updates, readable output.", "Package manager",
           tags={"safe", "perf", "max"}, needs=["/etc/pacman.conf"],
@@ -497,6 +564,20 @@ TWEAKS = [
           post=[["ufw", "--force", "enable"]], undo_post=[["ufw", "--force", "disable"]], test_cmd=["sh", "-c", "ufw status | grep -q 'Status: active'"]),
     Tweak("priv-avahi", "Disable mDNS/Avahi network discovery", "Stops the machine announcing itself on the LAN. Network printer and Chromecast auto-discovery stops working.", "Privacy",
           risk="moderate", tags={"privacy", "max"}, disable=["avahi-daemon.service", "avahi-daemon.socket"], needs=["/usr/lib/systemd/system/avahi-daemon.service"]),
+    # ---- browser debloat (managed policies: they apply to every profile and survive browser updates)
+    Tweak("browser-firefox", "Firefox: telemetry, studies, Pocket, sponsored content, AI chat", "Turns off telemetry, Shield studies, Pocket, sponsored tiles and suggestions, first-run pages, the AI chatbot and link previews; enables strict tracking protection. Also locks the new-tab weather, widgets, stories and sponsored tiles off through an autoconfig file in /usr/lib/firefox. Close every Firefox window and reopen it; about:policies should list the policies." + _POLICY_NOTE,
+          "Browsers", tags={"privacy", "max"}, files={"/usr/lib/firefox/distribution/policies.json": _policy(_FIREFOX, wrap=True),
+                                                  "/etc/firefox/policies/policies.json": _policy(_FIREFOX, wrap=True),
+                                                  "/usr/lib/firefox/defaults/pref/optimaxer-autoconfig.js": _FF_AUTOCONFIG,
+                                                  "/usr/lib/firefox/optimaxer.cfg": _FF_CFG}, needs=["firefox"]),
+    Tweak("browser-chromium", "Chromium: reporting, ads API, prediction, AI features", "Turns off usage reporting, Privacy Sandbox ad APIs, the spelling web service, search suggestions, network prediction and generative-AI features; WebRTC no longer leaks the local IP." + _POLICY_NOTE,
+          "Browsers", tags={"privacy", "max"}, files={"/etc/chromium/policies/managed/optimaxer.json": _policy(_CHROMIUM_PRIVACY)}, needs=["chromium"]),
+    Tweak("browser-chrome", "Google Chrome: reporting, ads API, prediction, AI features", "Turns off usage reporting, Privacy Sandbox ad APIs, the spelling web service, search suggestions, network prediction, background mode and Gemini/generative-AI features." + _POLICY_NOTE,
+          "Browsers", tags={"privacy", "max"}, files={"/etc/opt/chrome/policies/managed/optimaxer.json": _policy(_CHROMIUM_PRIVACY)}, needs=["google-chrome-stable"]),
+    Tweak("browser-brave", "Brave: Rewards, Wallet, VPN, AI chat, News, Talk, telemetry", "Turns off Brave Rewards, Wallet, VPN, Leo AI chat, News, Talk, P3A and the stats ping, plus the shared Chromium privacy policies." + _POLICY_NOTE,
+          "Browsers", tags={"privacy", "max"}, files={"/etc/brave/policies/managed/optimaxer.json": _policy(_BRAVE)}, needs=["brave"]),
+    Tweak("browser-edge", "Microsoft Edge: diagnostics, shopping, sidebar, Copilot, rewards", "Turns off diagnostic data, the shopping assistant, sidebar, Copilot icon, recommendations, startup boost, workspaces and Rewards, plus the shared Chromium privacy policies." + _POLICY_NOTE,
+          "Browsers", tags={"privacy", "max"}, files={"/etc/opt/edge/policies/managed/optimaxer.json": _policy(_EDGE)}, needs=["microsoft-edge-stable"]),
 ]
 
 PRESETS = ("safe", "perf", "privacy", "max")
@@ -519,6 +600,7 @@ Browsers|Vivaldi|P|vivaldi
 Browsers|Falkon|P|falkon
 Browsers|Tor Browser|P|torbrowser-launcher
 Browsers|Brave|A|brave-bin
+Browsers|Helium|A|helium-browser-bin
 Browsers|Google Chrome|A|google-chrome
 Browsers|Zen Browser|A|zen-browser-bin
 Browsers|Floorp|A|floorp-bin

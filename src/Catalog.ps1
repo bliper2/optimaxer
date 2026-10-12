@@ -12,12 +12,12 @@ function T {
         [string]$Id, [string]$Name, [string]$Desc, [string]$Cat, [string]$Risk = 'Safe', [string[]]$Tags = @(),
         [object[]]$Reg = @(), [object[]]$Svc = @(), [string[]]$Task = @(),
         [scriptblock]$Apply, [scriptblock]$Undo, [scriptblock]$Test,
-        [switch]$Restart, [switch]$Explorer, [switch]$DesktopOnly, [switch]$SSDOnly, [double]$SvcTol = 1.0
+        [switch]$Restart, [switch]$Explorer, [switch]$DesktopOnly, [switch]$SSDOnly, [string]$Vendor = '', [double]$SvcTol = 1.0
     )
     [void]$global:OptiCatalog.Add([pscustomobject]@{
         Id = $Id; Name = $Name; Desc = $Desc; Cat = $Cat; Risk = $Risk; Tags = $Tags
         Reg = $Reg; Svc = $Svc; Task = $Task; Apply = $Apply; Undo = $Undo; Test = $Test
-        Restart = [bool]$Restart; Explorer = [bool]$Explorer; DesktopOnly = [bool]$DesktopOnly; SSDOnly = [bool]$SSDOnly; SvcTol = $SvcTol
+        Restart = [bool]$Restart; Explorer = [bool]$Explorer; DesktopOnly = [bool]$DesktopOnly; SSDOnly = [bool]$SSDOnly; Vendor = $Vendor; SvcTol = $SvcTol
     })
 }
 
@@ -161,6 +161,24 @@ T -Id 'perf-vbs' -Cat $P -Name 'Disable Memory Integrity (VBS/HVCI)' -Tags optin
   -Desc 'WARNING: lowers kernel security. Can give 5-10% FPS in some games. Only for dedicated gaming rigs.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' 'Enabled' 0 )
 
+T -Id 'perf-globaltimer' -Cat $P -Name 'Honor per-app timer resolution requests' -Tags gaming, max -Risk Moderate -Restart `
+  -Desc 'GlobalTimerResolutionRequests = 1 (Windows 11 / Server 2022 behaviour restored): games and tools that request a 0.5 ms timer apply it system-wide again. Slightly higher idle power.' `
+  -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' 'GlobalTimerResolutionRequests' 1 )
+
+T -Id 'perf-mmagent' -Cat $P -Name 'Disable app pre-launch and page combining' -Tags max -Risk Moderate `
+  -Desc 'Turns off MMAgent ApplicationPreLaunch and PageCombining: less background memory and disk activity. Apps may start marginally slower the first time.' `
+  -Apply {
+      $a = Get-MMAgent -ErrorAction Stop
+      Disable-MMAgent -ApplicationPreLaunch -PageCombining -ErrorAction Stop | Out-Null
+      @{ PreLaunch = [bool]$a.ApplicationPreLaunch; Combining = [bool]$a.PageCombining }
+  } `
+  -Undo {
+      param($d)
+      if ($d -and $d.PreLaunch) { Enable-MMAgent -ApplicationPreLaunch -ErrorAction Stop | Out-Null }
+      if ($d -and $d.Combining) { Enable-MMAgent -PageCombining -ErrorAction Stop | Out-Null }
+  } `
+  -Test { $a = Get-MMAgent -ErrorAction Stop; -not $a.ApplicationPreLaunch -and -not $a.PageCombining }
+
 # ======================================================================= GAMING
 $G = 'Gaming'
 T -Id 'game-mode' -Cat $G -Name 'Enable Game Mode' -Tags safe, gaming, max `
@@ -185,6 +203,10 @@ T -Id 'game-fso' -Cat $G -Name 'Disable fullscreen optimizations globally' -Tags
       Rg $GCS 'GameDVR_FSEBehavior' 2
       Rg $GCS 'GameDVR_DXGIHonorFSEWindowsCompatible' 1
   )
+
+T -Id 'game-mpo' -Cat $G -Name 'Disable Multiplane Overlay (MPO)' -Tags gaming, max -Risk Moderate -Restart `
+  -Desc 'Fixes stutter, flicker and black screens on some NVIDIA/AMD setups (multi-monitor, high refresh). Set OverlayTestMode = 5 in the DWM key; undo removes it.' `
+  -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\Windows\Dwm' 'OverlayTestMode' 5 )
 
 T -Id 'game-windowed' -Cat $G -Name 'Optimizations for windowed games' -Tags safe, gaming, max `
   -Desc 'Enables flip-model presentation for borderless/windowed DirectX 10/11 games: lower latency, VRR support.' `
