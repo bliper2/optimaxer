@@ -215,6 +215,7 @@ T -Id 'ai-recall' -Cat $AI -Name 'Turn off Recall and AI data analysis' -Tags sa
   -Reg @(
       Rg $WAI 'DisableAIDataAnalysis' 1
       Rg $WAI 'AllowRecallEnablement' 0
+      Rg $WAI 'TurnOffSavingSnapshots' 1
       Rg 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI' 'DisableAIDataAnalysis' 1
   ) `
   -Apply {
@@ -258,19 +259,38 @@ T -Id 'ai-edge' -Cat $AI -Name 'Edge: turn off Copilot sidebar and page context'
       Rg $EDGEP 'EdgeEntraCopilotPageContext' 0
   )
 
-T -Id 'ai-remove-apps' -Cat $AI -Name 'Uninstall the Copilot app packages' -Tags max, deai -Risk Moderate `
-  -Desc 'Removes every installed *Copilot* app package for all users and from the provisioning list so new accounts do not get it. Undo cannot reinstall: use the Microsoft Store.' `
+T -Id 'ai-cloudsearch' -Cat $AI -Name 'Search: no cloud account content or search highlights' -Tags safe, privacy, max, deai `
+  -Desc 'Stops Windows Search from querying your Microsoft/work account cloud content and removes the daily search highlights (doodles, trending topics) from the search box.' `
+  -Reg @(
+      Rg "$CV\SearchSettings" 'IsMSACloudSearchEnabled' 0
+      Rg "$CV\SearchSettings" 'IsAADCloudSearchEnabled' 0
+      Rg "$CV\SearchSettings" 'IsDynamicSearchBoxEnabled' 0
+      Rg "$POL\Windows Search" 'EnableDynamicContentInWSB' 0
+  )
+
+T -Id 'ai-tailored' -Cat $AI -Name 'No tailored experiences from your diagnostic data' -Tags safe, privacy, max, deai `
+  -Desc 'Windows stops using your diagnostic data to personalize tips, ads and recommendations.' `
+  -Reg @(
+      Rg "$CV\Privacy" 'TailoredExperiencesWithDiagnosticDataEnabled' 0
+      Rg 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableTailoredExperiencesWithDiagnosticData' 1
+  )
+
+$global:OptiAiApps = @('*Copilot*', 'Microsoft.Windows.AIHub', 'MicrosoftWindows.Client.AIX', 'MicrosoftWindows.Client.CoreAI')
+
+T -Id 'ai-remove-apps' -Cat $AI -Name 'Uninstall the Copilot and AI app packages' -Tags max, deai -Risk Moderate `
+  -Desc 'Removes every installed Copilot / AI Hub package for all users and from the provisioning list so new accounts do not get them. Protected system components (marked non-removable by Windows) are skipped and reported. Undo cannot reinstall: use the Microsoft Store.' `
   -Apply {
-      $names = @()
-      foreach ($p in Get-AppxPackage -AllUsers -Name '*Copilot*' -ErrorAction SilentlyContinue) {
-          $names += $p.Name
-          Remove-AppxPackage -Package $p.PackageFullName -AllUsers -ErrorAction SilentlyContinue
-      }
-      Get-AppxProvisionedPackage -Online | Where-Object DisplayName -like '*Copilot*' | Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Out-Null
-      , @($names | Select-Object -Unique)
+      $r = Remove-AppxByName $global:OptiAiApps
+      foreach ($f in $r.Failed) { Write-Log "  could not remove $f" 'WARN' }
+      , @($r.Removed)
   } `
   -Undo { Write-Log '  Copilot apps cannot be restored automatically: reinstall from the Microsoft Store if you want them back.' 'WARN' } `
-  -Test { -not (Get-AppxPackage -Name '*Copilot*' -ErrorAction SilentlyContinue) }
+  -Test {
+      foreach ($pat in $global:OptiAiApps) {
+          foreach ($p in @(Get-AppxPackage -AllUsers -Name $pat -ErrorAction SilentlyContinue)) { if (-not $p.NonRemovable -and -not $p.IsFramework) { return $false } }
+      }
+      $true
+  }
 
 # ======================================================================= MORE DEBLOAT
 T -Id 'debloat-spotlight' -Cat $D -Name 'Turn off Windows Spotlight and lock-screen promos' -Tags safe, privacy, max, deai `

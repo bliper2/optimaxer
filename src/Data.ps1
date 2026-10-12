@@ -193,6 +193,8 @@ Microsoft.WidgetsPlatformRuntime|Widgets runtime|O
 Microsoft.Edge.GameAssist|Edge Game Assist|O
 Microsoft.PCManager|PC Manager|R
 Microsoft.Windows.AIHub|Copilot+ AI Hub|R
+MicrosoftWindows.Client.AIX|Windows AI experience (system component)|C
+MicrosoftWindows.Client.CoreAI|Windows AI core (system component)|C
 Microsoft.NetworkSpeedTest|Network Speed Test|R
 Microsoft.News|Microsoft News app|R
 Microsoft.Office.Sway|Sway|R

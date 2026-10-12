@@ -358,6 +358,8 @@ T -Id 'priv-websearch' -Cat $V -Name 'Disable Bing web results in Start search' 
       Rg "$CV\Search" 'BingSearchEnabled' 0
       Rg "$CV\Search" 'CortanaConsent' 0
       Rg 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\Explorer' 'DisableSearchBoxSuggestions' 1
+      Rg "$POL\Windows Search" 'DisableWebSearch' 1
+      Rg "$POL\Windows Search" 'ConnectedSearchUseWeb' 0
   )
 
 T -Id 'priv-ai' -Cat $V -Name 'Disable Copilot, Recall and Click to Do' -Tags safe, privacy, max, deai `
@@ -432,21 +434,36 @@ T -Id 'debloat-widgets' -Cat $D -Name 'Remove Widgets and Chat taskbar buttons' 
   -Desc 'Hides the Widgets board and Teams Chat, and stops the news feed.' `
   -Reg @( Rg $EXA 'TaskbarDa' 0; Rg $EXA 'TaskbarMn' 0; Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Dsh' 'AllowNewsAndInterests' 0 )
 
-T -Id 'debloat-onedrive' -Cat $D -Name 'Uninstall OneDrive' -Tags optin -Risk Advanced `
-  -Desc 'Removes the OneDrive client. Make sure your files are not only in the cloud first. Undo reinstalls it.' `
-  -Reg @( Rg "$POL\OneDrive" 'DisableFileSyncNGSC' 1 ) `
+T -Id 'debloat-onedrive' -Cat $D -Name 'Uninstall OneDrive' -Tags optin -Risk Advanced -Explorer `
+  -Desc 'Stops OneDrive, runs its per-user and per-machine uninstallers, blocks it from coming back (policy, update tasks, new-user setup entry), hides the Explorer sidebar entry and clears leftovers. Your files in the OneDrive folder are never deleted. Refuses to run while Desktop/Documents/Pictures are backed up into OneDrive: move them back first. Undo reinstalls it.' `
+  -Reg @(
+      Rg 'HKCU:\Software\Classes\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}' 'System.IsPinnedToNameSpaceTree' 0
+      Rg 'HKCU:\Software\Classes\Wow6432Node\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}' 'System.IsPinnedToNameSpaceTree' 0
+  ) `
   -Apply {
-      Stop-Process -Name OneDrive -Force -ErrorAction SilentlyContinue
-      $exe = "$env:SystemRoot\SysWOW64\OneDriveSetup.exe"; if (-not (Test-Path $exe)) { $exe = "$env:SystemRoot\System32\OneDriveSetup.exe" }
-      if (Test-Path $exe) { Start-Process $exe '/uninstall' -Wait }
-      $null
+      $moved = @(Get-OneDriveRedirectedFolders)
+      if ($moved.Count) {
+          Write-Log '  NOT uninstalled: these folders are backed up into OneDrive and files may exist only in the cloud:' 'WARN'
+          foreach ($m in $moved) { Write-Log "    $m" 'WARN' }
+          Write-Log '  Open OneDrive > Settings > Sync and backup > Manage backup, stop backing them up, move the files back, then run this again.' 'WARN'
+          return @{ Refused = $true; PolicyExisted = $false; PolicyValue = 0; Tasks = @() }
+      }
+      $pol = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\OneDrive'
+      $snap = Get-RegSnapshot @{ P = $pol; N = 'DisableFileSyncNGSC' }
+      $r = Uninstall-OneDrive
+      Set-RegEntry $pol 'DisableFileSyncNGSC' 1
+      @{ Refused = $false; PolicyExisted = [bool]$snap.Exists; PolicyValue = $snap.Value; Tasks = @($r.Tasks) }
   } `
   -Undo {
-      $exe = "$env:SystemRoot\SysWOW64\OneDriveSetup.exe"; if (-not (Test-Path $exe)) { $exe = "$env:SystemRoot\System32\OneDriveSetup.exe" }
-      if (Test-Path $exe) { Start-Process $exe -Wait }
+      param($d)
+      if ($d -and $d.Refused) { return }
+      $pol = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\OneDrive'
+      if ($d -and $d.PolicyExisted) { Set-RegEntry $pol 'DisableFileSyncNGSC' $d.PolicyValue } else { Remove-RegEntry $pol 'DisableFileSyncNGSC' }
+      foreach ($t in @($d.Tasks)) { if ($t) { Set-TaskEnabled $t $true } }
+      Install-OneDrive
   } `
   -Test {
-      -not ((Test-Path "$env:LOCALAPPDATA\Microsoft\OneDrive\OneDrive.exe") -or (Test-Path "$env:ProgramFiles\Microsoft OneDrive\OneDrive.exe") -or (Test-Path "${env:ProgramFiles(x86)}\Microsoft OneDrive\OneDrive.exe"))
+      -not (Test-OneDriveInstalled) -and ((Get-RegSnapshot @{ P = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\OneDrive'; N = 'DisableFileSyncNGSC' }).Value -eq 1)
   }
 
 T -Id 'svc-manual' -Cat $D -Name 'Services: set unneeded services to Manual' -Tags safe, max -SvcTol 0.9 `
