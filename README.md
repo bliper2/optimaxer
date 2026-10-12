@@ -17,7 +17,7 @@ Or download the zip from [Releases](https://github.com/bliper2/optimaxer/release
 
 ## What it does
 - **Install**: 260+ apps in 10 categories through WinGet (the WinUtil list plus more), with real app icons, "Show installed", upgrade-all, and a verification step after every install or uninstall.
-- **Tweaks**: 170+ tweaks (performance, gaming, network, privacy, AI/Copilot removal, browser debloat, Windows Update control, interface) with presets. The original value of everything a tweak touches is saved, so each tweak, and "Undo ALL", restores your real prior settings. Optional restore point first.
+- **Tweaks**: 180 tweaks (performance, gaming, network, privacy, AI/Copilot/Recall removal, a safe OneDrive uninstall, browser debloat, Windows Update control, interface) with presets. The original value of everything a tweak touches is saved, so each tweak, and "Undo ALL", restores your real prior settings. Optional restore point first.
 - **Config**: export/import what you ticked on Install and Tweaks, create a desktop shortcut, and run unattended (see below).
 - **Services**: ~240 services with recommended Manual/Disable lists, protected core services hidden, JSON backup before every change.
 - **Startup**: registry, startup-folder **and scheduled-task** entries that run at logon/boot; enable or disable without uninstalling.

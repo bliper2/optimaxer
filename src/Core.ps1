@@ -44,14 +44,23 @@ function Get-OptiState {
         try {
             $o = Get-Content -LiteralPath $global:OptiStatePath -Raw -ErrorAction Stop | ConvertFrom-Json
             foreach ($p in $o.PSObject.Properties) { $h[$p.Name] = $p.Value }
-        } catch { Write-Log "State file unreadable: $($_.Exception.Message)" 'WARN' }
+        } catch {
+            # Keep the unreadable file: the next Save-OptiState would otherwise overwrite every saved original value.
+            $why = $_.Exception.Message
+            $keep = Join-Path $global:OptiBackupDir ('state-unreadable-{0}.json' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+            try { Copy-Item -LiteralPath $global:OptiStatePath -Destination $keep -Force -ErrorAction Stop; Write-Log "State file unreadable ($why); copy kept at $keep" 'WARN' }
+            catch { Write-Log "State file unreadable: $why" 'WARN' }
+        }
     }
     return $h
 }
 
 function Save-OptiState {
+    # Write to a temp file and swap it in, so a crash or full disk cannot leave a half-written state file.
     param($State)
-    $State | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $global:OptiStatePath -Encoding UTF8
+    $tmp = "$global:OptiStatePath.tmp"
+    $State | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $tmp -Encoding UTF8 -ErrorAction Stop
+    Move-Item -LiteralPath $tmp -Destination $global:OptiStatePath -Force -ErrorAction Stop
 }
 
 # ---------------------------------------------------------------- registry
@@ -551,6 +560,117 @@ function Test-RegKeysGone {
     return $true
 }
 
+# ---------------------------------------------------------------- Appx removal (installed + provisioned)
+function Remove-AppxByName {
+    # Removes packages whose Name matches any pattern, for all users, then drops matching provisioned copies so new
+    # accounts do not get them. One failing package no longer stops the rest. Returns @{ Removed; Failed }.
+    param([string[]]$Pattern)
+    $removed = @(); $failed = @()
+    foreach ($pat in $Pattern) {
+        foreach ($p in @(Get-AppxPackage -AllUsers -Name $pat -ErrorAction SilentlyContinue)) {
+            if ($p.NonRemovable -or $p.IsFramework) { continue }
+            try { Remove-AppxPackage -Package $p.PackageFullName -AllUsers -ErrorAction Stop; $removed += $p.Name }
+            catch {
+                try { Remove-AppxPackage -Package $p.PackageFullName -ErrorAction Stop; $removed += $p.Name }
+                catch { $failed += ('{0}: {1}' -f $p.Name, $_.Exception.Message.Split("`n")[0].Trim()) }
+            }
+        }
+        try {
+            foreach ($pp in @(Get-AppxProvisionedPackage -Online -ErrorAction Stop | Where-Object { $_.DisplayName -like $pat })) {
+                try { Remove-AppxProvisionedPackage -Online -PackageName $pp.PackageName -ErrorAction Stop | Out-Null; $removed += $pp.DisplayName }
+                catch { $failed += ('{0} (provisioned): {1}' -f $pp.DisplayName, $_.Exception.Message.Split("`n")[0].Trim()) }
+            }
+        } catch { Write-Log "  could not read provisioned apps: $($_.Exception.Message)" 'WARN' }
+    }
+    return @{ Removed = @($removed | Select-Object -Unique); Failed = @($failed | Select-Object -Unique) }
+}
+
+# ---------------------------------------------------------------- OneDrive
+function Get-OneDriveExePaths {
+    @("$env:LOCALAPPDATA\Microsoft\OneDrive\OneDrive.exe", "$env:ProgramFiles\Microsoft OneDrive\OneDrive.exe", "${env:ProgramFiles(x86)}\Microsoft OneDrive\OneDrive.exe")
+}
+
+function Test-OneDriveInstalled {
+    foreach ($e in Get-OneDriveExePaths) { if ($e -and (Test-Path -LiteralPath $e)) { return $true } }
+    return $false
+}
+
+function Get-OneDriveRedirectedFolders {
+    # Known folders (Desktop, Documents, Pictures...) that Windows currently keeps inside a OneDrive folder.
+    # Uninstalling while these point there leaves online-only files unreachable, so callers refuse.
+    $hits = @()
+    $k = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders'
+    foreach ($n in 'Desktop', 'Personal', 'My Pictures', 'My Music', 'My Video', '{374DE290-123F-4565-9164-39C4925E467B}') {
+        $v = (Get-ItemProperty -LiteralPath $k -Name $n -ErrorAction SilentlyContinue).$n
+        if ($v) { $x = [Environment]::ExpandEnvironmentVariables($v); if ($x -match '\\OneDrive[^\\]*(\\|$)') { $hits += $x } }
+    }
+    , $hits
+}
+
+function Stop-OneDriveProcesses {
+    foreach ($n in 'OneDrive', 'OneDriveStandaloneUpdater', 'FileCoAuth', 'FileSyncHelper') { Stop-Process -Name $n -Force -ErrorAction SilentlyContinue }
+}
+
+function Uninstall-OneDrive {
+    # Runs every uninstaller that exists (per-user setup, per-machine setup), then removes the leftovers that make it
+    # come back: scheduled update tasks, the Run entries for new users, and the Explorer sidebar entry.
+    # Returns @{ Tasks = full names of the OneDrive tasks that were enabled and are now disabled }.
+    Stop-OneDriveProcesses
+    $setups = @()
+    $sys = "$env:SystemRoot\SysWOW64\OneDriveSetup.exe"; if (-not (Test-Path -LiteralPath $sys)) { $sys = "$env:SystemRoot\System32\OneDriveSetup.exe" }
+    if (Test-Path -LiteralPath $sys) { $setups += @{ Exe = $sys; Args = '/uninstall' } }
+    foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if (-not $root) { continue }
+        foreach ($f in @(Get-ChildItem -Path (Join-Path $root 'Microsoft OneDrive\*\Installer\setup.exe') -ErrorAction SilentlyContinue)) { $setups += @{ Exe = $f.FullName; Args = '/uninstall /allusers' } }
+    }
+    if (-not $setups.Count) { Write-Log '  no OneDrive uninstaller found (already removed?)' 'WARN' }
+    foreach ($s in $setups) {
+        Write-Log "  running $($s.Exe) $($s.Args)"
+        try {
+            $proc = Start-Process -FilePath $s.Exe -ArgumentList $s.Args -PassThru -WindowStyle Hidden -ErrorAction Stop
+            if (-not $proc.WaitForExit(180000)) { Write-Log '  uninstaller still running after 3 minutes, continuing' 'WARN' }
+        } catch { Write-Log "  uninstaller failed: $($_.Exception.Message)" 'WARN' }
+    }
+    Stop-OneDriveProcesses
+
+    $tasks = @()
+    foreach ($t in @(Get-ScheduledTask -TaskName 'OneDrive*' -ErrorAction SilentlyContinue)) {
+        if ($t.State -ne 'Disabled') { $tasks += ($t.TaskPath + $t.TaskName); Disable-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction SilentlyContinue | Out-Null }
+    }
+
+    Remove-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'OneDrive' -ErrorAction SilentlyContinue
+    # New accounts get OneDrive from the Default user's Run key; remove it from that hive.
+    $def = Join-Path $env:SystemDrive 'Users\Default\NTUSER.DAT'
+    if (Test-Path -LiteralPath $def) {
+        $null = reg.exe load 'HKU\OptiDefault' $def 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            $null = reg.exe delete 'HKU\OptiDefault\Software\Microsoft\Windows\CurrentVersion\Run' /v OneDriveSetup /f 2>&1
+            [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+            $null = reg.exe unload 'HKU\OptiDefault' 2>&1
+        }
+    }
+    foreach ($d in "$env:LOCALAPPDATA\Microsoft\OneDrive", "$env:ProgramData\Microsoft OneDrive") {
+        if (Test-Path -LiteralPath $d) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    # The user's own OneDrive folders hold their files: only an empty one is removed.
+    foreach ($d in @(Get-ChildItem -LiteralPath $env:USERPROFILE -Directory -Filter 'OneDrive*' -ErrorAction SilentlyContinue)) {
+        if (-not (Get-ChildItem -LiteralPath $d.FullName -Force -ErrorAction SilentlyContinue)) { Remove-Item -LiteralPath $d.FullName -Force -ErrorAction SilentlyContinue }
+    }
+    @{ Tasks = @($tasks) }
+}
+
+function Install-OneDrive {
+    $sys = "$env:SystemRoot\SysWOW64\OneDriveSetup.exe"; if (-not (Test-Path -LiteralPath $sys)) { $sys = "$env:SystemRoot\System32\OneDriveSetup.exe" }
+    if (Test-Path -LiteralPath $sys) {
+        $proc = Start-Process -FilePath $sys -PassThru -ErrorAction SilentlyContinue
+        if ($proc) { [void]$proc.WaitForExit(180000) }
+    }
+    if (-not (Test-OneDriveInstalled)) {
+        Write-Log '  OneDrive setup not found, installing through WinGet'
+        Invoke-WingetPackages -Action Install -Programs @('Microsoft.OneDrive')
+    }
+}
+
 # ---------------------------------------------------------------- WinGet runner (same flow and exit-code handling as WinUtil's installer)
 function Invoke-WingetPackages {
     # One winget process per package, real exit code, per-package outcome, and a verification step.
@@ -558,6 +678,7 @@ function Invoke-WingetPackages {
 
     $adminContextProhibited = -1978335107   # per-user package touched from an elevated process
     $nothingToDo = @{ -1978335135 = 'already installed'; -1978335189 = 'no applicable update' }
+    if ($Action -eq 'Uninstall') { $nothingToDo[-1978335212] = 'not installed' }
     $rebootCodes = @{ 3010 = 'installed, a restart is needed to finish'; 1641 = 'installed, the installer started a restart'
                       -1978334967 = 'installed, a restart is needed to finish'; -1978334965 = 'installed, the installer started a restart' }
 

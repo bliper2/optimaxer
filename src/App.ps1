@@ -795,12 +795,21 @@ $global:DbRows = Initialize-List $UI.DbList 'db'
 
 function Start-AppScan {
     [void](Start-OptiJob 'Scanning installed apps' -Script {
+        $seen = @{}
         Get-AppxPackage -AllUsers | Group-Object Name | ForEach-Object {
             $p = $_.Group[0]
             if ($p.NonRemovable -or $p.IsFramework) { return }
             $m = $OptiAppx | Where-Object { $p.Name -like $_.Id } | Select-Object -First 1
-            if ($m) { @{ Name = $p.Name; Friendly = $m.Name; Level = $m.Level } }
+            if ($m) { $seen[$p.Name] = $true; @{ Name = $p.Name; Friendly = $m.Name; Level = $m.Level } }
         }
+        # Provisioned copies of apps already uninstalled for every user still reinstall for new accounts.
+        try {
+            foreach ($pp in @(Get-AppxProvisionedPackage -Online -ErrorAction Stop)) {
+                if ($seen.ContainsKey($pp.DisplayName)) { continue }
+                $m = $OptiAppx | Where-Object { $pp.DisplayName -like $_.Id } | Select-Object -First 1
+                if ($m) { $seen[$pp.DisplayName] = $true; @{ Name = $pp.DisplayName; Friendly = "$($m.Name) (new accounts only)"; Level = $m.Level } }
+            }
+        } catch {}
     } -OnDone {
         param($res)
         $global:DbRows.Clear()
@@ -820,13 +829,14 @@ function Start-AppRemove {
     if (-not (Confirm-Action "Remove $($names.Count) app(s) for all users?`nThey can be reinstalled from the Microsoft Store.")) { return }
     [void](Start-OptiJob 'Removing apps' -ArgList @(, $names) -Script {
         param($names)
+        $done = 0; $bad = 0
         foreach ($n in $names) {
-            try {
-                Get-AppxPackage -AllUsers -Name $n | Remove-AppxPackage -AllUsers -ErrorAction Stop
-                Get-AppxProvisionedPackage -Online | Where-Object DisplayName -eq $n | Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Out-Null
-                Write-Log "  removed $n"
-            } catch { Write-Log "  $n : $($_.Exception.Message)" 'WARN' }
+            $r = Remove-AppxByName $n
+            if ($r.Failed.Count) { $bad++; foreach ($f in $r.Failed) { Write-Log "  $f" 'WARN' } }
+            elseif ($r.Removed.Count) { $done++; Write-Log "  removed $n" }
+            else { Write-Log "  $n : nothing to remove (already gone)" }
         }
+        Write-Log "Apps removed: $done, with problems: $bad" $(if ($bad) { 'WARN' } else { 'OK' })
     } -OnDone { Start-AppScan })
 }
 
