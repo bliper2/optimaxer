@@ -26,7 +26,7 @@ Or download the zip from [Releases](https://github.com/bliper2/optimaxer/release
 - **Network**: DNS provider switch (+DoH), latency benchmark, stack reset; opt-in hosts-file telemetry block.
 - **Features**: Hyper-V, WSL, Sandbox, .NET 3.5 and more.
 - **Tools**: free RAM, TRIM/defrag, disk health, SFC, DISM, Windows Update reset, icon/Store cache, performance counters, registry backup, update check, System Restore.
-- **Appearance**: themes (dark default, light and 8 more), optional animated wallpaper effects, layout and animation controls.
+- **Settings**: light, dark or match-Windows theme, six accent colours, reduced-motion option and update-check control.
 
 ## Linux (Manjaro / Arch)
 A separate, dependency-free Python edition lives in [`linux/`](linux/optimaxer.py). It works on Manjaro and other pacman-based distributions (EndeavourOS, Arch, Garuda...).
@@ -60,7 +60,7 @@ Add `-NoRestorePoint` to skip the restore point. Exit code 0 = everything verifi
 - Logs: `%ProgramData%\Optimaxer\optimaxer.log`. Settings: `%ProgramData%\Optimaxer\settings.json`.
 
 ## Updates
-Optimaxer checks GitHub Releases once per launch (Appearance > Updates, or Tools > Check for updates). A newer release shows an **Update to vX** button in the title bar. Updating downloads the zip, verifies its published SHA-256, backs up the current files to `%ProgramData%\Optimaxer\backups\app-<version>-<time>`, swaps them in after the app closes and restarts. A git checkout is never overwritten (use `git pull`). For a private fork set `OPTIMAXER_TOKEN` to a GitHub token with read access.
+Optimaxer checks GitHub Releases once per launch (Settings > Updates, or Tools > Check for updates). A newer release shows an **Update to vX** button in the title bar. Updating downloads the zip, verifies its published SHA-256, backs up the current files to `%ProgramData%\Optimaxer\backups\app-<version>-<time>`, swaps them in after the app closes and restarts. A git checkout is never overwritten (use `git pull`). For a private fork set `OPTIMAXER_TOKEN` to a GitHub token with read access.
 
 ## Development
 Linux edition tests: `python -m unittest discover -s linux/tests` (runs on any OS with a fake system).

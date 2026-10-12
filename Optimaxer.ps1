@@ -81,7 +81,7 @@ if ($Screenshot) {
     }
     $win.Show()
     Wait-UI 9
-    foreach ($n in 'Dash', 'Install', 'Tweaks', 'Config', 'Services', 'Startup', 'Cleanup', 'Debloat', 'Network', 'Features', 'Tools', 'Rice') {
+    foreach ($n in 'Dash', 'Install', 'Tweaks', 'Config', 'Services', 'Startup', 'Cleanup', 'Debloat', 'Network', 'Features', 'Tools', 'Settings') {
         $UI["Nav$n"].IsChecked = $true
         Wait-UI 4
         Save-Shot $n.ToLower()
