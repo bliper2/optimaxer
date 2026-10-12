@@ -206,6 +206,17 @@ Microsoft.BingTravel|Bing Travel|R
 Microsoft.M365Companions|Microsoft 365 Companions|R
 Microsoft.Office.OneNote|OneNote (UWP)|O
 MicrosoftCorporationII.QuickAssist|Quick Assist|O
+Microsoft.MSPaint|Paint 3D|O
+Microsoft.Paint|Paint|O
+Microsoft.RemoteDesktop|Remote Desktop app|O
+Microsoft.ScreenSketch|Snipping Tool|O
+Microsoft.Windows.Photos|Photos|O
+Microsoft.WindowsCalculator|Calculator|O
+Microsoft.WindowsCamera|Camera|O
+Microsoft.WindowsNotepad|Notepad|O
+LGElectronics.LGMonitorApp|LG Monitor app|O
+Microsoft.WindowsTerminal|Windows Terminal (default terminal)|C
+Microsoft.WindowsStore|Microsoft Store (hard to reinstall)|C
 MicrosoftWindows.CrossDevice|Cross Device Experience|O
 Microsoft.StartExperiencesApp|Start experiences (widgets host)|O
 AD2F1837.*|HP preinstalled apps|O

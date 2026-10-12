@@ -244,9 +244,11 @@ T -Id 'ai-apps' -Cat $AI -Name 'Notepad, Paint and Photos: turn off AI features'
   -Desc 'Group-policy switches that hide Notepad AI (Rewrite/Summarize), Paint Cocreator, Generative Fill and Image Creator. Which switches apply depends on the app version.' `
   -Reg @(
       Rg 'HKLM:\SOFTWARE\Policies\WindowsNotepad' 'DisableAIFeatures' 1
-      Rg "$POL\Paint" 'DisableCocreator' 1
-      Rg "$POL\Paint" 'DisableGenerativeFill' 1
-      Rg "$POL\Paint" 'DisableImageCreator' 1
+      Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Paint' 'DisableCocreator' 1
+      Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Paint' 'DisableGenerativeFill' 1
+      Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Paint' 'DisableImageCreator' 1
+      Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Paint' 'DisableGenerativeErase' 1
+      Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Paint' 'DisableRemoveBackground' 1
   )
 
 T -Id 'ai-edge' -Cat $AI -Name 'Edge: turn off Copilot sidebar and page context' -Tags safe, privacy, max, deai `
@@ -257,6 +259,10 @@ T -Id 'ai-edge' -Cat $AI -Name 'Edge: turn off Copilot sidebar and page context'
       Rg $EDGEP 'CopilotPageContext' 0
       Rg $EDGEP 'Microsoft365CopilotChatIconEnabled' 0
       Rg $EDGEP 'EdgeEntraCopilotPageContext' 0
+      Rg $EDGEP 'EdgeHistoryAISearchEnabled' 0
+      Rg $EDGEP 'ComposeInlineEnabled' 0
+      Rg $EDGEP 'GenAILocalFoundationalModelSettings' 1
+      Rg $EDGEP 'NewTabPageBingChatEnabled' 0
   )
 
 T -Id 'ai-cloudsearch' -Cat $AI -Name 'Search: no cloud account content or search highlights' -Tags safe, privacy, max, deai `
@@ -278,18 +284,55 @@ T -Id 'ai-tailored' -Cat $AI -Name 'No tailored experiences from your diagnostic
 $global:OptiAiApps = @('*Copilot*', 'Microsoft.Windows.AIHub', 'MicrosoftWindows.Client.AIX', 'MicrosoftWindows.Client.CoreAI')
 
 T -Id 'ai-remove-apps' -Cat $AI -Name 'Uninstall the Copilot and AI app packages' -Tags max, deai -Risk Moderate `
-  -Desc 'Removes every installed Copilot / AI Hub package for all users and from the provisioning list so new accounts do not get them. Protected system components (marked non-removable by Windows) are skipped and reported. Undo cannot reinstall: use the Microsoft Store.' `
+  -Desc 'Removes every installed Copilot / AI Hub package, the Microsoft 365 (Office hub) Copilot launcher and the Store Copilot for all users and from the provisioning list so new accounts do not get them. Also removes the Windows AI core package using the same end-of-life method WinUtil uses. Undo cannot reinstall: use the Microsoft Store.' `
   -Apply {
-      $r = Remove-AppxByName $global:OptiAiApps
+      # Same approach as WinUtil's "Windows AI - Disable And Remove": marking CoreAI end-of-life lets Windows remove it.
+      try {
+          $core = Get-AppxPackage -AllUsers -Name 'MicrosoftWindows.Client.CoreAI' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($core) {
+              $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+              New-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Appx\AppxAllUserStore\EndOfLife\$sid\$($core.PackageFullName)" -Force -ErrorAction Stop | Out-Null
+          }
+      } catch { Write-Log "  could not mark the Windows AI core package for removal: $($_.Exception.Message)" 'WARN' }
+      $r = Remove-AppxByName ($global:OptiAiApps + 'Microsoft.MicrosoftOfficeHub')
       foreach ($f in $r.Failed) { Write-Log "  could not remove $f" 'WARN' }
+      # Store version of Copilot (Win11Debloat removes it by Store id)
+      if (Get-Command winget -ErrorAction SilentlyContinue) {
+          $null = winget list --id XP9CXNGPPJ97XX --source msstore --accept-source-agreements 2>&1
+          if ($LASTEXITCODE -eq 0) { $null = winget uninstall --id XP9CXNGPPJ97XX --source msstore --silent --accept-source-agreements 2>&1 }
+      }
       , @($r.Removed)
   } `
   -Undo { Write-Log '  Copilot apps cannot be restored automatically: reinstall from the Microsoft Store if you want them back.' 'WARN' } `
   -Test {
-      foreach ($pat in $global:OptiAiApps) {
+      foreach ($pat in ($global:OptiAiApps + 'Microsoft.MicrosoftOfficeHub')) {
           foreach ($p in @(Get-AppxPackage -AllUsers -Name $pat -ErrorAction SilentlyContinue)) { if (-not $p.NonRemovable -and -not $p.IsFramework) { return $false } }
       }
       $true
+  }
+
+T -Id 'ai-settingspage' -Cat $AI -Name 'Hide the Settings "AI components" page' -Tags safe, privacy, max, deai `
+  -Desc 'Hides Settings > System > AI components (Windows 11 24H2+), as WinUtil does. Other pages you hid with this policy are kept.' `
+  -Apply {
+      $k = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'
+      $snap = Get-RegSnapshot @{ P = $k; N = 'SettingsPageVisibility' }
+      $cur = if ($snap.Exists) { [string]$snap.Value } else { '' }
+      if ($cur -like 'showonly:*') { Write-Log '  Settings page visibility is in "show only" mode; not changed' 'WARN'; return @{ Existed = [bool]$snap.Exists; Value = $cur; Changed = $false } }
+      if ($cur -notmatch '(^|[:;])aicomponents(;|$)') {
+          $new = if ($cur -like 'hide:*') { $cur.TrimEnd(';') + ';aicomponents' } else { 'hide:aicomponents' }
+          Set-RegEntry $k 'SettingsPageVisibility' $new 'String'
+      }
+      @{ Existed = [bool]$snap.Exists; Value = $cur; Changed = $true }
+  } `
+  -Undo {
+      param($d)
+      if (-not $d -or -not $d.Changed) { return }
+      $k = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'
+      if ($d.Existed) { Set-RegEntry $k 'SettingsPageVisibility' $d.Value 'String' } else { Remove-RegEntry $k 'SettingsPageVisibility' }
+  } `
+  -Test {
+      $v = (Get-RegSnapshot @{ P = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'; N = 'SettingsPageVisibility' }).Value
+      [bool]($v -and ([string]$v -match '(^|[:;])aicomponents(;|$)'))
   }
 
 # ======================================================================= MORE DEBLOAT
@@ -324,6 +367,94 @@ T -Id 'debloat-store' -Cat $D -Name 'Microsoft Store: no promoted apps or auto-u
 T -Id 'debloat-feeds' -Cat $D -Name 'Turn off news, weather and interests feeds' -Tags safe, max, deai `
   -Desc 'Removes the news-and-interests feed from the taskbar and the Widgets news board via policy.' `
   -Reg @( Rg "$POL\Windows Feeds" 'EnableFeeds' 0; Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Dsh' 'AllowNewsAndInterests' 0 )
+
+# ======================================================================= PORTED FROM WINUTIL / WIN11DEBLOAT (both MIT; see README)
+T -Id 'debloat-startrec' -Cat $D -Name 'Start menu: hide the Recommended section' -Tags max `
+  -Desc 'Removes "Recommended" (recent files and suggested apps) from the Windows 11 Start menu using the user and machine policies plus the Pro-edition override WinUtil uses. Side effect (WinUtil warns the same): Windows Spotlight on the lock screen stops.' `
+  -Reg @(
+      Rg 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\Explorer' 'HideRecommendedSection' 1
+      Rg "$POL\Explorer" 'HideRecommendedSection' 1
+      Rg 'HKLM:\SOFTWARE\Microsoft\PolicyManager\current\device\Start' 'HideRecommendedSection' 1
+      Rg 'HKLM:\SOFTWARE\Microsoft\PolicyManager\current\device\Education' 'IsEducationEnvironment' 1
+  ) -Explorer
+
+T -Id 'debloat-edge-remove' -Cat $D -Name 'Uninstall Microsoft Edge' -Tags optin -Risk Advanced `
+  -Desc 'Uses the method WinUtil uses: a placeholder legacy Edge file unlocks Edge''s own system-level uninstaller, with its profile data deleted. WebView2 (needed by many apps) stays. Windows Update can bring Edge back. Undo reinstalls it through WinGet.' `
+  -Apply {
+      $setup = @(Get-ChildItem -Path "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\*\Installer\setup.exe" -ErrorAction SilentlyContinue | Select-Object -Last 1)
+      if (-not $setup.Count) { Write-Log '  Edge is not installed' ; return $null }
+      Stop-Process -Name 'msedge' -Force -ErrorAction SilentlyContinue
+      New-Item -Path "$env:SystemRoot\SystemApps\Microsoft.MicrosoftEdge_8wekyb3d8bbwe\MicrosoftEdge.exe" -Force -ErrorAction SilentlyContinue | Out-Null
+      $proc = Start-Process -FilePath $setup[0].FullName -ArgumentList '--uninstall --system-level --force-uninstall --delete-profile' -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
+      if ($proc -and -not $proc.WaitForExit(240000)) { Write-Log '  Edge uninstaller still running after 4 minutes' 'WARN' }
+      $null
+  } `
+  -Undo { Invoke-WingetPackages -Action Install -Programs @('Microsoft.Edge') } `
+  -Test { -not ((Test-Path "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe") -or (Test-Path "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe")) }
+
+T -Id 'sys-utc' -Cat $P -Name 'Hardware clock in UTC (dual boot with Linux)' -Tags optin `
+  -Desc 'Windows keeps the hardware clock in UTC like Linux does, so the time stays right when you dual boot (WinUtil).' `
+  -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\TimeZoneInformation' 'RealTimeIsUniversal' 1 'QWord' )
+
+T -Id 'ui-bsod' -Cat $I -Name 'Detailed blue-screen information' -Tags safe `
+  -Desc 'Shows the stop code and parameters on a blue screen instead of the smiley face (WinUtil).' `
+  -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\CrashControl' 'DisplayParameters' 1; Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\CrashControl' 'DisableEmoticon' 1 )
+
+T -Id 'ui-battery' -Cat $I -Name 'Show battery percentage in the system tray' -Explorer `
+  -Desc 'Adds the numeric percentage next to the battery icon (WinUtil).' `
+  -Reg @( Rg $EXA 'IsBatteryPercentageEnabled' 1 )
+
+T -Id 'ui-loginblur' -Cat $I -Name 'Sharp sign-in screen background (no acrylic blur)' `
+  -Desc 'Turns off the blur on the sign-in screen background (WinUtil).' `
+  -Reg @( Rg "$POL\System" 'DisableAcrylicBackgroundOnLogon' 1 )
+
+T -Id 'ui-nosnap' -Cat $I -Name 'Turn off window snapping' -Tags optin `
+  -Desc 'Windows stop snapping and resizing when dragged to screen edges (Win11Debloat / WinUtil).' `
+  -Reg @( Rg $DESK 'WindowArrangementActive' '0' 'String' )
+
+# Device-software blockers: Windows Update keeps pushing these helper installers. An empty folder with a deny-write ACL stops them.
+function Test-FolderWriteDenied {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    try {
+        foreach ($a in (Get-Acl -LiteralPath $Path).Access) {
+            if ($a.AccessControlType -eq 'Deny' -and $a.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -eq 'S-1-1-0') { return $true }
+        }
+    } catch {}
+    return $false
+}
+
+T -Id 'debloat-razer' -Cat $D -Name 'Block Razer software auto-install' -Tags optin `
+  -Desc 'Stops Windows from silently installing Razer Synapse when a Razer device is plugged in, by locking the Razer installer folder (WinUtil). The hardware keeps working. Undo unlocks the folder.' `
+  -Apply {
+      $d = "$env:SystemRoot\Installer\Razer"
+      if (Test-Path -LiteralPath $d) { Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue }
+      else { New-Item -Path $d -ItemType Directory -Force | Out-Null }
+      & icacls.exe $d /deny '*S-1-1-0:(W)' 2>&1 | Out-Null
+      $null
+  } `
+  -Undo { & icacls.exe "$env:SystemRoot\Installer\Razer" /remove:d '*S-1-1-0' 2>&1 | Out-Null } `
+  -Test { Test-FolderWriteDenied "$env:SystemRoot\Installer\Razer" }
+
+T -Id 'debloat-logitech' -Cat $D -Name 'Block Logitech Download Assistant auto-install' -Tags optin `
+  -Desc 'Stops Windows Update from reinstalling the Logi Download Assistant with Logitech drivers, by locking its folder (WinUtil). Logitech hardware keeps working. Undo unlocks the folder.' `
+  -Apply {
+      Stop-Process -Name 'logi_download_assistant' -Force -ErrorAction SilentlyContinue
+      $root = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
+      $d = Join-Path $root 'LogiDownloadAssistant'
+      if (Test-Path -LiteralPath $d) { Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue }
+      else { New-Item -Path $d -ItemType Directory -Force | Out-Null }
+      & icacls.exe $d /deny '*S-1-1-0:(W)' 2>&1 | Out-Null
+      $null
+  } `
+  -Undo {
+      $root = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
+      & icacls.exe (Join-Path $root 'LogiDownloadAssistant') /remove:d '*S-1-1-0' 2>&1 | Out-Null
+  } `
+  -Test {
+      $root = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
+      Test-FolderWriteDenied (Join-Path $root 'LogiDownloadAssistant')
+  }
 
 # ======================================================================= BROWSERS (enterprise policies; browsers show "managed by your organization")
 $B = 'Browsers'
@@ -364,6 +495,17 @@ T -Id 'br-chrome-ai' -Cat $B -Name 'Chrome: turn off Gemini and generative AI fe
       Rg $CHR 'CreateThemesSettings' 2
       Rg $CHR 'TabCompareSettings' 2
       Rg $CHR 'AIModeSettings' 1
+      Rg $CHR 'AutofillPredictionSettings' 2
+      Rg $CHR 'ChromeSuggestionsSettings' 1
+      Rg $CHR 'DevToolsGenAiSettings' 2
+      Rg $CHR 'FindAndFillWithGeminiSettings' 2
+      Rg $CHR 'GeminiSparkSettings' 1
+      Rg $CHR 'GenAILocalFoundationalModelSettings' 1
+      Rg $CHR 'HistorySearchSettings' 2
+      Rg $CHR 'SearchContentSharingSettings' 1
+      Rg $CHR 'SmartTabSharingSettings' 1
+      Rg $CHR 'ThirdPartyAiChatSettings' 1
+      Rg $CHR 'VoiceTypingSettings' 2
   )
 
 T -Id 'br-brave-debloat' -Cat $B -Name 'Brave: remove Rewards, Wallet, VPN, News, Talk and AI Chat' -Tags safe, privacy, max, deai `
@@ -380,6 +522,9 @@ T -Id 'br-brave-debloat' -Cat $B -Name 'Brave: remove Rewards, Wallet, VPN, News
       Rg $BRV 'MetricsReportingEnabled' 0
       Rg $BRV 'BackgroundModeEnabled' 0
       Rg $BRV 'SafeBrowsingExtendedReportingEnabled' 0
+      Rg $BRV 'TorDisabled' 1
+      Rg $BRV 'BraveP3AEnabled' 0
+      Rg $BRV 'UrlKeyedAnonymizedDataCollectionEnabled' 0
   )
 
 T -Id 'br-edge-debloat' -Cat $B -Name 'Edge: remove new-tab feed, workspaces, Bing ads and promos' -Tags safe, privacy, max, deai `
@@ -397,6 +542,16 @@ T -Id 'br-edge-debloat' -Cat $B -Name 'Edge: remove new-tab feed, workspaces, Bi
       Rg $EDG 'GamerModeEnabled' 0
       Rg $EDG 'EdgeShoppingAssistantEnabled' 0
       Rg $EDG 'PersonalizationReportingEnabled' 0
+      Rg $EDG 'TabServicesEnabled' 0
+      Rg $EDG 'AlternateErrorPagesEnabled' 0
+      Rg $EDG 'WalletDonationEnabled' 0
+      Rg $EDG 'DefaultBrowserSettingsCampaignEnabled' 0
+      Rg $EDG 'NewTabPageHideDefaultTopSites' 1
+      Rg $EDG 'EdgeCollectionsEnabled' 0
+      Rg $EDG 'EdgeAssetDeliveryServiceEnabled' 0
+      Rg $EDG 'DiagnosticData' 0
+      Rg $EDG 'HideFirstRunExperience' 1
+      Rg 'HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate' 'CreateDesktopShortcutDefault' 0
   )
 
 T -Id 'br-firefox-debloat' -Cat $B -Name 'Firefox: no telemetry, studies, Pocket, sponsored content or nags' -Tags safe, privacy, max, deai `

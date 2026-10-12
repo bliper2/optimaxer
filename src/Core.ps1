@@ -616,6 +616,17 @@ function Uninstall-OneDrive {
     # come back: scheduled update tasks, the Run entries for new users, and the Explorer sidebar entry.
     # Returns @{ Tasks = full names of the OneDrive tasks that were enabled and are now disabled }.
     Stop-OneDriveProcesses
+    # WinUtil's safeguard: while the uninstaller runs, deny Administrators the right to delete the OneDrive folders,
+    # so a leftover-cleanup step can never take the user's files. Skipped for a folder that already has a deny entry.
+    $guarded = @()
+    foreach ($v in 'OneDrive', 'OneDriveConsumer', 'OneDriveCommercial') {
+        $f = [Environment]::GetEnvironmentVariable($v)
+        if ($f -and (Test-Path -LiteralPath $f) -and ($guarded -notcontains $f)) {
+            $acl = (& icacls.exe $f 2>&1 | Out-String)
+            if ($acl -notmatch '\(DENY\)') { & icacls.exe $f /deny '*S-1-5-32-544:(D,DC)' 2>&1 | Out-Null; $guarded += $f }
+        }
+    }
+    try {
     $setups = @()
     $sys = "$env:SystemRoot\SysWOW64\OneDriveSetup.exe"; if (-not (Test-Path -LiteralPath $sys)) { $sys = "$env:SystemRoot\System32\OneDriveSetup.exe" }
     if (Test-Path -LiteralPath $sys) { $setups += @{ Exe = $sys; Args = '/uninstall' } }
@@ -657,6 +668,9 @@ function Uninstall-OneDrive {
         if (-not (Get-ChildItem -LiteralPath $d.FullName -Force -ErrorAction SilentlyContinue)) { Remove-Item -LiteralPath $d.FullName -Force -ErrorAction SilentlyContinue }
     }
     @{ Tasks = @($tasks) }
+    } finally {
+        foreach ($f in $guarded) { & icacls.exe $f /remove:d '*S-1-5-32-544' 2>&1 | Out-Null }
+    }
 }
 
 function Install-OneDrive {
