@@ -4,7 +4,7 @@
 
 **[Website](https://bliper2.github.io/optimaxer/)** · [Download](https://github.com/bliper2/optimaxer/releases/latest) · [Privacy](https://bliper2.github.io/optimaxer/privacy.html) · [Terms](https://bliper2.github.io/optimaxer/terms.html) · MIT licensed
 
-Windows 10/11 performance, privacy, debloat and app-install toolkit. WPF GUI in Windows PowerShell 5.1, inspired by the layout of [Chris Titus Tech's WinUtil](https://github.com/ChrisTitusTech/winutil) (MIT), rebuilt with undo support, verification and a lot more tweaks.
+Windows 10/11 performance, privacy, debloat and app-install toolkit. WPF GUI in Windows PowerShell 5.1, inspired by the layout of [Chris Titus Tech's WinUtil](https://github.com/ChrisTitusTech/winutil) (MIT), rebuilt with undo support, verification and a lot more tweaks. Many settings, app lists and scripts are adapted from WinUtil and [Win11Debloat](https://github.com/Raphire/Win11Debloat) (MIT); see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ## Get it
 **One line** (installs to `%LOCALAPPDATA%\Optimaxer`, adds desktop and Start menu shortcuts, starts the app; run again to update):
@@ -17,7 +17,7 @@ Or download the zip from [Releases](https://github.com/bliper2/optimaxer/release
 
 ## What it does
 - **Install**: 260+ apps in 10 categories through WinGet (the WinUtil list plus more), with real app icons, "Show installed", upgrade-all, and a verification step after every install or uninstall.
-- **Tweaks**: 180 tweaks (performance, gaming, network, privacy, AI/Copilot/Recall removal, a safe OneDrive uninstall, browser debloat, Windows Update control, interface) with presets. The original value of everything a tweak touches is saved, so each tweak, and "Undo ALL", restores your real prior settings. Optional restore point first.
+- **Tweaks**: 190 tweaks (performance, gaming, network, privacy, AI/Copilot/Recall removal, a safe OneDrive uninstall, browser debloat, Windows Update control, interface) with presets. The original value of everything a tweak touches is saved, so each tweak, and "Undo ALL", restores your real prior settings. Optional restore point first.
 - **Config**: export/import what you ticked on Install and Tweaks, create a desktop shortcut, and run unattended (see below).
 - **Services**: ~240 services with recommended Manual/Disable lists, protected core services hidden, JSON backup before every change.
 - **Startup**: registry, startup-folder **and scheduled-task** entries that run at logon/boot; enable or disable without uninstalling.
