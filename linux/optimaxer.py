@@ -19,7 +19,7 @@ import tempfile
 import time
 import urllib.request
 
-__version__ = "2.3.3"
+__version__ = "2.4.0"
 REPO = "bliper2/optimaxer"
 STATE_FILE = "/var/lib/optimaxer/state.json"
 BACKUP_DIR = "/var/lib/optimaxer/backups"
@@ -528,6 +528,19 @@ TWEAKS = [
           edits=[LineEdit("/etc/default/grub", "GRUB_TIMEOUT", "2", sep="=")], needs=["/etc/default/grub"],
           post=[["sh", "-c", "command -v update-grub >/dev/null && update-grub || grub-mkconfig -o /boot/grub/grub.cfg"]],
           undo_post=[["sh", "-c", "command -v update-grub >/dev/null && update-grub || grub-mkconfig -o /boot/grub/grub.cfg"]]),
+    Tweak("perf-inotify", "Raise inotify watch limit (524288)", "IDEs, file managers and sync tools stop failing with 'no space left on device' (ENOSPC) on big folders.", "Performance",
+          tags={"safe", "perf", "max"}, files={"/etc/sysctl.d/99-optimaxer-inotify.conf": "fs.inotify.max_user_watches = 524288\nfs.inotify.max_user_instances = 1024\n"}, post=[SYSCTL]),
+    Tweak("perf-mapcount", "Raise vm.max_map_count (1048576)", "Needed by many Proton/Wine games and some engines that crash with the old 65530 limit.", "Gaming",
+          tags={"perf", "max"}, files={"/etc/sysctl.d/99-optimaxer-mapcount.conf": "vm.max_map_count = 1048576\n"}, post=[SYSCTL]),
+    Tweak("perf-netbuf", "Larger network buffers, TCP Fast Open and MTU probing", "16 MB socket buffer ceilings, Fast Open for client and server, and MTU probing: better throughput on fast links and fewer stalls behind broken routers.",
+          "Network", tags={"perf", "max"},
+          files={"/etc/sysctl.d/99-optimaxer-netbuf.conf": "net.core.rmem_max = 16777216\nnet.core.wmem_max = 16777216\nnet.core.netdev_max_backlog = 16384\nnet.ipv4.tcp_fastopen = 3\nnet.ipv4.tcp_mtu_probing = 1\nnet.ipv4.tcp_slow_start_after_idle = 0\n"}, post=[SYSCTL]),
+    Tweak("perf-gamemode", "GameMode (on-demand game performance)", "Installs gamemode: games started with `gamemoderun %command%` get the performance CPU governor and higher priority only while running.", "Gaming",
+          tags={"perf", "max"}, pkgs=["gamemode"]),
+    Tweak("perf-irqbalance", "irqbalance (spread hardware interrupts across cores)", "Installs and enables irqbalance: smoother network and disk throughput on multi-core CPUs.", "Performance",
+          tags={"max"}, pkgs=["irqbalance"], enable=["irqbalance.service"]),
+    Tweak("perf-networkd-wait", "Faster boot: mask systemd-networkd-wait-online", "Stops boot waiting on systemd-networkd-wait-online; harmless on NetworkManager systems.", "Performance",
+          risk="moderate", tags={"max"}, disable=["systemd-networkd-wait-online.service"], needs=["/usr/lib/systemd/system/systemd-networkd-wait-online.service"]),
     # ---- package manager
     Tweak("pm-pacman", "pacman: parallel downloads and colour", "ParallelDownloads = 5 and Color in /etc/pacman.conf: much faster updates, readable output.", "Package manager",
           tags={"safe", "perf", "max"}, needs=["/etc/pacman.conf"],
