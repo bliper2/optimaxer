@@ -560,6 +560,115 @@ function Test-RegKeysGone {
     return $true
 }
 
+# ---------------------------------------------------------------- hourly auto clean (RAM + temp files)
+# A scheduled task runs a small script as SYSTEM every hour. The script is copied to Program Files, which only
+# administrators can write, so a standard user cannot edit something that runs with SYSTEM rights.
+$global:OptiAutoName = 'Auto Clean'
+$global:OptiAutoPath = '\Optimaxer\'
+$global:OptiAutoStatus = Join-Path $global:OptiData 'autoclean.json'
+
+function Get-AutoCleanBody {
+    @'
+$ErrorActionPreference = 'SilentlyContinue'
+$data = Join-Path $env:ProgramData 'Optimaxer'
+New-Item -ItemType Directory -Path $data -Force | Out-Null
+$minAge = (Get-Date).AddMinutes(-60)
+
+function Clear-OldTemp {
+    # Deletes files that have not been touched for an hour. Never follows junctions or symlinks.
+    param([string]$Root)
+    $freed = [int64]0
+    if (-not (Test-Path -LiteralPath $Root)) { return $freed }
+    $stack = New-Object System.Collections.Stack
+    $dirs = New-Object System.Collections.ArrayList
+    $stack.Push((New-Object IO.DirectoryInfo $Root))
+    while ($stack.Count) {
+        $d = $stack.Pop()
+        try { $items = $d.GetFileSystemInfos() } catch { continue }
+        foreach ($i in $items) {
+            if ($i.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+            if ($i -is [IO.DirectoryInfo]) { [void]$dirs.Add($i); $stack.Push($i) }
+            elseif ($i.LastWriteTime -lt $minAge -and $i.CreationTime -lt $minAge) {
+                $len = [int64]$i.Length
+                if ($ReportOnly) { $freed += $len }
+                else { try { $i.Delete(); $freed += $len } catch {} }
+            }
+        }
+    }
+    for ($k = $dirs.Count - 1; $k -ge 0; $k--) {
+        $d = $dirs[$k]
+        if ($d.LastWriteTime -lt $minAge -and -not $ReportOnly) { try { if (-not $d.GetFileSystemInfos().Count) { $d.Delete() } } catch {} }
+    }
+    return $freed
+}
+
+$before = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory
+$trimmed = 0; $standby = $false
+if (-not $ReportOnly) {
+    $trimmed = [OptiMem]::TrimWorkingSets()
+    $standby = [OptiMem]::PurgeStandbyList()
+    Start-Sleep -Seconds 2
+}
+$after = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory
+
+$tempFreed = [int64]0
+$roots = @("$env:SystemRoot\Temp")
+foreach ($u in Get-ChildItem -LiteralPath (Join-Path $env:SystemDrive 'Users') -Directory -Force) {
+    if ($u.Name -in 'Public', 'Default', 'Default User', 'All Users') { continue }
+    $roots += (Join-Path $u.FullName 'AppData\Local\Temp')
+}
+foreach ($r in $roots) { $tempFreed += [int64](Clear-OldTemp $r) }
+
+$ramKB = [math]::Max(0, [int64]$after - [int64]$before)
+$rec = [pscustomobject]@{ Time = (Get-Date).ToString('s'); RamFreedKB = $ramKB; TempFreedBytes = $tempFreed; Processes = $trimmed; Standby = $standby; ReportOnly = [bool]$ReportOnly }
+$rec | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $data 'autoclean.json') -Encoding UTF8
+$line = '[{0}] INFO  Auto clean: RAM +{1:N0} MB, temp files {2:N1} MB removed ({3} processes trimmed)' -f (Get-Date -Format 'HH:mm:ss'), ($ramKB / 1024), ($tempFreed / 1MB), $trimmed
+Add-Content -LiteralPath (Join-Path $data 'optimaxer.log') -Value $line -Encoding UTF8
+'@
+}
+
+function Get-AutoCleanScript {
+    # param() has to be the first statement, so it goes ahead of the native helper block.
+    $native = Get-Content -LiteralPath (Join-Path $global:OptiRoot 'src\Native.ps1') -Raw
+    return ("param([switch]`$ReportOnly)`r`n" + $native + "`r`n" + (Get-AutoCleanBody))
+}
+
+function Test-AutoClean {
+    $t = Get-ScheduledTask -TaskName $global:OptiAutoName -TaskPath $global:OptiAutoPath -ErrorAction SilentlyContinue
+    return [bool]($t -and $t.State -ne 'Disabled')
+}
+
+function Get-AutoCleanStatus {
+    # @{ Enabled; Next; Last = parsed autoclean.json or $null }
+    $r = @{ Enabled = (Test-AutoClean); Next = $null; Last = $null }
+    if ($r.Enabled) { $r.Next = (Get-ScheduledTaskInfo -TaskName $global:OptiAutoName -TaskPath $global:OptiAutoPath -ErrorAction SilentlyContinue).NextRunTime }
+    if (Test-Path -LiteralPath $global:OptiAutoStatus) { try { $r.Last = Get-Content -LiteralPath $global:OptiAutoStatus -Raw | ConvertFrom-Json } catch {} }
+    return $r
+}
+
+function Enable-AutoClean {
+    $dir = Join-Path $env:ProgramFiles 'Optimaxer'
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    $script = Join-Path $dir 'AutoClean.ps1'
+    Set-Content -LiteralPath $script -Value (Get-AutoCleanScript) -Encoding UTF8 -ErrorAction Stop
+
+    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}"' -f $script)
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration (New-TimeSpan -Days 9999)
+    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
+    Register-ScheduledTask -TaskName $global:OptiAutoName -TaskPath $global:OptiAutoPath -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Optimaxer: frees RAM and removes temp files older than an hour, every hour.' -Force -ErrorAction Stop | Out-Null
+    Start-ScheduledTask -TaskName $global:OptiAutoName -TaskPath $global:OptiAutoPath -ErrorAction SilentlyContinue
+    Write-Log 'Auto clean on: RAM and temp files are cleaned every hour (first run now).' 'OK'
+}
+
+function Disable-AutoClean {
+    Unregister-ScheduledTask -TaskName $global:OptiAutoName -TaskPath $global:OptiAutoPath -Confirm:$false -ErrorAction SilentlyContinue
+    $dir = Join-Path $env:ProgramFiles 'Optimaxer'
+    Remove-Item -LiteralPath (Join-Path $dir 'AutoClean.ps1') -Force -ErrorAction SilentlyContinue
+    if ((Test-Path -LiteralPath $dir) -and -not (Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue)) { Remove-Item -LiteralPath $dir -Force -ErrorAction SilentlyContinue }
+    Write-Log 'Auto clean off.' 'OK'
+}
+
 # ---------------------------------------------------------------- Appx removal (installed + provisioned)
 function Remove-AppxByName {
     # Removes packages whose Name matches any pattern, for all users, then drops matching provisioned copies so new

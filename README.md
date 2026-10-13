@@ -25,6 +25,7 @@ Or download the zip from [Releases](https://github.com/bliper2/optimaxer/release
 - **Debloat**: curated Appx removal (Microsoft, OEM and game bloat) with safety levels.
 - **Network**: DNS provider switch (+DoH), latency benchmark, stack reset; opt-in hosts-file telemetry block.
 - **Features**: Hyper-V, WSL, Sandbox, .NET 3.5 and more.
+- **Auto clean**: one checkbox on the Dashboard schedules an hourly background task (runs as SYSTEM, even with Optimaxer closed) that trims process memory, purges the standby list and deletes temp files older than an hour. Turning it off removes the task.
 - **Tools**: free RAM, TRIM/defrag, disk health, SFC, DISM, Windows Update reset, icon/Store cache, performance counters, registry backup, update check, System Restore.
 - **Settings**: light, dark or match-Windows theme, six accent colours, reduced-motion option and update-check control.
 
