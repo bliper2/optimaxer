@@ -594,6 +594,14 @@
                       <Button x:Name="BtnQuickClean" Content="Scan for junk" Height="34"/>
                       <Button x:Name="BtnRestorePoint" Content="Create restore point" Height="34"/>
                     </WrapPanel>
+                    <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Margin="0,16,0,0" Padding="0,14,0,0">
+                      <StackPanel>
+                        <CheckBox x:Name="ChkAutoClean" Style="{StaticResource CardCheck}" ToolTip="Runs in the background as a scheduled task, even when Optimaxer is closed">
+                          <TextBlock Text="Free RAM and clear temp files every hour"/>
+                        </CheckBox>
+                        <TextBlock x:Name="AutoCleanInfo" Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="30,4,0,0"/>
+                      </StackPanel>
+                    </Border>
                   </StackPanel>
                 </Border>
 

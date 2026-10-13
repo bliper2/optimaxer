@@ -156,6 +156,7 @@ function Show-Page {
         foreach ($k in @($UI.Keys)) { if ($k -like 'Page_*') { $UI[$k].Visibility = if ($k -eq "Page_$Name") { 'Visible' } else { 'Collapsed' } } }
         Start-PageIn $UI["Page_$Name"]
     }
+    if ($Name -eq 'dash') { Update-AutoCleanState }
     if (-not $global:Loaded[$Name]) {
         if ($global:Busy) { $global:PendingPage = $Name; return }   # a job is running: load as soon as it finishes
         switch ($Name) {
@@ -291,6 +292,50 @@ function Initialize-Dashboard {
         Update-TweakStatus
     }
 }
+
+# ================================================================ hourly auto clean
+$global:AutoCleanSync = $false
+
+function Update-AutoCleanState {
+    $global:AutoCleanSync = $true
+    try {
+        $st = Get-AutoCleanStatus
+        $UI.ChkAutoClean.IsChecked = [bool]$st.Enabled
+        if (-not $st.Enabled) {
+            $UI.AutoCleanInfo.Text = if ($st.Last) { 'Off. Last run {0:g}.' -f [datetime]$st.Last.Time } else { 'Off. When on, a background task runs every hour, even with Optimaxer closed.' }
+        } else {
+            $parts = @()
+            if ($st.Last) {
+                $parts += 'Last run {0:t}: RAM +{1:N0} MB, {2:N1} MB of temp files removed.' -f [datetime]$st.Last.Time, ($st.Last.RamFreedKB / 1024), ($st.Last.TempFreedBytes / 1MB)
+            } else { $parts += 'Waiting for the first run.' }
+            if ($st.Next) { $parts += 'Next run {0:t}.' -f $st.Next }
+            $UI.AutoCleanInfo.Text = $parts -join ' '
+        }
+    } catch { $UI.AutoCleanInfo.Text = '' }
+    $global:AutoCleanSync = $false
+}
+
+$UI.ChkAutoClean.Add_Click({
+    if ($global:AutoCleanSync) { return }
+    $want = [bool]$UI.ChkAutoClean.IsChecked
+    $global:AutoCleanWant = $want
+    if (-not (Test-Elevated)) { Update-AutoCleanState; return }
+    $ok = Start-OptiJob $(if ($want) { 'Turning on hourly auto clean' } else { 'Turning off hourly auto clean' }) -ArgList @($want) -Script {
+        param($on)
+        try { if ($on) { Enable-AutoClean } else { Disable-AutoClean } }
+        catch { Write-Log "Auto clean: $($_.Exception.Message)" 'ERROR' }
+    } -OnDone {
+        Update-AutoCleanState
+        if ($global:AutoCleanWant) {
+            # the first run takes a few seconds; look again so the line shows its result
+            $t = New-Object Windows.Threading.DispatcherTimer
+            $t.Interval = [TimeSpan]::FromSeconds(20)
+            $t.Add_Tick({ param($s, $e) $s.Stop(); Update-AutoCleanState })
+            $t.Start()
+        }
+    }
+    if (-not $ok) { Update-AutoCleanState }
+})
 
 # ================================================================ tweaks page
 $global:TwRows = New-Object 'System.Collections.ObjectModel.ObservableCollection[OptiRow]'
@@ -1192,6 +1237,7 @@ $win.Add_ContentRendered({
     if (-not $global:Started) {
         $global:Started = $true
         Update-Live
+        Update-AutoCleanState
         Start-WindowIn
         if (-not $isAdmin) { Write-Log 'Not running as administrator: most changes will fail. Restart via Launch.bat.' 'WARN' }
         Write-Log "Optimaxer ready. Log file: $global:OptiLogPath"
