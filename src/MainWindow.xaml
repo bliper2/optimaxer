@@ -97,10 +97,30 @@
         <Setter.Value>
           <ControlTemplate TargetType="Button">
             <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
-              <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
+              <Grid>
+                <Border x:Name="wash" Background="{DynamicResource Text}" Opacity="0" CornerRadius="5" IsHitTestVisible="False"/>
+                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
+              </Grid>
             </Border>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource CardHi}"/></Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Trigger.EnterActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="wash" Storyboard.TargetProperty="Opacity" To="0.07" Duration="0:0:0.14">
+                        <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                      </DoubleAnimation>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="wash" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.18"/>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.ExitActions>
+              </Trigger>
               <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger>
               <Trigger Property="IsPressed" Value="True"><Setter TargetName="b" Property="Opacity" Value="0.8"/></Trigger>
               <Trigger Property="IsEnabled" Value="False"><Setter TargetName="b" Property="Opacity" Value="0.45"/></Trigger>
@@ -118,10 +138,30 @@
         <Setter.Value>
           <ControlTemplate TargetType="Button">
             <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
-              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              <Grid>
+                <Border x:Name="wash" Background="#FFFFFFFF" Opacity="0" CornerRadius="5" IsHitTestVisible="False"/>
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              </Grid>
             </Border>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource AccentHi}"/><Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource AccentHi}"/></Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Trigger.EnterActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="wash" Storyboard.TargetProperty="Opacity" To="0.16" Duration="0:0:0.14">
+                        <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                      </DoubleAnimation>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="wash" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.18"/>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.ExitActions>
+              </Trigger>
               <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Text}"/></Trigger>
               <Trigger Property="IsPressed" Value="True"><Setter TargetName="b" Property="Opacity" Value="0.85"/></Trigger>
               <Trigger Property="IsEnabled" Value="False"><Setter TargetName="b" Property="Opacity" Value="0.45"/></Trigger>
@@ -155,10 +195,30 @@
         <Setter.Value>
           <ControlTemplate TargetType="Button">
             <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="14" Padding="{TemplateBinding Padding}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
-              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              <Grid>
+                <Border x:Name="wash" Background="{DynamicResource Text}" Opacity="0" CornerRadius="13" IsHitTestVisible="False"/>
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              </Grid>
             </Border>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource CardHi}"/></Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Trigger.EnterActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="wash" Storyboard.TargetProperty="Opacity" To="0.08" Duration="0:0:0.14">
+                        <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                      </DoubleAnimation>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="wash" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.18"/>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.ExitActions>
+              </Trigger>
               <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger>
               <Trigger Property="IsPressed" Value="True"><Setter TargetName="b" Property="Opacity" Value="0.8"/></Trigger>
             </ControlTemplate.Triggers>
@@ -175,10 +235,30 @@
         <Setter.Value>
           <ControlTemplate TargetType="Button">
             <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
-              <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Top"/>
+              <Grid>
+                <Border x:Name="wash" Background="{DynamicResource Text}" Opacity="0" CornerRadius="7" IsHitTestVisible="False"/>
+                <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Top"/>
+              </Grid>
             </Border>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource CardHi}"/></Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Trigger.EnterActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="wash" Storyboard.TargetProperty="Opacity" To="0.07" Duration="0:0:0.14">
+                        <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                      </DoubleAnimation>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="wash" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.18"/>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.ExitActions>
+              </Trigger>
               <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger>
               <Trigger Property="IsPressed" Value="True"><Setter TargetName="b" Property="Opacity" Value="0.8"/></Trigger>
             </ControlTemplate.Triggers>
@@ -226,17 +306,55 @@
         <Setter.Value>
           <ControlTemplate TargetType="RadioButton">
             <Grid Margin="10,1" Height="36">
-              <Border x:Name="bg" CornerRadius="6" Background="Transparent" BorderThickness="1" BorderBrush="Transparent"/>
-              <Border x:Name="bar" Width="3" Height="16" CornerRadius="2" HorizontalAlignment="Left" Background="{DynamicResource Accent}" Visibility="Collapsed"/>
+              <Border x:Name="bg" CornerRadius="6" Background="Transparent" BorderThickness="1" BorderBrush="Transparent">
+                <Border x:Name="wash" Background="{DynamicResource Text}" Opacity="0" CornerRadius="6" IsHitTestVisible="False"/>
+              </Border>
+              <Border x:Name="bar" Width="3" Height="16" CornerRadius="2" HorizontalAlignment="Left" Background="{DynamicResource Accent}" Opacity="0" RenderTransformOrigin="0.5,0.5">
+                <Border.RenderTransform><ScaleTransform x:Name="barScale" ScaleY="1"/></Border.RenderTransform>
+              </Border>
               <ContentPresenter Margin="14,0,10,0" VerticalAlignment="Center"/>
             </Grid>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bg" Property="Background" Value="{DynamicResource CardHi}"/><Setter Property="Foreground" Value="{DynamicResource Text}"/></Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+                <Trigger.EnterActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="wash" Storyboard.TargetProperty="Opacity" To="0.07" Duration="0:0:0.14">
+                        <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                      </DoubleAnimation>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="wash" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.16"/>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.ExitActions>
+              </Trigger>
               <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="bg" Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger>
               <Trigger Property="IsChecked" Value="True">
                 <Setter TargetName="bg" Property="Background" Value="{DynamicResource Selected}"/>
-                <Setter TargetName="bar" Property="Visibility" Value="Visible"/>
+                <Setter TargetName="bar" Property="Opacity" Value="1"/>
                 <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+                <Trigger.EnterActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="barScale" Storyboard.TargetProperty="ScaleY" From="0.35" To="1" Duration="0:0:0.2">
+                        <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                      </DoubleAnimation>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="barScale" Storyboard.TargetProperty="ScaleY" To="0.35" Duration="0:0:0.12"/>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.ExitActions>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -255,7 +373,8 @@
           <ControlTemplate TargetType="CheckBox">
             <Grid Background="Transparent">
               <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <Border x:Name="box" Width="18" Height="18" CornerRadius="4" BorderThickness="1.5" BorderBrush="{DynamicResource Muted}" Background="Transparent" VerticalAlignment="Center" Margin="0,0,12,0">
+              <Border x:Name="box" Width="18" Height="18" CornerRadius="4" BorderThickness="1.5" BorderBrush="{DynamicResource Muted}" Background="Transparent" VerticalAlignment="Center" Margin="0,0,12,0" RenderTransformOrigin="0.5,0.5">
+                <Border.RenderTransform><ScaleTransform x:Name="boxScale" ScaleX="1" ScaleY="1"/></Border.RenderTransform>
                 <Path x:Name="tick" Data="M 4,9 L 7.4,12.4 L 13.4,5.2" Stroke="{DynamicResource OnAccent}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Visibility="Collapsed"/>
               </Border>
               <ContentPresenter Grid.Column="1" VerticalAlignment="Center"/>
@@ -265,6 +384,18 @@
                 <Setter TargetName="box" Property="Background" Value="{DynamicResource Accent}"/>
                 <Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource Accent}"/>
                 <Setter TargetName="tick" Property="Visibility" Value="Visible"/>
+                <Trigger.EnterActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="boxScale" Storyboard.TargetProperty="ScaleX" From="0.82" To="1" Duration="0:0:0.18">
+                        <DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.45"/></DoubleAnimation.EasingFunction>
+                      </DoubleAnimation>
+                      <DoubleAnimation Storyboard.TargetName="boxScale" Storyboard.TargetProperty="ScaleY" From="0.82" To="1" Duration="0:0:0.18">
+                        <DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.45"/></DoubleAnimation.EasingFunction>
+                      </DoubleAnimation>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.EnterActions>
               </Trigger>
               <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger>
               <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="box" Property="BorderThickness" Value="2.5"/><Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger>
@@ -408,6 +539,8 @@
 
     <DataTemplate x:Key="CardTemplate">
       <Border x:Name="row" Padding="16,11" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Background="Transparent">
+        <Grid>
+          <Border x:Name="wash" Background="{DynamicResource Text}" Opacity="0" IsHitTestVisible="False" Margin="-16,-11,-16,-11"/>
         <CheckBox Style="{StaticResource CardCheck}" IsChecked="{Binding IsChecked, Mode=TwoWay}">
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -421,14 +554,34 @@
             </StackPanel>
           </Grid>
         </CheckBox>
+        </Grid>
       </Border>
       <DataTemplate.Triggers>
-        <Trigger SourceName="row" Property="IsMouseOver" Value="True"><Setter TargetName="row" Property="Background" Value="{DynamicResource CardHi}"/></Trigger>
+        <Trigger SourceName="row" Property="IsMouseOver" Value="True">
+          <Trigger.EnterActions>
+            <BeginStoryboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="wash" Storyboard.TargetProperty="Opacity" To="0.06" Duration="0:0:0.12">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.EnterActions>
+          <Trigger.ExitActions>
+            <BeginStoryboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="wash" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.16"/>
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.ExitActions>
+        </Trigger>
       </DataTemplate.Triggers>
     </DataTemplate>
 
     <DataTemplate x:Key="TweakTemplate">
       <Border x:Name="row" Padding="16,10" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Background="Transparent">
+        <Grid>
+          <Border x:Name="wash" Background="{DynamicResource Text}" Opacity="0" IsHitTestVisible="False" Margin="-16,-10,-16,-10"/>
         <CheckBox Style="{StaticResource CardCheck}" IsChecked="{Binding IsChecked, Mode=TwoWay}">
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -442,14 +595,34 @@
             </StackPanel>
           </Grid>
         </CheckBox>
+        </Grid>
       </Border>
       <DataTemplate.Triggers>
-        <Trigger SourceName="row" Property="IsMouseOver" Value="True"><Setter TargetName="row" Property="Background" Value="{DynamicResource CardHi}"/></Trigger>
+        <Trigger SourceName="row" Property="IsMouseOver" Value="True">
+          <Trigger.EnterActions>
+            <BeginStoryboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="wash" Storyboard.TargetProperty="Opacity" To="0.06" Duration="0:0:0.12">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.EnterActions>
+          <Trigger.ExitActions>
+            <BeginStoryboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="wash" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.16"/>
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.ExitActions>
+        </Trigger>
       </DataTemplate.Triggers>
     </DataTemplate>
 
     <DataTemplate x:Key="AppTile">
-      <Border Width="218" Height="46" Margin="0,0,8,8" CornerRadius="8" Background="{DynamicResource Card}" BorderBrush="{DynamicResource Line}" BorderThickness="1" Padding="12,0" ToolTip="{Binding Desc}">
+      <Border x:Name="tile" Width="218" Height="46" Margin="0,0,8,8" CornerRadius="8" Background="{DynamicResource Card}" BorderBrush="{DynamicResource Line}" BorderThickness="1" Padding="12,0" ToolTip="{Binding Desc}">
+        <Grid>
+          <Border x:Name="wash" Background="{DynamicResource Text}" Opacity="0" CornerRadius="7" IsHitTestVisible="False" Margin="-12,0"/>
         <CheckBox Style="{StaticResource CardCheck}" IsChecked="{Binding IsChecked, Mode=TwoWay}" VerticalAlignment="Center">
           <DockPanel LastChildFill="True">
             <TextBlock DockPanel.Dock="Right" Style="{StaticResource StateText}" Text="{Binding Extra}"/>
@@ -468,7 +641,28 @@
             <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
           </DockPanel>
         </CheckBox>
+        </Grid>
       </Border>
+      <DataTemplate.Triggers>
+        <Trigger SourceName="tile" Property="IsMouseOver" Value="True">
+          <Trigger.EnterActions>
+            <BeginStoryboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="wash" Storyboard.TargetProperty="Opacity" To="0.07" Duration="0:0:0.12">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.EnterActions>
+          <Trigger.ExitActions>
+            <BeginStoryboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="wash" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.16"/>
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.ExitActions>
+        </Trigger>
+      </DataTemplate.Triggers>
     </DataTemplate>
     <Style x:Key="TileItems" TargetType="ItemsControl">
       <Setter Property="ItemTemplate" Value="{StaticResource AppTile}"/>
@@ -850,7 +1044,7 @@
             <ScrollViewer VerticalScrollBarVisibility="Auto">
               <StackPanel Margin="0,0,10,24" MaxWidth="820" HorizontalAlignment="Left">
                 <TextBlock Style="{StaticResource PageTitle}" Text="Settings"/>
-                <TextBlock Style="{StaticResource Comment}" Text="Appearance and behavior. Changes are saved as you make them."/>
+                <TextBlock Style="{StaticResource Comment}" Text="Appearance and behavior. Theme and accent changes are saved as you pick them."/>
                 <Border Style="{StaticResource Panel}" Padding="20,18">
                   <StackPanel>
                     <TextBlock Text="Theme" FontWeight="SemiBold" FontSize="14"/>
@@ -862,7 +1056,7 @@
                 <Border Style="{StaticResource Panel}" Padding="20,18" Margin="0,14,0,0">
                   <StackPanel>
                     <TextBlock Text="Motion" FontWeight="SemiBold" FontSize="14"/>
-                    <TextBlock Style="{StaticResource Comment}" Margin="0,4,0,12" Text="Page transitions and animated progress bars."/>
+                    <TextBlock Style="{StaticResource Comment}" Margin="0,4,0,12" Text="Window open, page changes, theme fades and progress bars. Reduce motion keeps the short hover highlights."/>
                     <WrapPanel x:Name="AnimPanel"/>
                   </StackPanel>
                 </Border>

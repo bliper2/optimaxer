@@ -17,10 +17,14 @@ COMSysApp|s|COM+ System Application
 CertPropSvc|s|Certificate propagation (smart cards)
 CscService|s|Offline Files
 DmEnrollmentSvc|s|Device management enrollment
+DcpSvc|s|Data collection publishing
 DsSvc|s|Data Sharing Service
+diagsvc|s|Diagnostic execution service
+diagnosticshub.standardcollector.service|s|Diagnostic hub collector
 EntAppSvc|s|Enterprise app management
 FDResPub|s|Function Discovery Resource Publication
 Fax|d|Fax
+GraphicsPerfSvc|d|Graphics performance monitor
 HvHost|s|Hyper-V host service
 IpxlatCfgSvc|s|IP translation configuration
 KtmRm|s|Kernel transaction manager for MSDTC
@@ -56,8 +60,9 @@ SEMgrSvc|s|Payments and NFC/SE manager
 SNMPTRAP|d|SNMP trap
 SSDPSRV|s|SSDP discovery (UPnP)
 SessionEnv|s|Remote Desktop configuration
-SharedAccess|s|Internet Connection Sharing
+SharedAccess|d|Internet Connection Sharing
 SmsRouter|s|SMS router
+TabletInputService|s|Touch keyboard and handwriting
 TapiSrv|s|Telephony
 TermService|s|Remote Desktop Services
 TieringEngineService|s|Storage tiers management
@@ -123,6 +128,8 @@ $global:OptiCleanup = @(
     @{ Id = 'vivaldi';   Name = 'Vivaldi cache';              Desc = 'Close Vivaldi first.';                                                           Paths = @("$env:LOCALAPPDATA\Vivaldi\User Data\*\Cache", "$env:LOCALAPPDATA\Vivaldi\User Data\*\Code Cache", "$env:LOCALAPPDATA\Vivaldi\User Data\*\GPUCache") },
     @{ Id = 'firefox';   Name = 'Firefox cache';              Desc = 'Close Firefox first.';                                                           Paths = @("$env:LOCALAPPDATA\Mozilla\Firefox\Profiles\*\cache2") },
     @{ Id = 'discord';   Name = 'Discord cache';              Desc = 'Close Discord first.';                                                           Paths = @("$env:APPDATA\discord\Cache", "$env:APPDATA\discord\Code Cache", "$env:APPDATA\discord\GPUCache") },
+    @{ Id = 'teams';     Name = 'Teams cache';                Desc = 'Close Teams first. Chats and sign-in are kept.';                                  Paths = @("$env:APPDATA\Microsoft\Teams\Cache", "$env:APPDATA\Microsoft\Teams\Code Cache", "$env:APPDATA\Microsoft\Teams\GPUCache", "$env:LOCALAPPDATA\Microsoft\Teams\Cache") },
+    @{ Id = 'inet';      Name = 'Windows web and certificate caches'; Desc = 'WinInet temporary files and the Cryptnet URL cache. Rebuilt when Windows checks certificates.'; Paths = @("$env:LOCALAPPDATA\Microsoft\Windows\INetCache", "$env:WINDIR\System32\config\systemprofile\AppData\LocalLow\Microsoft\CryptnetUrlCache\Content", "$env:WINDIR\System32\config\systemprofile\AppData\LocalLow\Microsoft\CryptnetUrlCache\MetaData") },
     @{ Id = 'spotify';   Name = 'Spotify cache';              Desc = 'Offline downloads are kept.';                                                    Paths = @("$env:LOCALAPPDATA\Spotify\Data") },
     @{ Id = 'steam';     Name = 'Steam web cache';            Desc = 'Steam browser/html cache.';                                                      Paths = @("$env:LOCALAPPDATA\Steam\htmlcache") },
     @{ Id = 'fontcache'; Name = 'Windows font cache';          Desc = 'Rebuilt on demand. Fixes garbled fonts.';                                        Paths = @("$env:WINDIR\ServiceProfiles\LocalService\AppData\Local\FontCache\*", "$env:WINDIR\System32\FNTCACHE.DAT"); Services = @('FontCache') },

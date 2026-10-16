@@ -13,8 +13,12 @@ T -Id 'perf-fth' -Cat $P -Name 'Disable Fault Tolerant Heap' -Tags safe, max -Ri
   -Apply { rundll32.exe fthsvc.dll,FthSysprepSpecialize; Set-RegEntry 'HKLM:\SOFTWARE\Microsoft\FTH' 'Enabled' 0 'DWord'; $null }
 
 T -Id 'perf-bgapps' -Cat $P -Name 'Disable background apps' -Tags safe, max `
-  -Desc 'Store apps no longer run in the background. Less CPU, RAM and network use; notifications from those apps stop.' `
-  -Reg @( Rg "$CV\BackgroundAccessApplications" 'GlobalUserDisabled' 1; Rg "$CV\Search" 'BackgroundAppGlobalToggle' 0 )
+  -Desc 'Store apps no longer run in the background, including the Windows 11 policy that forces it off for every account. Less CPU, RAM and network use; notifications from those apps stop.' `
+  -Reg @(
+      Rg "$CV\BackgroundAccessApplications" 'GlobalUserDisabled' 1
+      Rg "$CV\Search" 'BackgroundAppGlobalToggle' 0
+      Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy' 'LetAppsRunInBackground' 2
+  )
 
 T -Id 'perf-sleepstudy' -Cat $P -Name 'Disable SleepStudy and power diagnostic logging' -Tags safe, max `
   -Desc 'Turns off Modern Standby / power diagnostic event logs and the Power Efficiency Diagnostics task. Less background disk writes.' `
@@ -528,7 +532,7 @@ T -Id 'br-brave-debloat' -Cat $B -Name 'Brave: remove Rewards, Wallet, VPN, News
   )
 
 T -Id 'br-edge-debloat' -Cat $B -Name 'Edge: remove new-tab feed, workspaces, Bing ads and promos' -Tags safe, privacy, max, deai `
-  -Desc ('Extra Edge policies on top of "Edge: disable nags": new-tab news feed, promotional tabs, workspaces, Bing ads, default-browser nag, metrics and site-info reporting, game mode panel.' + $NOTE) `
+  -Desc ('Extra Edge policies on top of "Edge: disable nags": new-tab news feed, promotional tabs, workspaces, Bing ads, default-browser nag, Do Not Track, metrics, and the Microsoft Editor sidebar extension WinUtil blocks.' + $NOTE) `
   -Reg @(
       Rg $EDG 'PromotionalTabsEnabled' 0
       Rg $EDG 'NewTabPageContentEnabled' 0
@@ -551,7 +555,9 @@ T -Id 'br-edge-debloat' -Cat $B -Name 'Edge: remove new-tab feed, workspaces, Bi
       Rg $EDG 'EdgeAssetDeliveryServiceEnabled' 0
       Rg $EDG 'DiagnosticData' 0
       Rg $EDG 'HideFirstRunExperience' 1
+      Rg $EDG 'ConfigureDoNotTrack' 1
       Rg 'HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate' 'CreateDesktopShortcutDefault' 0
+      Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Edge\ExtensionInstallBlocklist' '1' 'ofefcgjbeghpigppfmkologfjadafddi' 'String'
   )
 
 T -Id 'br-firefox-debloat' -Cat $B -Name 'Firefox: no telemetry, studies, Pocket, sponsored content or nags' -Tags safe, privacy, max, deai `
@@ -734,10 +740,12 @@ T -Id 'debloat-settings365' -Cat $D -Name 'Remove Microsoft 365 and account prom
   -Desc 'Hides the consumer account-state banners and offers in the Settings app.' `
   -Reg @( Rg "$POL\CloudContent" 'DisableConsumerAccountStateContent' 1 )
 
-T -Id 'debloat-suggestions2' -Cat $D -Name 'Turn off remaining Windows suggestions and nag toasts' -Tags safe, max, deai `
-  -Desc 'Account notifications, sync-provider (OneDrive) ads, backup reminders, suggested-toast notifications and mobile-device nags.' `
+T -Id 'debloat-suggestions2' -Cat $D -Name 'Turn off remaining Windows suggestions and nag toasts' -Tags safe, privacy, max, deai `
+  -Desc 'The rest of the Win11Debloat suggestions list: Start tips, account notifications, OneDrive ads, backup reminders, suggested toasts and Phone Link nags.' `
   -Reg @(
       Rg $CDM 'SubscribedContent-353698Enabled' 0
+      Rg $EXA 'Start_IrisRecommendations' 0
+      Rg $EXA 'Start_AccountNotifications' 0
       Rg "$CV\SystemSettings\AccountNotifications" 'EnableAccountNotifications' 0
       Rg $EXA 'ShowSyncProviderNotifications' 0
       Rg "$CV\Notifications\Settings\Windows.SystemToast.Suggested" 'Enabled' 0
@@ -984,3 +992,184 @@ T -Id 'audio-loudnesseq' -Cat $P -Name 'Unhide "Loudness Equalization" on audio 
       }
       $any
   }
+
+# ======================================================================= 2026 MODULES (WinUtil + Win11Debloat, both MIT)
+# Registry values and behavior follow those projects. Original values are snapshotted, so undo restores this PC.
+
+T -Id 'game-barpop' -Cat $G -Name 'Stop Game Bar popups when a game or controller opens' -Tags gaming, max `
+  -Desc 'Adapted from Win11Debloat: points the ms-gamebar and ms-gamebarservices links at systray so Windows stops opening Game Bar when a game launches or a controller connects. Your previous registration is exported first.' `
+  -Apply {
+      $done = @()
+      foreach ($proto in 'ms-gamebar', 'ms-gamebarservices') {
+          $native = "HKEY_CURRENT_USER\Software\Classes\$proto"
+          $ps = "HKCU:\Software\Classes\$proto"
+          $existed = Test-Path -LiteralPath $ps
+          $file = $null
+          if ($existed) {
+              $file = Join-Path $global:OptiBackupDir ("gamebar-{0}-{1}.reg" -f $proto, (Get-Date -Format 'yyyyMMdd-HHmmss'))
+              reg.exe export $native $file /y | Out-Null
+              if (-not (Test-Path -LiteralPath $file)) { throw "could not back up $proto, left untouched" }
+          }
+          if (-not $existed) { New-Item -Path $ps -Force | Out-Null }
+          Set-Item -LiteralPath $ps -Value "URL:$proto"
+          New-ItemProperty -LiteralPath $ps -Name 'URL Protocol' -Value '' -PropertyType String -Force | Out-Null
+          New-ItemProperty -LiteralPath $ps -Name 'NoOpenWith' -Value '' -PropertyType String -Force | Out-Null
+          $cmd = Join-Path $ps 'shell\open\command'
+          New-Item -Path $cmd -Force | Out-Null
+          Set-Item -LiteralPath $cmd -Value '%SystemRoot%/System32/systray.exe'
+          $done += @{ Proto = $proto; Existed = $existed; File = $file }
+      }
+      , $done
+  } `
+  -Undo {
+      param($d)
+      foreach ($p in @($d)) {
+          $ps = "HKCU:\Software\Classes\$($p.Proto)"
+          if ($p.File -and (Test-Path -LiteralPath $p.File)) { reg.exe import $p.File | Out-Null }
+          elseif (-not $p.Existed) { Remove-Item -LiteralPath $ps -Recurse -Force -ErrorAction SilentlyContinue }
+      }
+  } `
+  -Test {
+      $cmd = 'HKCU:\Software\Classes\ms-gamebar\shell\open\command'
+      (Test-Path -LiteralPath $cmd) -and ((Get-Item -LiteralPath $cmd).GetValue('') -match 'systray\.exe')
+  }
+
+T -Id 'ui-snapassist' -Cat $I -Name 'No app suggestions when snapping windows' -Tags gaming, max -Explorer `
+  -Desc 'Adapted from Win11Debloat: turns off Snap Assist, the row of other windows offered after you snap one to a side or corner.' `
+  -Reg @( Rg $EXA 'SnapAssist' 0 )
+
+T -Id 'ui-snaplayouts' -Cat $I -Name 'Hide snap layout flyouts' -Tags gaming -Explorer `
+  -Desc 'Adapted from Win11Debloat: hides the snap layout popup on the maximize button and when a window is dragged to the top of the screen. Snapping itself stays on.' `
+  -Reg @( Rg $EXA 'EnableSnapBar' 0; Rg $EXA 'EnableSnapAssistFlyout' 0 )
+
+T -Id 'ui-taskbar-labels' -Cat $I -Name 'Taskbar: never combine buttons, show labels' -Tags max -Explorer `
+  -Desc 'Adapted from Win11Debloat: the main taskbar keeps a separate button and a label for every window.' `
+  -Reg @( Rg $EXA 'TaskbarGlomLevel' 2 )
+
+T -Id 'ui-taskbar-whenfull' -Cat $I -Name 'Taskbar: combine buttons only when full' -Explorer `
+  -Desc 'Adapted from Win11Debloat: the main taskbar shows labels until it runs out of room, then combines them.' `
+  -Reg @( Rg $EXA 'TaskbarGlomLevel' 1 )
+
+T -Id 'ui-taskbar-labels2' -Cat $I -Name 'Secondary taskbars: never combine buttons' -Tags max -Explorer `
+  -Desc 'Adapted from Win11Debloat: taskbars on extra monitors show a separate labeled button for every window.' `
+  -Reg @( Rg $EXA 'MMTaskbarGlomLevel' 2 )
+
+T -Id 'ui-mmtaskbar-main' -Cat $I -Name 'Extra monitors: show a window on the main taskbar too' -Explorer `
+  -Desc 'Adapted from Win11Debloat: an app appears on the main taskbar and on the monitor where its window is open.' `
+  -Reg @( Rg $EXA 'MMTaskbarMode' 1 )
+
+T -Id 'ui-mmtaskbar-active' -Cat $I -Name 'Extra monitors: show a window only where it is open' -Explorer `
+  -Desc 'Adapted from Win11Debloat: each window is listed only on the taskbar of the monitor it sits on.' `
+  -Reg @( Rg $EXA 'MMTaskbarMode' 2 )
+
+T -Id 'ui-explorer-dl' -Cat $I -Name 'Open Explorer to Downloads' -Explorer `
+  -Desc 'Adapted from Win11Debloat: File Explorer starts in Downloads instead of Home or This PC.' `
+  -Reg @( Rg $EXA 'LaunchTo' 3 )
+
+T -Id 'ui-letters-first' -Cat $I -Name 'Show drive letters before the drive name' -Explorer `
+  -Desc 'Adapted from Win11Debloat: Explorer lists "C: Local Disk" instead of "Local Disk (C:)".' `
+  -Reg @( Rg "$CV\Explorer" 'ShowDriveLettersFirst' 4 )
+
+T -Id 'ui-letters-net' -Cat $I -Name 'Show network drive letters before the name' -Explorer `
+  -Desc 'Adapted from Win11Debloat: only network drives put the letter first. Local drives stay "name (letter)". Replaces the all-drives letter layout if that was applied.' `
+  -Reg @( Rg "$CV\Explorer" 'ShowDriveLettersFirst' 1 )
+
+T -Id 'ui-letters-hide' -Cat $I -Name 'Hide drive letters' -Tags optin -Explorer `
+  -Desc 'Adapted from Win11Debloat: Explorer shows drive names without letters. Undo restores the previous layout.' `
+  -Reg @( Rg "$CV\Explorer" 'ShowDriveLettersFirst' 2 )
+
+T -Id 'ui-spotlight-learn' -Cat $I -Name 'Hide "Learn about this picture" on the desktop' -Tags safe, max `
+  -Desc 'Adapted from Win11Debloat: hides the Spotlight desktop shortcut. Rotating Spotlight wallpaper can stay on. This does not turn Spotlight off.' `
+  -Reg @( Rg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel' '{2cc5ca98-6485-489a-920e-b3e88a6ccce3}' 1 )
+
+T -Id 'ui-thispc-folders' -Cat $I -Name 'This PC: show Desktop, Documents, Downloads, Music, Pictures and Videos' -Explorer `
+  -Desc 'Adapted from Win11Debloat: puts those folders back on the This PC page. Previous hide flags are saved and restored on undo.' `
+  -Apply {
+      $base = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace'
+      $ids = '{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}', '{d3162b92-9365-467a-956b-92703aca08af}', '{088e3905-0323-4b02-9826-5d99428e115f}', '{1CF1260C-4DD0-4ebb-811F-33C572699FDE}', '{3dfdf296-dbec-4fb4-81d1-6a3438bcf4de}', '{24ad3ad4-a569-4530-98e1-ab02f9417aa8}', '{f86fa3ab-70d2-4fc7-9c99-fcbf05467f3a}'
+      $prev = @()
+      foreach ($id in $ids) {
+          $p = Join-Path $base $id
+          $existed = Test-Path -LiteralPath $p
+          if (-not $existed) { New-Item -Path $p -Force | Out-Null }
+          $item = Get-ItemProperty -LiteralPath $p
+          $prev += @{ Path = $p; Existed = $existed; HadHide = ($null -ne $item.HideIfEnabled); Hide = $item.HideIfEnabled; HadHidden = ($null -ne $item.HiddenByDefault); Hidden = $item.HiddenByDefault }
+          if ($null -ne $item.HideIfEnabled) { Remove-ItemProperty -LiteralPath $p -Name 'HideIfEnabled' -ErrorAction SilentlyContinue }
+          Set-RegEntry $p 'HiddenByDefault' 0
+      }
+      , $prev
+  } `
+  -Undo {
+      param($d)
+      foreach ($p in @($d)) {
+          if (-not $p.Existed) { Remove-Item -LiteralPath $p.Path -Recurse -Force -ErrorAction SilentlyContinue; continue }
+          if ($p.HadHide) { Set-RegEntry $p.Path 'HideIfEnabled' $p.Hide } else { Remove-RegEntry $p.Path 'HideIfEnabled' }
+          if ($p.HadHidden) { Set-RegEntry $p.Path 'HiddenByDefault' $p.Hidden } else { Remove-RegEntry $p.Path 'HiddenByDefault' }
+      }
+  } `
+  -Test {
+      $p = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}'
+      $item = Get-ItemProperty -LiteralPath $p -ErrorAction SilentlyContinue
+      ($null -ne $item) -and ($item.HiddenByDefault -eq 0) -and ($null -eq $item.HideIfEnabled)
+  }
+
+T -Id 'ui-allapps-grid' -Cat $I -Name 'Start All apps: grid' -Explorer `
+  -Desc 'Adapted from Win11Debloat (Windows 11 25H2, build 26200 and newer): the All apps list uses the alphabetical grid.' `
+  -Reg @( Rg "$CV\Start" 'AllAppsViewMode' 1 )
+
+T -Id 'ui-allapps-list' -Cat $I -Name 'Start All apps: list' -Explorer `
+  -Desc 'Adapted from Win11Debloat (Windows 11 25H2, build 26200 and newer): the All apps list uses the alphabetical list. Category view is the Windows default; undo restores whatever you had.' `
+  -Reg @( Rg "$CV\Start" 'AllAppsViewMode' 2 )
+
+T -Id 'ui-allapps-hide' -Cat $I -Name 'Hide All apps in Start' -Tags optin -Risk Moderate -Explorer `
+  -Desc 'Adapted from Win11Debloat (build 26200 and newer): removes the All apps section from Start. Installed apps are harder to find. Undo restores the section.' `
+  -Reg @( Rg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'NoStartMenuMorePrograms' 1 )
+
+T -Id 'ui-search-icon' -Cat $I -Name 'Taskbar search: icon only' -Explorer `
+  -Desc 'Adapted from Win11Debloat: replaces the search box with a search icon. Win+S still opens search.' `
+  -Reg @( Rg "$CV\Search" 'SearchboxTaskbarMode' 1 )
+
+T -Id 'ui-search-label' -Cat $I -Name 'Taskbar search: icon and label' -Explorer `
+  -Desc 'Adapted from Win11Debloat: shows a search icon with the word Search, narrower than the full box.' `
+  -Reg @( Rg "$CV\Search" 'SearchboxTaskbarMode' 3 )
+
+T -Id 'ui-notifcenter' -Cat $I -Name 'Disable the notification center and calendar flyout' -Tags optin -Risk Moderate `
+  -Desc 'Adapted from Chris Titus Tech WinUtil: turns off the notification center, including the calendar flyout. Toast popups are a separate tweak.' `
+  -Reg @( Rg 'HKCU:\Software\Policies\Microsoft\Windows\Explorer' 'DisableNotificationCenter' 1 )
+
+T -Id 'priv-storesearch' -Cat $V -Name 'Hide Microsoft Store suggestions in search' -Tags safe, privacy, max, deai `
+  -Desc 'Adapted from Chris Titus Tech WinUtil: denies Everyone write access to the Store recommendation database so Start search stops offering Store apps. Undo removes only that deny entry. Needs the Microsoft Store package for this account.' `
+  -Apply {
+      $db = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsStore_8wekyb3d8bbwe\LocalState\store.db'
+      if (-not (Test-Path -LiteralPath $db)) { throw 'Microsoft Store database was not found for this account' }
+      & icacls.exe $db /deny '*S-1-1-0:F' | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "could not update permissions on the Store database (exit $LASTEXITCODE)" }
+      $null
+  } `
+  -Undo {
+      $db = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsStore_8wekyb3d8bbwe\LocalState\store.db'
+      if (Test-Path -LiteralPath $db) { & icacls.exe $db /remove:d '*S-1-1-0' | Out-Null }
+  } `
+  -Test {
+      $db = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsStore_8wekyb3d8bbwe\LocalState\store.db'
+      if (-not (Test-Path -LiteralPath $db)) { return $false }
+      ((& icacls.exe $db | Out-String) -match 'Everyone:\(DENY\)|Everyone:\(N\)')
+  }
+
+T -Id 'perf-s3' -Cat $P -Name 'Prefer classic S3 sleep over Modern Standby' -Tags optin -Risk Advanced -Restart `
+  -Desc 'Adapted from Chris Titus Tech WinUtil: sets PlatformAoAcOverride so the PC uses S3 sleep (CPU powered off, memory refreshed) instead of Modern Standby. Some laptops sleep poorly or not at all with this. Undo restores the previous value.' `
+  -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Power' 'PlatformAoAcOverride' 0 )
+
+T -Id 'net-rdp-unsigned' -Cat $N -Name 'Do not warn when opening an unsigned Remote Desktop file' -Tags optin -Risk Moderate `
+  -Desc 'Adapted from Chris Titus Tech WinUtil: skips the warning added by recent Windows 10 and 11 updates when you open an .rdp file that is not signed. Leave this off unless you open Remote Desktop files you trust.' `
+  -Reg @(
+      Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services\Client' 'RedirectionWarningDialogVersion' 1
+      Rg 'HKCU:\SOFTWARE\Microsoft\Terminal Server Client' 'RdpLaunchConsentAccepted' 1
+  )
+
+T -Id 'ui-start-old' -Cat $I -Name 'Prefer the Start menu layout from before the 25H2 rollout' -Tags optin -Risk Advanced -Explorer `
+  -Desc 'Adapted from Chris Titus Tech WinUtil: sets the feature override that keeps the previous Start layout on builds still honoring it. WinUtil warns this does nothing on newer Windows. Undo restores the previous override value.' `
+  -Reg @(
+      Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\FeatureManagement\Overrides\8\3036241548' 'EnabledState' 1
+      Rg 'HKLM:\SYSTEM\ControlSet001\Control\FeatureManagement\Overrides\8\3036241548' 'EnabledState' 1
+  )

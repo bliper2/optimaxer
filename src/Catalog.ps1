@@ -186,10 +186,14 @@ T -Id 'game-mode' -Cat $G -Name 'Enable Game Mode' -Tags safe, gaming, max `
   -Reg @( Rg 'HKCU:\Software\Microsoft\GameBar' 'AutoGameModeEnabled' 1; Rg 'HKCU:\Software\Microsoft\GameBar' 'AllowAutoGameMode' 1 )
 
 T -Id 'game-dvr' -Cat $G -Name 'Disable Game DVR and background capture' -Tags safe, gaming, max `
-  -Desc 'Stops Xbox Game Bar background recording that costs FPS. Game Bar overlay shortcuts stop working.' `
+  -Desc 'Stops Xbox Game Bar background recording, including the saved-clip, microphone and cursor captures, for this account and the machine. Game Bar overlay shortcuts stop working.' `
   -Reg @(
       Rg $GCS 'GameDVR_Enabled' 0
       Rg "$CV\GameDVR" 'AppCaptureEnabled' 0
+      Rg "$CV\GameDVR" 'HistoricalCaptureEnabled' 0
+      Rg "$CV\GameDVR" 'AudioCaptureEnabled' 0
+      Rg "$CV\GameDVR" 'CursorCaptureEnabled' 0
+      Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR' 'AppCaptureEnabled' 0
       Rg "$POL\GameDVR" 'AllowGameDVR' 0
       Rg 'HKCU:\Software\Microsoft\GameBar' 'UseNexusForGameBarEnabled' 0
       Rg 'HKCU:\Software\Microsoft\GameBar' 'ShowStartupPanel' 0
@@ -289,12 +293,15 @@ T -Id 'net-smb1' -Cat $N -Name 'Disable SMBv1 server' -Tags safe `
 # ======================================================================= PRIVACY
 $V = 'Privacy & Telemetry'
 T -Id 'priv-telemetry' -Cat $V -Name 'Disable telemetry and diagnostic data' -Tags safe, privacy, max `
-  -Desc 'Sets telemetry to the minimum, stops DiagTrack and disables Microsoft data-collection tasks.' `
+  -Desc 'Sets telemetry to the minimum Windows allows, blocks device-name and dump uploads, stops DiagTrack and disables Microsoft data-collection tasks. Home and Pro still keep required diagnostics; this is the lowest setting those editions accept.' `
   -Reg @(
       Rg "$POL\DataCollection" 'AllowTelemetry' 0
       Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection' 'AllowTelemetry' 0
       Rg "$POL\DataCollection" 'DoNotShowFeedbackNotifications' 1
       Rg "$POL\DataCollection" 'DisableOneSettingsDownloads' 1
+      Rg "$POL\DataCollection" 'AllowDeviceNameInTelemetry' 0
+      Rg "$POL\DataCollection" 'LimitDiagnosticLogCollection' 1
+      Rg "$POL\DataCollection" 'LimitDumpCollection' 1
   ) -Svc @( Sx 'DiagTrack' 4; Sx 'dmwappushservice' 4 ) `
   -Task @(
       'Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser'
@@ -353,13 +360,16 @@ T -Id 'priv-consumer' -Cat $V -Name 'Disable Start/lock-screen ads and suggested
   )
 
 T -Id 'priv-websearch' -Cat $V -Name 'Disable Bing web results in Start search' -Tags safe, privacy, max, deai `
-  -Desc 'Start search only searches your PC. Faster and nothing you type goes to Bing.' `
+  -Desc 'Start search only searches your PC. Bing, Cortana and location-based web suggestions stay off, and nothing you type is sent out.' `
   -Reg @(
       Rg "$CV\Search" 'BingSearchEnabled' 0
       Rg "$CV\Search" 'CortanaConsent' 0
       Rg 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\Explorer' 'DisableSearchBoxSuggestions' 1
+      Rg "$POL\Windows Search" 'AllowCortana' 0
+      Rg "$POL\Windows Search" 'CortanaConsent' 0
       Rg "$POL\Windows Search" 'DisableWebSearch' 1
       Rg "$POL\Windows Search" 'ConnectedSearchUseWeb' 0
+      Rg "$POL\Windows Search" 'AllowSearchToUseLocation' 0
   )
 
 T -Id 'priv-ai' -Cat $V -Name 'Disable Copilot, Recall and Click to Do' -Tags safe, privacy, max, deai `
@@ -373,12 +383,14 @@ T -Id 'priv-ai' -Cat $V -Name 'Disable Copilot, Recall and Click to Do' -Tags sa
   )
 
 T -Id 'priv-location' -Cat $V -Name 'Disable location tracking' -Tags privacy -Risk Moderate `
-  -Desc 'Denies system-wide location access. Maps and Find My Device will not work.' `
+  -Desc 'Denies location for the machine and this account, turns off the location sensor and stops the Geolocation service. Maps and Find My Device will not work.' `
   -Reg @(
       Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location' 'Value' 'Deny' 'String'
+      Rg 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location' 'Value' 'Deny' 'String'
       Rg "$POL\LocationAndSensors" 'DisableLocation' 1
+      Rg 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Sensor\Overrides\{BFA794E4-F964-4FDB-90F6-51056BFE4B44}' 'SensorPermissionState' 0
       Rg 'HKLM:\SYSTEM\Maps' 'AutoUpdateEnabled' 0
-  )
+  ) -Svc @( Sx 'lfsvc' 4 )
 
 T -Id 'priv-input' -Cat $V -Name 'Disable typing, inking and speech data collection' -Tags safe, privacy, max `
   -Desc 'Stops Windows from harvesting what you type, ink and say to personalize services.' `
@@ -391,8 +403,15 @@ T -Id 'priv-input' -Cat $V -Name 'Disable typing, inking and speech data collect
   )
 
 T -Id 'priv-feedback' -Cat $V -Name 'Disable feedback prompts and app-launch tracking' -Tags safe, privacy, max `
-  -Desc 'No "How likely are you to recommend Windows" popups; Start stops tracking launched apps.' `
-  -Reg @( Rg 'HKCU:\Software\Microsoft\Siuf\Rules' 'NumberOfSIUFInPeriod' 0; Rg $EXA 'Start_TrackProgs' 0 )
+  -Desc 'No "How likely are you to recommend Windows" popups; Start stops tracking launched apps. The feedback timer is removed the same way Win11Debloat does, and undo puts it back.' `
+  -Reg @( Rg 'HKCU:\Software\Microsoft\Siuf\Rules' 'NumberOfSIUFInPeriod' 0; Rg $EXA 'Start_TrackProgs' 0 ) `
+  -Apply {
+      $p = 'HKCU:\Software\Microsoft\Siuf\Rules'
+      $snap = Get-RegSnapshot @{ P = $p; N = 'PeriodInNanoSeconds' }
+      if ($snap.Exists) { Remove-RegEntry $p 'PeriodInNanoSeconds' }
+      @{ Existed = [bool]$snap.Exists; Value = $snap.Value; Type = $snap.Type }
+  } `
+  -Undo { param($d) if ($d -and $d.Existed) { Set-RegEntry 'HKCU:\Software\Microsoft\Siuf\Rules' 'PeriodInNanoSeconds' $d.Value $d.Type } }
 
 T -Id 'priv-wer' -Cat $V -Name 'Disable Windows Error Reporting' -Tags privacy, max -Risk Moderate `
   -Desc 'Crash reports are no longer sent to Microsoft. Local crash dialogs remain.' `
@@ -431,8 +450,15 @@ T -Id 'debloat-edge' -Cat $D -Name 'Edge: disable nags, telemetry and background
   )
 
 T -Id 'debloat-widgets' -Cat $D -Name 'Remove Widgets and Chat taskbar buttons' -Tags safe, max, deai -Explorer `
-  -Desc 'Hides the Widgets board and Teams Chat, and stops the news feed.' `
-  -Reg @( Rg $EXA 'TaskbarDa' 0; Rg $EXA 'TaskbarMn' 0; Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Dsh' 'AllowNewsAndInterests' 0 )
+  -Desc 'Hides Widgets and Teams Chat, blocks the news feed, stops Widgets preloading, and ends any Widgets process already running. The packages stay installed.' `
+  -Reg @(
+      Rg $EXA 'TaskbarDa' 0
+      Rg $EXA 'TaskbarMn' 0
+      Rg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'HideSCAMeetNow' 1
+      Rg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Dsh' 'IsPrelaunchEnabled' 0
+      Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Dsh' 'AllowNewsAndInterests' 0
+  ) `
+  -Apply { Get-Process -Name 'Widgets','WidgetService','Win32Bridge.Server' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; $null }
 
 T -Id 'debloat-onedrive' -Cat $D -Name 'Uninstall OneDrive' -Tags optin -Risk Advanced -Explorer `
   -Desc 'Stops OneDrive, runs its per-user and per-machine uninstallers, blocks it from coming back (policy, update tasks, new-user setup entry), hides the Explorer sidebar entry and clears leftovers. Your files in the OneDrive folder are never deleted. Refuses to run while Desktop/Documents/Pictures are backed up into OneDrive: move them back first. Undo reinstalls it.' `
@@ -467,11 +493,11 @@ T -Id 'debloat-onedrive' -Cat $D -Name 'Uninstall OneDrive' -Tags optin -Risk Ad
   }
 
 T -Id 'svc-manual' -Cat $D -Name 'Services: set unneeded services to Manual' -Tags safe, max -SvcTol 0.9 `
-  -Desc 'Moves ~80 rarely-needed services (fax, remote registry helpers, peer networking, etc.) to Manual. They still start if something asks.' `
+  -Desc 'Moves rarely-needed services (diagnostic collectors, peer networking, touch keyboard, and similar) to Manual. They still start if something asks.' `
   -Svc @( $global:OptiServiceRecs | Where-Object { $_.Start -eq 3 } | ForEach-Object { Sx $_.Name 3 } )
 
 T -Id 'svc-disable' -Cat $D -Name 'Services: disable truly useless services' -Tags max -Risk Moderate -SvcTol 0.9 `
-  -Desc 'Disables Fax, Remote Registry, Retail Demo, SNMP trap, Maps broker, Media Player sharing and similar.' `
+  -Desc 'Disables Fax, Remote Registry, Retail Demo, Internet Connection Sharing, the graphics performance monitor, SNMP trap, Maps broker, Media Player sharing and similar.' `
   -Svc @( $global:OptiServiceRecs | Where-Object { $_.Start -eq 4 } | ForEach-Object { Sx $_.Name 4 } )
 
 T -Id 'sto-reserved' -Cat $D -Name 'Disable Reserved Storage' -Tags optin -Risk Moderate `
