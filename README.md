@@ -17,7 +17,7 @@ Or download the zip from [Releases](https://github.com/bliper2/optimaxer/release
 
 ## What it does
 - **Install**: 260+ apps in 10 categories through WinGet (the WinUtil list plus more), with real app icons, "Show installed", upgrade-all, and a verification step after every install or uninstall.
-- **Tweaks**: 190 tweaks (performance, gaming, network, privacy, AI/Copilot/Recall removal, a safe OneDrive uninstall, browser debloat, Windows Update control, interface) with presets. The original value of everything a tweak touches is saved, so each tweak, and "Undo ALL", restores your real prior settings. Optional restore point first.
+- **Tweaks**: 213 tweaks (performance, gaming, network, privacy, AI/Copilot/Recall removal, a safe OneDrive uninstall, browser debloat, Windows Update control, interface) with presets. The 2026 taskbar, Start, Explorer, Game Bar and Store-search modules follow [WinUtil](https://github.com/ChrisTitusTech/winutil) and [Win11Debloat](https://github.com/Raphire/Win11Debloat). The original value of everything a tweak touches is saved, so each tweak, and "Undo ALL", restores your real prior settings. Optional restore point first.
 - **Config**: export/import what you ticked on Install and Tweaks, create a desktop shortcut, and run unattended (see below).
 - **Services**: ~240 services with recommended Manual/Disable lists, protected core services hidden, JSON backup before every change.
 - **Startup**: registry, startup-folder **and scheduled-task** entries that run at logon/boot; enable or disable without uninstalling.
@@ -27,7 +27,7 @@ Or download the zip from [Releases](https://github.com/bliper2/optimaxer/release
 - **Features**: Hyper-V, WSL, Sandbox, .NET 3.5 and more.
 - **Auto clean**: one checkbox on the Dashboard schedules an hourly background task (runs as SYSTEM, even with Optimaxer closed) that trims process memory, purges the standby list and deletes temp files older than an hour. Turning it off removes the task.
 - **Tools**: free RAM, TRIM/defrag, disk health, SFC, DISM, Windows Update reset, icon/Store cache, performance counters, registry backup, update check, System Restore.
-- **Settings**: light, dark or match-Windows theme, six accent colours, reduced-motion option and update-check control.
+- **Settings**: match-Windows, Dark, Light, OLED, Nord, Graphite, Dusk or Porcelain, eight accent colours, reduced-motion option and update-check control.
 
 ## Linux (Manjaro / Arch)
 A separate, dependency-free Python edition lives in [`linux/`](linux/optimaxer.py). It works on Manjaro and other pacman-based distributions (EndeavourOS, Arch, Garuda...).

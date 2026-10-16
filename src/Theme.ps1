@@ -1,8 +1,14 @@
 # Optimaxer look: palettes, accent colours, settings file, small animation helpers. Needs $win and $UI from App.ps1.
 
+# Light = $true picks the light accent tone and the lighter selection mix.
 $global:OptiModes = [ordered]@{
-    dark  = @{ Label = 'Dark';  Bg = '1B1B1D'; Sidebar = '151517'; Card = '232326'; CardHi = '2B2B2F'; Line = '34343A'; Text = 'ECECEF'; Muted = '9B9BA4'; Good = '5FB878'; Warn = 'E0A93B'; Bad = 'E5645F' }
-    light = @{ Label = 'Light'; Bg = 'F5F5F7'; Sidebar = 'EDEDF0'; Card = 'FFFFFF'; CardHi = 'F0F0F3'; Line = 'DADADF'; Text = '1C1C1F'; Muted = '62626B'; Good = '2E8B4F'; Warn = '9A6700'; Bad = 'C4352F' }
+    dark      = @{ Label = 'Dark';      Light = $false; Bg = '1B1B1D'; Sidebar = '151517'; Card = '232326'; CardHi = '2B2B2F'; Line = '34343A'; Text = 'ECECEF'; Muted = '9B9BA4'; Good = '5FB878'; Warn = 'E0A93B'; Bad = 'E5645F' }
+    light     = @{ Label = 'Light';     Light = $true;  Bg = 'F5F5F7'; Sidebar = 'EDEDF0'; Card = 'FFFFFF'; CardHi = 'F0F0F3'; Line = 'DADADF'; Text = '1C1C1F'; Muted = '62626B'; Good = '2E8B4F'; Warn = '9A6700'; Bad = 'C4352F' }
+    oled      = @{ Label = 'OLED';      Light = $false; Bg = '000000'; Sidebar = '000000'; Card = '101010'; CardHi = '1A1A1A'; Line = '2A2A2A'; Text = 'F2F2F2'; Muted = '8E8E93'; Good = '4ADE80'; Warn = 'F5C451'; Bad = 'F07178' }
+    nord      = @{ Label = 'Nord';      Light = $false; Bg = '2E3440'; Sidebar = '272C36'; Card = '3B4252'; CardHi = '434C5E'; Line = '4C566A'; Text = 'ECEFF4'; Muted = 'A7B1C2'; Good = 'A3BE8C'; Warn = 'EBCB8B'; Bad = 'BF616A' }
+    graphite  = @{ Label = 'Graphite';  Light = $false; Bg = '1C1E21'; Sidebar = '141618'; Card = '26282C'; CardHi = '30343A'; Line = '3C4148'; Text = 'E7E9EC'; Muted = '9AA1A9'; Good = '6FCF97'; Warn = 'E6B450'; Bad = 'E36B63' }
+    dusk      = @{ Label = 'Dusk';      Light = $false; Bg = '1A1422'; Sidebar = '120E18'; Card = '261C31'; CardHi = '32243F'; Line = '463256'; Text = 'F6F0FA'; Muted = 'B5A6C4'; Good = '7DCEA0'; Warn = 'E6C07B'; Bad = 'E07A8D' }
+    porcelain = @{ Label = 'Porcelain'; Light = $true;  Bg = 'F6F1EA'; Sidebar = 'EEE7DE'; Card = 'FFFCF8'; CardHi = 'F3EBE3'; Line = 'E4D9CC'; Text = '2C241C'; Muted = '74685C'; Good = '2C7A4B'; Warn = '8D5E00'; Bad = 'B23B32' }
 }
 
 # Each accent has a tone tuned for dark surfaces and one for light surfaces.
@@ -13,9 +19,11 @@ $global:OptiAccents = [ordered]@{
     rose   = @{ Label = 'Rose';   Dark = 'E5648B'; Light = 'C23A66' }
     amber  = @{ Label = 'Amber';  Dark = 'E0A93B'; Light = 'A86A00' }
     green  = @{ Label = 'Green';  Dark = '5FB878'; Light = '2E8B4F' }
+    cyan   = @{ Label = 'Cyan';   Dark = '3EC6D6'; Light = '0E7C8A' }
+    copper = @{ Label = 'Copper'; Dark = 'E08A4F'; Light = 'B85E24' }
 }
 
-$global:Cfg = @{ Mode = 'system'; Accent = 'teal'; Anim = $true; AutoUpdate = $true; UiVersion = 4 }
+$global:Cfg = @{ Mode = 'system'; Accent = 'teal'; Anim = $true; AutoUpdate = $true; UiVersion = 5 }
 $global:CfgPath = Join-Path $global:OptiData 'settings.json'
 
 function Import-Cfg {
@@ -23,11 +31,10 @@ function Import-Cfg {
     try {
         $o = Get-Content -LiteralPath $global:CfgPath -Raw | ConvertFrom-Json
         foreach ($k in 'Anim', 'AutoUpdate') { if ($null -ne $o.$k) { $global:Cfg[$k] = [bool]$o.$k } }
-        if ($o.UiVersion -eq 4) {
-            if ($global:OptiModes.Contains([string]$o.Mode) -or $o.Mode -eq 'system') { $global:Cfg.Mode = [string]$o.Mode }
-            if ($global:OptiAccents.Contains([string]$o.Accent)) { $global:Cfg.Accent = [string]$o.Accent }
-        } elseif ($o.Theme -eq 'light') { $global:Cfg.Mode = 'light' }
+        if ($global:OptiModes.Contains([string]$o.Mode) -or $o.Mode -eq 'system') { $global:Cfg.Mode = [string]$o.Mode }
+        elseif ($o.Theme -eq 'light') { $global:Cfg.Mode = 'light' }
         elseif ($o.Theme) { $global:Cfg.Mode = 'dark' }
+        if ($global:OptiAccents.Contains([string]$o.Accent)) { $global:Cfg.Accent = [string]$o.Accent }
     } catch {}
 }
 function Save-Cfg { try { $global:Cfg | ConvertTo-Json | Set-Content -LiteralPath $global:CfgPath -Encoding UTF8 } catch {} }
@@ -59,7 +66,7 @@ function Get-Luminance {
 }
 
 function Get-EffectiveMode {
-    if ($global:Cfg.Mode -in 'dark', 'light') { return $global:Cfg.Mode }
+    if ($global:OptiModes.Contains([string]$global:Cfg.Mode)) { return [string]$global:Cfg.Mode }
     try {
         $v = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name AppsUseLightTheme -ErrorAction Stop).AppsUseLightTheme
         if ($v -eq 1) { return 'light' }
@@ -75,8 +82,11 @@ function Swap-Brush {
     $nb = New-Object Windows.Media.SolidColorBrush $To
     if ($global:Cfg.Anim -and $old.Color -ne $To) {
         try {
-            $a = New-Object Windows.Media.Animation.ColorAnimation($old.Color, $To, (Get-Dur 220))
+            $ease = New-Object Windows.Media.Animation.CubicEase
+            $ease.EasingMode = 'EaseOut'
+            $a = New-Object Windows.Media.Animation.ColorAnimation($old.Color, $To, (Get-Dur 280))
             $a.FillBehavior = 'Stop'
+            $a.EasingFunction = $ease
             $nb.BeginAnimation([Windows.Media.SolidColorBrush]::ColorProperty, $a)
         } catch {}
     }
@@ -98,27 +108,50 @@ function Set-Bar {
 function Start-PageIn {
     param($Page)
     if (-not $global:Cfg.Anim) { $Page.Opacity = 1; $Page.RenderTransform = $null; return }
-    $tt = New-Object Windows.Media.TranslateTransform(0, 8)
-    $Page.RenderTransform = $tt
+    $tg = New-Object Windows.Media.TransformGroup
+    $sc = New-Object Windows.Media.ScaleTransform(0.985, 0.985)
+    $tt = New-Object Windows.Media.TranslateTransform(0, 16)
+    [void]$tg.Children.Add($sc)
+    [void]$tg.Children.Add($tt)
+    $Page.RenderTransformOrigin = '0.5,0'
+    $Page.RenderTransform = $tg
     $ease = New-Object Windows.Media.Animation.CubicEase
     $ease.EasingMode = 'EaseOut'
-    $fade = New-Object Windows.Media.Animation.DoubleAnimation(0, 1, (Get-Dur 160))
-    $slide = New-Object Windows.Media.Animation.DoubleAnimation(8, 0, (Get-Dur 200))
+    $fade = New-Object Windows.Media.Animation.DoubleAnimation(0, 1, (Get-Dur 180))
+    $slide = New-Object Windows.Media.Animation.DoubleAnimation(16, 0, (Get-Dur 240))
+    $sx = New-Object Windows.Media.Animation.DoubleAnimation(0.985, 1, (Get-Dur 240))
+    $sy = New-Object Windows.Media.Animation.DoubleAnimation(0.985, 1, (Get-Dur 240))
     $slide.EasingFunction = $ease
+    $sx.EasingFunction = $ease
+    $sy.EasingFunction = $ease
     $Page.BeginAnimation([Windows.UIElement]::OpacityProperty, $fade)
     $tt.BeginAnimation([Windows.Media.TranslateTransform]::YProperty, $slide)
+    $sc.BeginAnimation([Windows.Media.ScaleTransform]::ScaleXProperty, $sx)
+    $sc.BeginAnimation([Windows.Media.ScaleTransform]::ScaleYProperty, $sy)
 }
 
 function Start-WindowIn {
     if (-not $global:Cfg.Anim) { return }
-    $UI.Shell.BeginAnimation([Windows.UIElement]::OpacityProperty, (New-Object Windows.Media.Animation.DoubleAnimation(0, 1, (Get-Dur 200))))
+    $UI.Shell.RenderTransformOrigin = '0.5,0.5'
+    $sc = New-Object Windows.Media.ScaleTransform(0.985, 0.985)
+    $UI.Shell.RenderTransform = $sc
+    $ease = New-Object Windows.Media.Animation.CubicEase
+    $ease.EasingMode = 'EaseOut'
+    $fade = New-Object Windows.Media.Animation.DoubleAnimation(0, 1, (Get-Dur 240))
+    $sx = New-Object Windows.Media.Animation.DoubleAnimation(0.985, 1, (Get-Dur 300))
+    $sy = New-Object Windows.Media.Animation.DoubleAnimation(0.985, 1, (Get-Dur 300))
+    $sx.EasingFunction = $ease
+    $sy.EasingFunction = $ease
+    $UI.Shell.BeginAnimation([Windows.UIElement]::OpacityProperty, $fade)
+    $sc.BeginAnimation([Windows.Media.ScaleTransform]::ScaleXProperty, $sx)
+    $sc.BeginAnimation([Windows.Media.ScaleTransform]::ScaleYProperty, $sy)
 }
 
 # ---------------------------------------------------------------- applying the palette
 function Set-Appearance {
     param([bool]$Animate = $true)
     $mode = $global:OptiModes[(Get-EffectiveMode)]
-    $isLight = (Get-EffectiveMode) -eq 'light'
+    $isLight = [bool]$mode.Light
     $acc = $global:OptiAccents[$global:Cfg.Accent]
     $accent = ConvertTo-Color $(if ($isLight) { $acc.Light } else { $acc.Dark })
     $bg = ConvertTo-Color $mode.Bg
@@ -169,7 +202,7 @@ function Update-Appearance {
 }
 
 function Initialize-Settings {
-    foreach ($m in 'system', 'light', 'dark') {
+    foreach ($m in @('system') + @($global:OptiModes.Keys)) {
         $b = New-Chip $(if ($m -eq 'system') { 'Match Windows' } else { $global:OptiModes[$m].Label })
         $b.Tag = $m
         $b.Add_Click({ param($s, $e) $global:Cfg.Mode = $s.Tag; Save-Cfg; Set-Appearance })
