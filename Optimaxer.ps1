@@ -6,7 +6,7 @@ param(
     [switch]$NoElevate,        # developer: skip UAC relaunch
     [string]$Screenshot,       # developer: save a PNG of every page to this folder, then exit
     [switch]$Silent,           # unattended: apply -Preset / -Config without opening the window
-    [string]$Preset,           # safe | gaming | privacy | deai | max
+    [string]$Preset,           # auto | safe | gaming | privacy | deai | max (auto = detect this PC and pick what fits)
     [string]$Config,           # json exported from the Config tab (tweaks and apps)
     [switch]$NoRestorePoint
 )
@@ -44,7 +44,7 @@ if ($Silent) {
         $ids = @($cfg.tweaks); $apps = @($cfg.apps)
     }
     if ($Preset) {
-        if ($Preset -notin 'safe', 'gaming', 'privacy', 'deai', 'max') { Write-Log "Unknown preset '$Preset' (use safe, gaming, privacy, deai or max)" 'ERROR'; exit 2 }
+        if ($Preset -notin 'auto', 'safe', 'gaming', 'privacy', 'deai', 'max') { Write-Log "Unknown preset '$Preset' (use auto, safe, gaming, privacy, deai or max)" 'ERROR'; exit 2 }
         $ids += @(Get-PresetTweakIds $Preset (Get-SystemTraits))
     }
     $ids = @($ids | Where-Object { $_ } | Select-Object -Unique)

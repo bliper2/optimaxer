@@ -18,6 +18,7 @@ Or download the zip from [Releases](https://github.com/bliper2/optimaxer/release
 ## What it does
 - **Install**: 260+ apps in 10 categories through WinGet (the WinUtil list plus more), with real app icons, "Show installed", upgrade-all, and a verification step after every install or uninstall.
 - **Tweaks**: 213 tweaks (performance, gaming, network, privacy, AI/Copilot/Recall removal, a safe OneDrive uninstall, browser debloat, Windows Update control, interface) with presets. The 2026 taskbar, Start, Explorer, Game Bar and Store-search modules follow [WinUtil](https://github.com/ChrisTitusTech/winutil) and [Win11Debloat](https://github.com/Raphire/Win11Debloat). The original value of everything a tweak touches is saved, so each tweak, and "Undo ALL", restores your real prior settings. Optional restore point first.
+- **Smart optimize**: detects laptop or desktop, SSD/NVMe or HDD, RAM size, GPU and Windows version, then selects only the tweaks that fit this PC and are not applied yet (Dashboard button, the Auto-detect chip on Tweaks, or `-Preset auto` unattended).
 - **Config**: export/import what you ticked on Install and Tweaks, create a desktop shortcut, and run unattended (see below).
 - **Services**: ~240 services with recommended Manual/Disable lists, protected core services hidden, JSON backup before every change.
 - **Startup**: registry, startup-folder **and scheduled-task** entries that run at logon/boot; enable or disable without uninstalling.
@@ -49,7 +50,7 @@ Safety: every change records the original state in `/var/lib/optimaxer/state.jso
 
 ## Run unattended
 ```powershell
-powershell -ExecutionPolicy Bypass -File Optimaxer.ps1 -Silent -Preset safe          # safe | gaming | privacy | deai | max
+powershell -ExecutionPolicy Bypass -File Optimaxer.ps1 -Silent -Preset safe          # auto | safe | gaming | privacy | deai | max
 powershell -ExecutionPolicy Bypass -File Optimaxer.ps1 -Silent -Config my-setup.json # from Config > Export selection
 ```
 Add `-NoRestorePoint` to skip the restore point. Exit code 0 = everything verified, 1 = something was not applied, 2 = bad arguments.

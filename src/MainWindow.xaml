@@ -783,7 +783,8 @@
                       </StackPanel>
                     </Grid>
                     <WrapPanel Margin="0,22,0,0">
-                      <Button x:Name="BtnOptimize" Style="{StaticResource BtnAccent}" Content="Apply recommended" Padding="18,0" Height="34"/>
+                      <Button x:Name="BtnSmart" Style="{StaticResource BtnAccent}" Content="Smart optimize" Padding="18,0" Height="34" ToolTip="Detects your hardware (laptop or desktop, SSD or HDD, RAM, GPU) and selects only the tweaks that fit this PC"/>
+                      <Button x:Name="BtnOptimize" Content="Apply recommended" Padding="18,0" Height="34"/>
                       <Button x:Name="BtnFreeRam" Content="Free RAM" Height="34"/>
                       <Button x:Name="BtnQuickClean" Content="Scan for junk" Height="34"/>
                       <Button x:Name="BtnRestorePoint" Content="Create restore point" Height="34"/>
@@ -856,6 +857,7 @@
               <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
               <WrapPanel VerticalAlignment="Center">
                 <TextBlock Text="Presets" Style="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,12,6"/>
+                <Button x:Name="BtnPrAuto" Style="{StaticResource Chip}" Content="Auto-detect" ToolTip="Selects the tweaks that fit this PC and are not applied yet"/>
                 <Button x:Name="BtnPrRec" Style="{StaticResource Chip}" Content="Recommended"/>
                 <Button x:Name="BtnPrGame" Style="{StaticResource Chip}" Content="Gaming"/>
                 <Button x:Name="BtnPrPriv" Style="{StaticResource Chip}" Content="Privacy"/>

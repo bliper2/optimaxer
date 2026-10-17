@@ -64,15 +64,38 @@ function Save-OptiState {
 }
 
 # ---------------------------------------------------------------- registry
+function Open-RegKey {
+    # Read-only .NET handle for a PowerShell-style path (HKLM:\..., HKCU:\..., HKU:\..., HKCR:\...); $null when missing.
+    # Roughly 10x faster than Get-Item on the provider, which matters for the ~400 reads of a status pass.
+    param([string]$Path)
+    if ($Path -notmatch '^(HKLM|HKCU|HKU|HKCR):\\?(.*)$') { return $null }
+    $root = switch ($Matches[1]) {
+        'HKLM' { [Microsoft.Win32.Registry]::LocalMachine }
+        'HKCU' { [Microsoft.Win32.Registry]::CurrentUser }
+        'HKU'  { [Microsoft.Win32.Registry]::Users }
+        'HKCR' { [Microsoft.Win32.Registry]::ClassesRoot }
+    }
+    $sub = $Matches[2].TrimEnd('\')
+    try { if ($sub) { return $root.OpenSubKey($sub, $false) } else { return $root } } catch { return $null }
+}
+
 function Get-RegSnapshot {
     param($Entry)
     $exists = $false; $val = $null; $type = $null
     try {
-        $key = Get-Item -LiteralPath $Entry.P -ErrorAction Stop
-        if ($key.GetValueNames() -contains $Entry.N) {
-            $exists = $true
-            $val  = $key.GetValue($Entry.N, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-            $type = $key.GetValueKind($Entry.N).ToString()
+        $key = Open-RegKey $Entry.P
+        if ($key) {
+            try {
+                $val = $key.GetValue($Entry.N, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                if ($null -ne $val) { $exists = $true; $type = $key.GetValueKind($Entry.N).ToString() }
+            } finally { $key.Close() }
+        } elseif ($Entry.P -notmatch '^(HKLM|HKCU|HKU|HKCR):') {
+            $key = Get-Item -LiteralPath $Entry.P -ErrorAction Stop
+            if ($key.GetValueNames() -contains $Entry.N) {
+                $exists = $true
+                $val  = $key.GetValue($Entry.N, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                $type = $key.GetValueKind($Entry.N).ToString()
+            }
         }
     } catch {}
     return [pscustomobject]@{ Exists = $exists; Value = $val; Type = $type }
@@ -122,11 +145,15 @@ function Restore-RegSnapshot {
 # ---------------------------------------------------------------- services
 function Get-SvcSnapshot {
     param([string]$Name)
-    $k = "HKLM:\SYSTEM\CurrentControlSet\Services\$Name"
-    if (-not (Test-Path -LiteralPath $k)) { return $null }
-    $p = Get-ItemProperty -LiteralPath $k
-    if ($null -eq $p.Start) { return $null }
-    return @{ Name = $Name; Start = [int]$p.Start; Delayed = [int]($p.DelayedAutostart -eq 1) }
+    $key = $null
+    try {
+        $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("SYSTEM\CurrentControlSet\Services\$Name", $false)
+        if (-not $key) { return $null }
+        $start = $key.GetValue('Start', $null)
+        if ($null -eq $start) { return $null }
+        return @{ Name = $Name; Start = [int]$start; Delayed = [int]($key.GetValue('DelayedAutostart', 0) -eq 1) }
+    } catch { return $null }
+    finally { if ($key) { $key.Close() } }
 }
 
 function Set-SvcStart {
@@ -183,14 +210,22 @@ function Set-TaskEnabled {
 }
 
 # ---------------------------------------------------------------- power (powercfg output is parsed language-independently)
+# During a status pass these caches stop every power tweak from spawning its own powercfg.exe (set by Get-TweakStatus).
+$global:OptiPowerCache = $null
+
 function Get-ActiveSchemeGuid {
+    if ($global:OptiPowerCache -and $global:OptiPowerCache.ContainsKey('active')) { return $global:OptiPowerCache['active'] }
     $o = powercfg /getactivescheme | Out-String
+    if ($global:OptiPowerCache -and $o -match '([0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})') { $global:OptiPowerCache['active'] = $Matches[1] }
     if ($o -match '([0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})') { return $Matches[1] }
 }
 
 function Get-SchemeName {
     param([string]$Guid)
-    $o = powercfg /list | Out-String
+    if ($global:OptiPowerCache) {
+        if (-not $global:OptiPowerCache.ContainsKey('list')) { $global:OptiPowerCache['list'] = powercfg /list | Out-String }
+        $o = $global:OptiPowerCache['list']
+    } else { $o = powercfg /list | Out-String }
     if ($o -match [regex]::Escape($Guid) + '\s+\((.+?)\)') { return $Matches[1] }
     return ''
 }
@@ -204,7 +239,12 @@ function Get-SchemeGuidByName {
 
 function Get-PowerAC {
     param([string]$Sub, [string]$Setting)
-    $o = powercfg /q SCHEME_CURRENT $Sub $Setting | Out-String
+    $ck = "q:$Sub/$Setting"
+    if ($global:OptiPowerCache -and $global:OptiPowerCache.ContainsKey($ck)) { $o = $global:OptiPowerCache[$ck] }
+    else {
+        $o = powercfg /q SCHEME_CURRENT $Sub $Setting | Out-String
+        if ($global:OptiPowerCache) { $global:OptiPowerCache[$ck] = $o }
+    }
     $hex = [regex]::Matches($o, '0x[0-9a-fA-F]{8}')
     if ($hex.Count -ge 2) { return [Convert]::ToInt32($hex[$hex.Count - 2].Value.Substring(2), 16) }
     return $null
@@ -279,18 +319,25 @@ function Test-Tweak {
         $checked = $true
         if ($snap.Enabled) { return $false }
     }
-    if (-not $checked) { return $null -ne (Get-OptiState)[$T.Id] }
+    if (-not $checked) {
+        $st = if ($global:OptiStateCache) { $global:OptiStateCache } else { Get-OptiState }
+        return $null -ne $st[$T.Id]
+    }
     return $true
 }
 
 function Get-TweakStatus {
-    # Returns one @{Id; On} per catalog entry. Slow-ish (spawns powercfg etc.), run in a job.
+    # Returns one @{Id; On} per catalog entry. The saved state and powercfg answers are read once for the whole pass.
     param([string[]]$Ids)
     Clear-TaskCache
-    foreach ($t in $global:OptiCatalog) {
-        if ($Ids -and $Ids -notcontains $t.Id) { continue }
-        @{ Id = $t.Id; On = [bool](Test-Tweak $t) }
-    }
+    $global:OptiStateCache = Get-OptiState
+    $global:OptiPowerCache = @{}
+    try {
+        foreach ($t in $global:OptiCatalog) {
+            if ($Ids -and $Ids -notcontains $t.Id) { continue }
+            @{ Id = $t.Id; On = [bool](Test-Tweak $t) }
+        }
+    } finally { $global:OptiStateCache = $null; $global:OptiPowerCache = $null }
 }
 
 function Find-SharedOriginal {
@@ -463,11 +510,27 @@ function Set-DnsProvider {
 }
 
 # ---------------------------------------------------------------- cleanup
+function Get-DirSize {
+    # Iterative .NET walk: much faster than Get-ChildItem -Recurse, skips junctions/symlinks, ignores unreadable folders.
+    param([string]$Dir)
+    $total = 0.0
+    $stack = New-Object 'System.Collections.Generic.Stack[string]'
+    $stack.Push($Dir)
+    while ($stack.Count) {
+        $d = New-Object IO.DirectoryInfo ($stack.Pop())
+        try {
+            foreach ($f in $d.EnumerateFiles()) { $total += $f.Length }
+            foreach ($s in $d.EnumerateDirectories()) { if (-not ($s.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $stack.Push($s.FullName) } }
+        } catch {}
+    }
+    return $total
+}
+
 function Get-PathSize {
     param([string]$Path)
     $t = 0.0
     foreach ($i in Get-ChildItem -Path $Path -Force -ErrorAction SilentlyContinue) {
-        if ($i.PSIsContainer) { $t += [double]((Get-ChildItem -LiteralPath $i.FullName -Recurse -Force -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum) }
+        if ($i.PSIsContainer) { if (-not ($i.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $t += Get-DirSize $i.FullName } }
         else { $t += [double]$i.Length }
     }
     return $t
@@ -951,13 +1014,57 @@ function Add-HostsBlock {
 
 # ---------------------------------------------------------------- presets (shared by the GUI buttons and unattended mode)
 function Get-SystemTraits {
+    # Hardware profile used to pick tweaks. Tags: laptop|desktop, ssd|hdd, nvme, nvidia|amdgpu|intelgpu, dgpu, win11|win10,
+    # ram8 (8 GB or less), ram16 (16 GB or more), ram32, cores8 (8+ logical processors), lowend (weak CPU or little RAM).
     $laptop = [bool](Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue)
-    $ssd = $true
+    $ssd = $true; $nvme = $false
     try {
         $dn = (Get-Partition -DriveLetter $env:SystemDrive[0] -ErrorAction Stop).DiskNumber
-        if ((Get-PhysicalDisk | Where-Object { $_.DeviceId -eq "$dn" }).MediaType -eq 'HDD') { $ssd = $false }
+        $pd = Get-PhysicalDisk | Where-Object { $_.DeviceId -eq "$dn" } | Select-Object -First 1
+        if ($pd.MediaType -eq 'HDD') { $ssd = $false }
+        if ($pd.BusType -eq 'NVMe') { $nvme = $true }
     } catch {}
-    return @{ Laptop = $laptop; SSD = $ssd; Vendor = Get-SystemVendor }
+    $ram = 0.0; $threads = 0
+    try { $ram = [math]::Round((Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory / 1GB, 1) } catch {}
+    try { $threads = [int](Get-CimInstance Win32_Processor -ErrorAction Stop | Measure-Object NumberOfLogicalProcessors -Sum).Sum } catch {}
+    $gpus = @()
+    try { $gpus = @(Get-CimInstance Win32_VideoController -ErrorAction Stop | ForEach-Object { [string]$_.Name } | Where-Object { $_ }) } catch {}
+    $nv = [bool]($gpus -match 'NVIDIA')
+    $amd = [bool]($gpus -match 'AMD|Radeon')
+    # an AMD "Radeon Graphics" / Vega iGPU is not a discrete card
+    $amdDiscrete = [bool]($gpus -match 'Radeon\s+(RX|Pro|R[0-9])|Radeon\s+[0-9]{3,4}\b|Arc\s+[AB][0-9]')
+    $dgpu = $nv -or $amdDiscrete
+    $build = 0; try { $build = [int](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).BuildNumber } catch {}
+    $tags = New-Object System.Collections.ArrayList
+    [void]$tags.Add($(if ($laptop) { 'laptop' } else { 'desktop' }))
+    [void]$tags.Add($(if ($ssd) { 'ssd' } else { 'hdd' }))
+    if ($nvme) { [void]$tags.Add('nvme') }
+    if ($nv) { [void]$tags.Add('nvidia') }
+    if ($amd) { [void]$tags.Add('amdgpu') }
+    if ($gpus -match 'Intel') { [void]$tags.Add('intelgpu') }
+    if ($dgpu) { [void]$tags.Add('dgpu') }
+    [void]$tags.Add($(if ($build -ge 22000) { 'win11' } else { 'win10' }))
+    if ($ram -gt 0 -and $ram -le 8.5) { [void]$tags.Add('ram8') }
+    if ($ram -ge 15.5) { [void]$tags.Add('ram16') }
+    if ($ram -ge 31.5) { [void]$tags.Add('ram32') }
+    if ($threads -ge 8) { [void]$tags.Add('cores8') }
+    if (($ram -gt 0 -and $ram -le 6) -or ($threads -gt 0 -and $threads -le 2) -or -not $ssd) { [void]$tags.Add('lowend') }
+    return @{ Laptop = $laptop; SSD = $ssd; Vendor = Get-SystemVendor; RamGB = $ram; Threads = $threads; Gpus = $gpus; Build = $build; Tags = @($tags) }
+}
+
+function Test-TweakFits {
+    # True when a tweak makes sense on this hardware. -Need lists traits that must all be present; a leading '!' means absent.
+    param($T, $Traits)
+    if ($T.DesktopOnly -and $Traits.Laptop) { return $false }
+    if ($T.SSDOnly -and -not $Traits.SSD) { return $false }
+    if ($T.Vendor -and $T.Vendor -ne $Traits.Vendor) { return $false }
+    if ($T.MinRamGB -and $Traits.RamGB -and $Traits.RamGB -lt $T.MinRamGB) { return $false }
+    foreach ($n in @($T.Need)) {
+        if (-not $n) { continue }
+        if ($n.StartsWith('!')) { if (@($Traits.Tags) -contains $n.Substring(1)) { return $false } }
+        elseif (@($Traits.Tags) -notcontains $n) { return $false }
+    }
+    return $true
 }
 
 # Normalizes the board/system manufacturer string Windows reports to one of a few known brands, or ''.
@@ -984,12 +1091,36 @@ $global:OptiVendorDriverUrl = @{
 
 function Get-PresetTweakIds {
     param([string]$Preset, $Traits)
+    if ($Preset -eq 'auto') { return @((Get-SmartPlan $Traits).Ids) }
     foreach ($t in $global:OptiCatalog) {
-        if ($t.DesktopOnly -and $Traits.Laptop) { continue }
-        if ($t.SSDOnly -and -not $Traits.SSD) { continue }
-        if ($t.Vendor -and $t.Vendor -ne $Traits.Vendor) { continue }
+        if (-not (Test-TweakFits $t $Traits)) { continue }
         if ($t.Tags -contains $Preset) { $t.Id }
     }
+}
+
+function Get-SmartPlan {
+    # Picks tweaks for THIS machine: the recommended set, plus 'smart'-tagged tweaks whose hardware condition fits,
+    # plus the gaming set on PCs with a discrete GPU. Opt-in and unfit tweaks never appear.
+    # Returns @{ Ids; Notes } - Notes explains the choices in plain language for the log.
+    param($Traits, $Applied)
+    $gaming = @($Traits.Tags) -contains 'dgpu'
+    $ids = @(); $notes = New-Object System.Collections.ArrayList
+    foreach ($t in $global:OptiCatalog) {
+        if ($t.Tags -contains 'optin') { continue }
+        if (-not (Test-TweakFits $t $Traits)) { continue }
+        $pick = ($t.Tags -contains 'safe') -or ($t.Tags -contains 'smart') -or ($gaming -and ($t.Tags -contains 'gaming'))
+        if (-not $pick) { continue }
+        if ($Applied -and $Applied.ContainsKey($t.Id) -and $Applied[$t.Id]) { continue }
+        $ids += $t.Id
+    }
+    $tg = @($Traits.Tags)
+    [void]$notes.Add($(if ($tg -contains 'laptop') { 'Laptop: battery-friendly set, no always-max-power tweaks.' } else { 'Desktop: performance power plan and CPU tweaks included.' }))
+    [void]$notes.Add($(if ($tg -contains 'ssd') { 'SSD: TRIM and disk-wear tweaks included.' } else { 'Hard disk: prefetch/SysMain left on; run Defragment in Tools.' }))
+    if ($gaming) { [void]$notes.Add('Discrete GPU: gaming latency set included.') }
+    if ($tg -contains 'ram8') { [void]$notes.Add('8 GB or less RAM: memory compression stays on, background load trimmed.') }
+    if ($tg -contains 'ram16') { [void]$notes.Add('16 GB or more RAM: RAM-heavy tweaks included.') }
+    if ($tg -contains 'lowend') { [void]$notes.Add('Low-end hardware: visual effects trimmed for speed.') }
+    return @{ Ids = @($ids); Notes = @($notes) }
 }
 
 # ---------------------------------------------------------------- desktop shortcut (optionally "Run as administrator")
