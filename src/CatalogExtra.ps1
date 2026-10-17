@@ -31,7 +31,7 @@ T -Id 'perf-sleepstudy' -Cat $P -Name 'Disable SleepStudy and power diagnostic l
       foreach ($l in 'Microsoft-Windows-SleepStudy/Diagnostic', 'Microsoft-Windows-Kernel-Processor-Power/Diagnostic', 'Microsoft-Windows-UserModePowerService/Diagnostic') { wevtutil.exe set-log $l /e:true 2>&1 | Out-Null }
   }
 
-T -Id 'perf-paging' -Cat $P -Name 'Keep kernel in RAM (16 GB+ only)' -Tags max -Risk Moderate -Restart `
+T -Id 'perf-paging' -Cat $P -Name 'Keep kernel in RAM (16 GB+ only)' -Tags max -Risk Moderate -Restart -MinRamGB 15.5 `
   -Desc 'DisablePagingExecutive + DisablePageCombining: kernel and drivers are never paged out. Snappier with plenty of RAM; wasteful on small machines.' `
   -Reg @(
       Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' 'DisablePagingExecutive' 1

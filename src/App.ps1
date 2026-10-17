@@ -99,7 +99,7 @@ function Set-Busy {
 }
 
 function Start-OptiJob {
-    param([string]$Title, [scriptblock]$Script, [object[]]$ArgList = @(), [scriptblock]$OnDone)
+    param([string]$Title, [scriptblock]$Script, [object[]]$ArgList = @(), [scriptblock]$OnDone, [switch]$Catalog)
     if ($global:Busy) { Write-Log 'Another task is running, please wait.' 'WARN'; return $false }
     Set-Busy $true $Title
     Write-Log "== $Title"
@@ -110,13 +110,15 @@ function Start-OptiJob {
     $rs.SessionStateProxy.SetVariable('OptiRoot', $global:OptiRoot)
     $ps = [powershell]::Create()
     $ps.Runspace = $rs
+    # Core + Data are always loaded. The tweak catalog (~1700 lines to parse and build) only for jobs that read tweaks.
     $boot = {
-        param($sbText, $argv)
+        param($sbText, $argv, $withCatalog)
         $ErrorActionPreference = 'Continue'
-        . "$OptiRoot\src\Core.ps1"; . "$OptiRoot\src\Data.ps1"; . "$OptiRoot\src\Catalog.ps1"
+        . "$OptiRoot\src\Core.ps1"; . "$OptiRoot\src\Data.ps1"
+        if ($withCatalog) { . "$OptiRoot\src\Catalog.ps1" }
         & ([scriptblock]::Create($sbText)) @argv
     }
-    [void]$ps.AddScript($boot.ToString()).AddArgument($Script.ToString()).AddArgument($ArgList)
+    [void]$ps.AddScript($boot.ToString()).AddArgument($Script.ToString()).AddArgument($ArgList).AddArgument([bool]$Catalog)
     [void]$global:Jobs.Add(@{ PS = $ps; RS = $rs; Handle = $ps.BeginInvoke(); OnDone = $OnDone; Title = $Title })
     return $true
 }
@@ -219,7 +221,7 @@ function Set-Score {
 }
 
 function Update-Score {
-    $applicable = @($global:TwRows | Where-Object { $_.Tag.Tags -contains 'safe' -and (Test-Applicable $_.Tag) })
+    $applicable = @($global:TwRows | Where-Object { ($_.Tag.Tags -contains 'safe' -or $_.Tag.Tags -contains 'smart') -and $_.Tag.Tags -notcontains 'optin' -and (Test-Applicable $_.Tag) })
     if (-not $applicable.Count) { return }
     $on = @($applicable | Where-Object { $_.Extra -eq 'Applied' }).Count
     Set-Score ([int][math]::Round(100 * $on / $applicable.Count)) $on $applicable.Count
@@ -227,30 +229,24 @@ function Update-Score {
 
 function Test-Applicable {
     param($T)
-    if ($T.DesktopOnly -and $global:Sys.Laptop) { return $false }
-    if ($T.SSDOnly -and -not $global:Sys.SSD) { return $false }
-    if ($T.Vendor -and $T.Vendor -ne $global:Sys.Vendor) { return $false }
-    return $true
+    return (Test-TweakFits $T $global:Sys)
 }
 
 function Initialize-Dashboard {
     Start-OptiJob 'Reading system information' -Script {
         $os = Get-CimInstance Win32_OperatingSystem; $cs = Get-CimInstance Win32_ComputerSystem
         $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
-        $ssd = $true
-        try {
-            $dn = (Get-Partition -DriveLetter $env:SystemDrive[0] -ErrorAction Stop).DiskNumber
-            if ((Get-PhysicalDisk | Where-Object { $_.DeviceId -eq "$dn" }).MediaType -eq 'HDD') { $ssd = $false }
-        } catch {}
+        $traits = Get-SystemTraits
         @{
+            Traits = $traits
             OS = "$($os.Caption) (build $($os.BuildNumber))"
             Machine = "$($cs.Manufacturer) $($cs.Model)"
             CPU = "$($cpu.Name.Trim()) ($($cpu.NumberOfCores) cores / $($cpu.NumberOfLogicalProcessors) threads)"
             GPU = ((Get-CimInstance Win32_VideoController | ForEach-Object Name) -join ', ')
             RAM = [math]::Round($cs.TotalPhysicalMemory / 1GB, 1)
-            Laptop = [bool](Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue)
-            SSD = $ssd
-            Vendor = Get-SystemVendor
+            Laptop = $traits.Laptop
+            SSD = $traits.SSD
+            Vendor = $traits.Vendor
             Disks = @(Get-PhysicalDisk | ForEach-Object { '{0} - {1}, {2} GB, {3}' -f $_.FriendlyName, $_.MediaType, [math]::Round($_.Size / 1GB), $_.HealthStatus })
             Startup = @(Get-StartupItems -NoTasks).Count
             Processes = @(Get-Process).Count
@@ -264,7 +260,8 @@ function Initialize-Dashboard {
         param($res)
         $i = $res | Select-Object -First 1
         if ($i) {
-            $global:Sys.Laptop = [bool]$i.Laptop; $global:Sys.SSD = [bool]$i.SSD; $global:Sys.Vendor = [string]$i.Vendor
+            $global:Sys = @{ Laptop = [bool]$i.Traits.Laptop; SSD = [bool]$i.Traits.SSD; Vendor = [string]$i.Traits.Vendor; RamGB = [double]$i.Traits.RamGB
+                             Threads = [int]$i.Traits.Threads; Build = [int]$i.Traits.Build; Tags = @($i.Traits.Tags | ForEach-Object { [string]$_ }) }
             $pairs = New-Object System.Collections.ArrayList
             [void]$pairs.Add(@('Computer', "$($i.Machine) ($(if ($i.Laptop) { 'laptop' } else { 'desktop' }))"))
             [void]$pairs.Add(@('Windows', $i.OS))
@@ -275,6 +272,7 @@ function Initialize-Dashboard {
             [void]$pairs.Add(@('Startup', "$($i.Startup) items"))
             [void]$pairs.Add(@('Processes', "$($i.Processes) running"))
             if ($i.BootSec -gt 0) { [void]$pairs.Add(@('Last boot', "$($i.BootSec) s")) }
+            [void]$pairs.Add(@('Detected', ($global:Sys.Tags -join ', ')))
             if ($i.Vendor) { [void]$pairs.Add(@('Vendor', "$($i.Vendor) (driver page in Tools)")) }
             $UI.SysInfoPanel.Children.Clear()
             foreach ($pr in $pairs) {
@@ -395,7 +393,7 @@ foreach ($cat in @($global:TwRows | Group-Object Group)) {
 }
 
 function Update-TweakStatus {
-    [void](Start-OptiJob 'Checking active tweaks' -Script { Get-TweakStatus } -OnDone {
+    [void](Start-OptiJob 'Checking active tweaks' -Catalog -Script { Get-TweakStatus } -OnDone {
         param($res)
         $map = @{}; foreach ($r in $res) { $map[$r.Id] = [bool]$r.On }
         foreach ($row in $global:TwRows) { $row.Extra = if ($map[$row.Id]) { 'Applied' } else { '' } }
@@ -413,6 +411,17 @@ function Set-Preset {
     }
 }
 
+function Set-SmartPreset {
+    # Ticks the tweaks that fit this PC and are not active yet. Returns how many were ticked.
+    $applied = @{}; foreach ($row in $global:TwRows) { $applied[$row.Id] = ($row.Extra -eq 'Applied') }
+    $plan = Get-SmartPlan $global:Sys $applied
+    $pick = @{}; foreach ($id in $plan.Ids) { $pick[$id] = $true }
+    foreach ($row in $global:TwRows) { $row.IsChecked = $pick.ContainsKey($row.Id) }
+    foreach ($n in $plan.Notes) { Write-Log "  $n" }
+    Write-Log "Auto-detect: $($plan.Ids.Count) tweak(s) selected for this PC ($($global:Sys.Tags -join ', '))." 'OK'
+    return $plan.Ids.Count
+}
+
 function Invoke-TweakJob {
     param([ValidateSet('apply', 'undo')][string]$Mode)
     $sel = @($global:TwRows | Where-Object IsChecked)
@@ -424,7 +433,7 @@ function Invoke-TweakJob {
         if ($adv) { $msg += "`n`nAdvanced tweaks selected (read their descriptions):`n - " + ($adv -join "`n - ") }
         if (-not (Confirm-Action $msg)) { return }
     }
-    [void](Start-OptiJob "$Mode $($sel.Count) tweak(s)" -ArgList @(@($sel | ForEach-Object Id), $Mode, [bool]$UI.ChkRestore.IsChecked) -Script {
+    [void](Start-OptiJob "$Mode $($sel.Count) tweak(s)" -Catalog -ArgList @(@($sel | ForEach-Object Id), $Mode, [bool]$UI.ChkRestore.IsChecked) -Script {
         param($ids, $mode, $restorePoint)
         if ($mode -eq 'apply' -and $restorePoint) { [void](New-OptiRestorePoint 'Optimaxer - before tweaks') }
         $restart = $false; $explorer = $false; $ok = 0
@@ -989,6 +998,7 @@ $global:Tools = [ordered]@{
     icons   = @{ Title = 'Rebuild icon cache';          Desc = 'Fixes blank or wrong icons and thumbnails. Restarts Explorer.' }
     store   = @{ Title = 'Reset Microsoft Store cache'; Desc = 'Runs wsreset to fix Store download problems.' }
     perfctr = @{ Title = 'Rebuild performance counters';  Desc = 'Runs lodctr /r and winmgmt /resyncperf. Fixes empty Task Manager graphs, missing counters and slow WMI.' }
+    health2 = @{ Title = 'PC health check';             Desc = 'Reads uptime, free disk space, RAM, power plan, startup load and pending restarts, and says what to fix. Changes nothing.' }
     update  = @{ Title = 'Check for updates';           Desc = 'Looks for a newer Optimaxer release on GitHub and offers to install it (checksum-verified, current files are backed up first).' }
     regbackup = @{ Title = 'Export registry backup';    Desc = 'Saves .reg exports of the policy, Explorer, memory and network keys that Optimaxer edits, to the backups folder.' }
     rstrui  = @{ Title = 'Open System Restore';         Desc = 'Roll your PC back to a restore point.' }
@@ -1060,6 +1070,29 @@ $toolJobs = @{
         Write-Log 'Icon cache rebuilt.' 'OK'
     }
     update = { }
+    health2 = {
+        $os = Get-CimInstance Win32_OperatingSystem
+        $up = (Get-Date) - $os.LastBootUpTime
+        $freeRam = $os.FreePhysicalMemory * 1KB; $totRam = $os.TotalVisibleMemorySize * 1KB
+        $global:issues = 0
+        $say = { param($ok, $msg) if (-not $ok) { $global:issues++ }; Write-Log ("  [{0}] {1}" -f $(if ($ok) { 'ok ' } else { 'FIX' }), $msg) $(if ($ok) { 'INFO' } else { 'WARN' }) }
+        & $say ($up.TotalDays -lt 7) ("Uptime {0:N1} days{1}" -f $up.TotalDays, $(if ($up.TotalDays -ge 7) { ' - restart to clear memory leaks and finish updates' } else { '' }))
+        $pct = [math]::Round(100 * (1 - $freeRam / $totRam))
+        & $say ($pct -lt 85) ("RAM in use {0}% of {1}" -f $pct, (Format-Size $totRam))
+        foreach ($d in Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -ne $null -and ($_.Used + $_.Free) -gt 0 }) {
+            $freePct = [math]::Round(100 * $d.Free / ($d.Used + $d.Free))
+            & $say ($freePct -ge 15) ("Drive {0}: {1} free ({2}%){3}" -f $d.Name, (Format-Size $d.Free), $freePct, $(if ($freePct -lt 15) { ' - run Cleaner; SSDs slow down when nearly full' } else { '' }))
+        }
+        $plan = Get-SchemeName (Get-ActiveSchemeGuid)
+        $bat = [bool](Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue)
+        & $say ($bat -or $plan -notmatch 'Saver|Power saver') ("Power plan: $plan")
+        $su = @(Get-StartupItems -NoTasks | Where-Object { $_.Enabled }).Count
+        & $say ($su -le 15) ("$su startup items enabled$(if ($su -gt 15) { ' - disable what you do not need on the Startup page' })")
+        $pend = (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') -or (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending')
+        & $say (-not $pend) $(if ($pend) { 'A restart is pending' } else { 'No restart pending' })
+        foreach ($pd in Get-PhysicalDisk) { & $say ($pd.HealthStatus -eq 'Healthy') ("Disk {0}: {1}" -f $pd.FriendlyName, $pd.HealthStatus) }
+        Write-Log ("Health check finished: {0} item(s) need attention." -f $global:issues) $(if ($global:issues) { 'WARN' } else { 'OK' })
+    }
     perfctr = {
         lodctr.exe /r 2>&1 | Out-Null
         lodctr.exe /r 2>&1 | Out-Null
@@ -1114,7 +1147,7 @@ function Invoke-Tool {
     if ($Key -eq 'defrag' -and -not (Confirm-Action 'Defragmenting hard disks can take an hour or more and the app stays busy until it finishes. Continue?')) { return }
     if ($Key -eq 'revert' -and -not (Confirm-Action 'Restore ALL settings changed by Optimaxer to their original values?')) { return }
     $after = if ($Key -eq 'revert') { { Update-TweakStatus } } else { $null }
-    [void](Start-OptiJob $global:Tools[$Key].Title -Script $toolJobs[$Key] -OnDone $after)
+    [void](Start-OptiJob $global:Tools[$Key].Title -Catalog:($Key -eq 'revert') -Script $toolJobs[$Key] -OnDone $after)
 }
 
 # ================================================================ wiring
@@ -1151,6 +1184,19 @@ $UI.BtnRestorePoint.Add_Click({ Invoke-Tool 'restore' })
 $UI.BtnQuickClean.Add_Click({ $UI.NavCleanup.IsChecked = $true; Start-CleanScan })
 
 $UI.BtnPrRec.Add_Click({ Set-Preset 'safe' })
+$UI.BtnPrAuto.Add_Click({
+    if (-not $global:Loaded['tweaks']) { Write-Log 'Still analyzing, try again in a moment.' 'WARN'; return }
+    if ((Set-SmartPreset) -eq 0) { Write-Log 'Nothing to select: this PC already has every fitting tweak applied.' 'OK' }
+})
+$UI.BtnSmart.Add_Click({
+    if (-not $global:Loaded['tweaks']) { Write-Log 'Still analyzing, try again in a moment.' 'WARN'; return }
+    if ((Set-SmartPreset) -eq 0) {
+        [void][System.Windows.MessageBox]::Show('This PC is already optimized: every tweak that fits it is applied.', 'Optimaxer', 'OK', 'Information')
+        return
+    }
+    $UI.NavTweaks.IsChecked = $true
+    Invoke-TweakJob 'apply'
+})
 $UI.BtnPrGame.Add_Click({ Set-Preset 'gaming' })
 $UI.BtnPrPriv.Add_Click({ Set-Preset 'privacy' })
 $UI.BtnPrDeai.Add_Click({ Set-Preset 'deai' })

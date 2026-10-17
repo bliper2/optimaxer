@@ -12,12 +12,12 @@ function T {
         [string]$Id, [string]$Name, [string]$Desc, [string]$Cat, [string]$Risk = 'Safe', [string[]]$Tags = @(),
         [object[]]$Reg = @(), [object[]]$Svc = @(), [string[]]$Task = @(),
         [scriptblock]$Apply, [scriptblock]$Undo, [scriptblock]$Test,
-        [switch]$Restart, [switch]$Explorer, [switch]$DesktopOnly, [switch]$SSDOnly, [string]$Vendor = '', [double]$SvcTol = 1.0
+        [switch]$Restart, [switch]$Explorer, [switch]$DesktopOnly, [switch]$SSDOnly, [string]$Vendor = '', [double]$SvcTol = 1.0, [double]$MinRamGB = 0, [string[]]$Need = @()
     )
     [void]$global:OptiCatalog.Add([pscustomobject]@{
         Id = $Id; Name = $Name; Desc = $Desc; Cat = $Cat; Risk = $Risk; Tags = $Tags
         Reg = $Reg; Svc = $Svc; Task = $Task; Apply = $Apply; Undo = $Undo; Test = $Test
-        Restart = [bool]$Restart; Explorer = [bool]$Explorer; DesktopOnly = [bool]$DesktopOnly; SSDOnly = [bool]$SSDOnly; Vendor = $Vendor; SvcTol = $SvcTol
+        Restart = [bool]$Restart; Explorer = [bool]$Explorer; DesktopOnly = [bool]$DesktopOnly; SSDOnly = [bool]$SSDOnly; Vendor = $Vendor; SvcTol = $SvcTol; MinRamGB = $MinRamGB; Need = $Need
     })
 }
 
@@ -63,14 +63,14 @@ T -Id 'perf-animations' -Cat $P -Name 'Faster UI: minimize animations and menu d
       Rg 'HKCU:\Software\Microsoft\Windows\DWM' 'EnableAeroPeek' 0
   )
 
-T -Id 'perf-visualfx' -Cat $P -Name 'Visual effects: best performance preset' -Tags max -Risk Moderate -Restart `
+T -Id 'perf-visualfx' -Cat $P -Name 'Visual effects: best performance preset' -Tags max, smart -Risk Moderate -Restart -Need lowend `
   -Desc 'Windows "Adjust for best performance" visual-effects mask. Flatter look; applies fully after sign-out.' `
   -Reg @(
       Rg "$CV\Explorer\VisualEffects" 'VisualFXSetting' 2
       Rg $DESK 'UserPreferencesMask' ([byte[]](0x90, 0x12, 0x03, 0x80, 0x10, 0, 0, 0)) 'Binary'
   )
 
-T -Id 'perf-transparency' -Cat $P -Name 'Disable transparency effects' -Tags max `
+T -Id 'perf-transparency' -Cat $P -Name 'Disable transparency effects' -Tags max, smart -Need lowend `
   -Desc 'Turns off acrylic/mica transparency. Saves GPU work, especially on integrated graphics.' `
   -Reg @( Rg $PERS 'EnableTransparency' 0 )
 
@@ -110,7 +110,7 @@ T -Id 'perf-ntfs' -Cat $P -Name 'NTFS: stop last-access timestamp writes' -Tags 
   -Undo  { param($d) $v = if ($d -and $null -ne $d.Prev) { $d.Prev } else { 2 }; fsutil behavior set disablelastaccess $v | Out-Null } `
   -Test  { (Invoke-Native fsutil @('behavior', 'query', 'disablelastaccess')) -match '=\s*[13]' }
 
-T -Id 'perf-memcompress' -Cat $P -Name 'Disable memory compression (16 GB+ RAM)' -Tags max -Risk Moderate -Restart `
+T -Id 'perf-memcompress' -Cat $P -Name 'Disable memory compression (16 GB+ RAM)' -Tags max, smart -Risk Moderate -Restart -MinRamGB 15.5 -Need '!lowend' `
   -Desc 'Saves CPU cycles spent compressing RAM. Only helps if you have plenty of memory.' `
   -Apply { Disable-MMAgent -MemoryCompression -ErrorAction Stop | Out-Null; $null } `
   -Undo  { Enable-MMAgent -MemoryCompression -ErrorAction Stop | Out-Null } `
@@ -153,7 +153,7 @@ T -Id 'perf-timer' -Cat $P -Name 'Low-latency timer (disable dynamic tick)' -Tag
   -Undo  { param($d) bcdedit /deletevalue disabledynamictick 2>&1 | Out-Null; if ($d -and $d.HadPlatformClock) { bcdedit /set useplatformclock yes | Out-Null } } `
   -Test  { (bcdedit /enum '{current}' | Out-String) -match 'disabledynamictick\s+Yes' }
 
-T -Id 'perf-hags' -Cat $P -Name 'Hardware-accelerated GPU scheduling' -Tags gaming, max -Risk Moderate -Restart `
+T -Id 'perf-hags' -Cat $P -Name 'Hardware-accelerated GPU scheduling' -Tags gaming, max -Risk Moderate -Restart -Need dgpu `
   -Desc 'Lets the GPU manage its own VRAM scheduling. Lower latency on modern NVIDIA/AMD GPUs (needs recent drivers).' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers' 'HwSchMode' 2 )
 
@@ -548,3 +548,4 @@ T -Id 'ui-verbosebsod' -Cat $I -Name 'Verbose blue-screen details' -Desc 'Shows 
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\CrashControl' 'DisplayParameters' 1 )
 
 . "$PSScriptRoot\CatalogExtra.ps1"
+. "$PSScriptRoot\CatalogSmart.ps1"
