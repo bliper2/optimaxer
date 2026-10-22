@@ -1,0 +1,600 @@
+﻿{
+    "service_recs":  [
+                         {
+                             "name":  "AJRouter",
+                             "start":  3,
+                             "desc":  "AllJoyn Router (IoT discovery)"
+                         },
+                         {
+                             "name":  "ALG",
+                             "start":  3,
+                             "desc":  "Application Layer Gateway (Internet Connection Sharing helper)"
+                         },
+                         {
+                             "name":  "AppMgmt",
+                             "start":  3,
+                             "desc":  "Group-policy software installation"
+                         },
+                         {
+                             "name":  "AppReadiness",
+                             "start":  3,
+                             "desc":  "App Readiness (first-logon app prep)"
+                         },
+                         {
+                             "name":  "AppVClient",
+                             "start":  4,
+                             "desc":  "Microsoft App-V client"
+                         },
+                         {
+                             "name":  "AssignedAccessManagerSvc",
+                             "start":  4,
+                             "desc":  "Kiosk / assigned access"
+                         },
+                         {
+                             "name":  "AxInstSV",
+                             "start":  3,
+                             "desc":  "ActiveX Installer"
+                         },
+                         {
+                             "name":  "BDESVC",
+                             "start":  3,
+                             "desc":  "BitLocker service (still starts on demand)"
+                         },
+                         {
+                             "name":  "BTAGService",
+                             "start":  3,
+                             "desc":  "Bluetooth audio gateway"
+                         },
+                         {
+                             "name":  "Browser",
+                             "start":  3,
+                             "desc":  "Computer Browser (legacy)"
+                         },
+                         {
+                             "name":  "CDPSvc",
+                             "start":  3,
+                             "desc":  "Connected Devices Platform"
+                         },
+                         {
+                             "name":  "COMSysApp",
+                             "start":  3,
+                             "desc":  "COM+ System Application"
+                         },
+                         {
+                             "name":  "CertPropSvc",
+                             "start":  3,
+                             "desc":  "Certificate propagation (smart cards)"
+                         },
+                         {
+                             "name":  "CscService",
+                             "start":  3,
+                             "desc":  "Offline Files"
+                         },
+                         {
+                             "name":  "DmEnrollmentSvc",
+                             "start":  3,
+                             "desc":  "Device management enrollment"
+                         },
+                         {
+                             "name":  "DcpSvc",
+                             "start":  3,
+                             "desc":  "Data collection publishing"
+                         },
+                         {
+                             "name":  "DsSvc",
+                             "start":  3,
+                             "desc":  "Data Sharing Service"
+                         },
+                         {
+                             "name":  "diagsvc",
+                             "start":  3,
+                             "desc":  "Diagnostic execution service"
+                         },
+                         {
+                             "name":  "diagnosticshub.standardcollector.service",
+                             "start":  3,
+                             "desc":  "Diagnostic hub collector"
+                         },
+                         {
+                             "name":  "EntAppSvc",
+                             "start":  3,
+                             "desc":  "Enterprise app management"
+                         },
+                         {
+                             "name":  "FDResPub",
+                             "start":  3,
+                             "desc":  "Function Discovery Resource Publication"
+                         },
+                         {
+                             "name":  "Fax",
+                             "start":  4,
+                             "desc":  "Fax"
+                         },
+                         {
+                             "name":  "GraphicsPerfSvc",
+                             "start":  4,
+                             "desc":  "Graphics performance monitor"
+                         },
+                         {
+                             "name":  "HvHost",
+                             "start":  3,
+                             "desc":  "Hyper-V host service"
+                         },
+                         {
+                             "name":  "IpxlatCfgSvc",
+                             "start":  3,
+                             "desc":  "IP translation configuration"
+                         },
+                         {
+                             "name":  "KtmRm",
+                             "start":  3,
+                             "desc":  "Kernel transaction manager for MSDTC"
+                         },
+                         {
+                             "name":  "MSDTC",
+                             "start":  3,
+                             "desc":  "Distributed Transaction Coordinator"
+                         },
+                         {
+                             "name":  "MSiSCSI",
+                             "start":  3,
+                             "desc":  "iSCSI initiator"
+                         },
+                         {
+                             "name":  "MapsBroker",
+                             "start":  4,
+                             "desc":  "Downloaded maps manager"
+                         },
+                         {
+                             "name":  "MicrosoftEdgeElevationService",
+                             "start":  3,
+                             "desc":  "Edge elevation service"
+                         },
+                         {
+                             "name":  "MixedRealityOpenXRSvc",
+                             "start":  3,
+                             "desc":  "Windows Mixed Reality OpenXR"
+                         },
+                         {
+                             "name":  "NaturalAuthentication",
+                             "start":  3,
+                             "desc":  "Natural authentication"
+                         },
+                         {
+                             "name":  "NcaSvc",
+                             "start":  3,
+                             "desc":  "Network Connectivity Assistant"
+                         },
+                         {
+                             "name":  "NetTcpPortSharing",
+                             "start":  4,
+                             "desc":  "Net.Tcp port sharing"
+                         },
+                         {
+                             "name":  "Netlogon",
+                             "start":  3,
+                             "desc":  "Netlogon (domain controllers only)"
+                         },
+                         {
+                             "name":  "PNRPAutoReg",
+                             "start":  3,
+                             "desc":  "PNRP machine name publication"
+                         },
+                         {
+                             "name":  "PNRPsvc",
+                             "start":  3,
+                             "desc":  "Peer Name Resolution Protocol"
+                         },
+                         {
+                             "name":  "p2pimsvc",
+                             "start":  3,
+                             "desc":  "Peer networking identity manager"
+                         },
+                         {
+                             "name":  "p2psvc",
+                             "start":  3,
+                             "desc":  "Peer networking grouping"
+                         },
+                         {
+                             "name":  "PeerDistSvc",
+                             "start":  3,
+                             "desc":  "BranchCache"
+                         },
+                         {
+                             "name":  "PerfHost",
+                             "start":  3,
+                             "desc":  "Performance counter DLL host"
+                         },
+                         {
+                             "name":  "PhoneSvc",
+                             "start":  3,
+                             "desc":  "Phone service"
+                         },
+                         {
+                             "name":  "PrintNotify",
+                             "start":  3,
+                             "desc":  "Printer extensions and notifications"
+                         },
+                         {
+                             "name":  "PushToInstall",
+                             "start":  3,
+                             "desc":  "Windows PushToInstall"
+                         },
+                         {
+                             "name":  "QWAVE",
+                             "start":  3,
+                             "desc":  "Quality Windows Audio Video Experience"
+                         },
+                         {
+                             "name":  "RasAuto",
+                             "start":  3,
+                             "desc":  "Remote Access auto connection manager"
+                         },
+                         {
+                             "name":  "RemoteAccess",
+                             "start":  4,
+                             "desc":  "Routing and Remote Access"
+                         },
+                         {
+                             "name":  "RemoteRegistry",
+                             "start":  4,
+                             "desc":  "Remote Registry (security risk)"
+                         },
+                         {
+                             "name":  "RetailDemo",
+                             "start":  4,
+                             "desc":  "Retail demo mode"
+                         },
+                         {
+                             "name":  "RpcLocator",
+                             "start":  3,
+                             "desc":  "RPC locator"
+                         },
+                         {
+                             "name":  "SCPolicySvc",
+                             "start":  3,
+                             "desc":  "Smart card removal policy"
+                         },
+                         {
+                             "name":  "SCardSvr",
+                             "start":  3,
+                             "desc":  "Smart card"
+                         },
+                         {
+                             "name":  "ScDeviceEnum",
+                             "start":  3,
+                             "desc":  "Smart card device enumeration"
+                         },
+                         {
+                             "name":  "SDRSVC",
+                             "start":  3,
+                             "desc":  "Windows Backup"
+                         },
+                         {
+                             "name":  "SEMgrSvc",
+                             "start":  3,
+                             "desc":  "Payments and NFC/SE manager"
+                         },
+                         {
+                             "name":  "SNMPTRAP",
+                             "start":  4,
+                             "desc":  "SNMP trap"
+                         },
+                         {
+                             "name":  "SSDPSRV",
+                             "start":  3,
+                             "desc":  "SSDP discovery (UPnP)"
+                         },
+                         {
+                             "name":  "SessionEnv",
+                             "start":  3,
+                             "desc":  "Remote Desktop configuration"
+                         },
+                         {
+                             "name":  "SharedAccess",
+                             "start":  4,
+                             "desc":  "Internet Connection Sharing"
+                         },
+                         {
+                             "name":  "SmsRouter",
+                             "start":  3,
+                             "desc":  "SMS router"
+                         },
+                         {
+                             "name":  "TabletInputService",
+                             "start":  3,
+                             "desc":  "Touch keyboard and handwriting"
+                         },
+                         {
+                             "name":  "TapiSrv",
+                             "start":  3,
+                             "desc":  "Telephony"
+                         },
+                         {
+                             "name":  "TermService",
+                             "start":  3,
+                             "desc":  "Remote Desktop Services"
+                         },
+                         {
+                             "name":  "TieringEngineService",
+                             "start":  3,
+                             "desc":  "Storage tiers management"
+                         },
+                         {
+                             "name":  "TrkWks",
+                             "start":  3,
+                             "desc":  "Distributed link tracking client"
+                         },
+                         {
+                             "name":  "TroubleshootingSvc",
+                             "start":  3,
+                             "desc":  "Recommended troubleshooting service"
+                         },
+                         {
+                             "name":  "UevAgentService",
+                             "start":  4,
+                             "desc":  "User Experience Virtualization"
+                         },
+                         {
+                             "name":  "UmRdpService",
+                             "start":  3,
+                             "desc":  "Remote Desktop port redirector"
+                         },
+                         {
+                             "name":  "WEPHOSTSVC",
+                             "start":  3,
+                             "desc":  "Windows Encryption Provider host"
+                         },
+                         {
+                             "name":  "WFDSConMgrSvc",
+                             "start":  3,
+                             "desc":  "Wi-Fi Direct services connection manager"
+                         },
+                         {
+                             "name":  "WMPNetworkSvc",
+                             "start":  4,
+                             "desc":  "Windows Media Player network sharing"
+                         },
+                         {
+                             "name":  "WManSvc",
+                             "start":  3,
+                             "desc":  "Windows Management Service"
+                         },
+                         {
+                             "name":  "WalletService",
+                             "start":  4,
+                             "desc":  "Wallet service"
+                         },
+                         {
+                             "name":  "WarpJITSvc",
+                             "start":  3,
+                             "desc":  "Warp JIT service"
+                         },
+                         {
+                             "name":  "WdiServiceHost",
+                             "start":  3,
+                             "desc":  "Diagnostic service host"
+                         },
+                         {
+                             "name":  "WdiSystemHost",
+                             "start":  3,
+                             "desc":  "Diagnostic system host"
+                         },
+                         {
+                             "name":  "WebClient",
+                             "start":  3,
+                             "desc":  "WebDAV client"
+                         },
+                         {
+                             "name":  "Wecsvc",
+                             "start":  3,
+                             "desc":  "Windows Event Collector"
+                         },
+                         {
+                             "name":  "WinRM",
+                             "start":  3,
+                             "desc":  "Windows Remote Management"
+                         },
+                         {
+                             "name":  "WpcMonSvc",
+                             "start":  3,
+                             "desc":  "Parental controls"
+                         },
+                         {
+                             "name":  "autotimesvc",
+                             "start":  3,
+                             "desc":  "Cellular time"
+                         },
+                         {
+                             "name":  "cloudidsvc",
+                             "start":  3,
+                             "desc":  "Microsoft cloud identity"
+                         },
+                         {
+                             "name":  "edgeupdate",
+                             "start":  3,
+                             "desc":  "Microsoft Edge updater"
+                         },
+                         {
+                             "name":  "edgeupdatem",
+                             "start":  3,
+                             "desc":  "Microsoft Edge updater (machine)"
+                         },
+                         {
+                             "name":  "fdPHost",
+                             "start":  3,
+                             "desc":  "Function Discovery provider host"
+                         },
+                         {
+                             "name":  "fhsvc",
+                             "start":  3,
+                             "desc":  "File History"
+                         },
+                         {
+                             "name":  "icssvc",
+                             "start":  3,
+                             "desc":  "Mobile hotspot"
+                         },
+                         {
+                             "name":  "lfsvc",
+                             "start":  3,
+                             "desc":  "Geolocation service"
+                         },
+                         {
+                             "name":  "lltdsvc",
+                             "start":  3,
+                             "desc":  "Link-Layer Topology Discovery mapper"
+                         },
+                         {
+                             "name":  "upnphost",
+                             "start":  3,
+                             "desc":  "UPnP device host"
+                         },
+                         {
+                             "name":  "wisvc",
+                             "start":  3,
+                             "desc":  "Windows Insider service"
+                         },
+                         {
+                             "name":  "workfolderssvc",
+                             "start":  3,
+                             "desc":  "Work Folders"
+                         }
+                     ],
+    "protected":  [
+                      "RpcSs",
+                      "RpcEptMapper",
+                      "DcomLaunch",
+                      "LSM",
+                      "PlugPlay",
+                      "Power",
+                      "EventLog",
+                      "EventSystem",
+                      "mpssvc",
+                      "BFE",
+                      "WinDefend",
+                      "SecurityHealthService",
+                      "Wcmsvc",
+                      "Dhcp",
+                      "Dnscache",
+                      "nsi",
+                      "NlaSvc",
+                      "LanmanWorkstation",
+                      "CryptSvc",
+                      "TrustedInstaller",
+                      "gpsvc",
+                      "ProfSvc",
+                      "UserManager",
+                      "SamSs",
+                      "Winmgmt",
+                      "StateRepository",
+                      "TimeBrokerSvc",
+                      "SystemEventsBroker",
+                      "BrokerInfrastructure",
+                      "CoreMessagingRegistrar",
+                      "Schedule",
+                      "Audiosrv",
+                      "AudioEndpointBuilder",
+                      "sppsvc",
+                      "StorSvc",
+                      "DeviceInstall",
+                      "Themes",
+                      "ShellHWDetection",
+                      "UsoSvc",
+                      "wuauserv",
+                      "BITS",
+                      "KeyIso",
+                      "SENS",
+                      "LanmanServer",
+                      "netprofm",
+                      "WlanSvc",
+                      "hidserv",
+                      "DispBrokerDesktopSvc",
+                      "CDPUserSvc",
+                      "WpnService",
+                      "Appinfo",
+                      "CertPropSvc_",
+                      "AppXSvc",
+                      "ClipSVC",
+                      "InstallService",
+                      "DoSvc",
+                      "Spooler"
+                  ],
+    "dns":  [
+                {
+                    "name":  "Cloudflare",
+                    "desc":  "Fastest on average, privacy-focused. 1.1.1.1",
+                    "v4":  [
+                               "1.1.1.1",
+                               "1.0.0.1"
+                           ],
+                    "v6":  [
+                               "2606:4700:4700::1111",
+                               "2606:4700:4700::1001"
+                           ],
+                    "doh":  "https://cloudflare-dns.com/dns-query"
+                },
+                {
+                    "name":  "Google",
+                    "desc":  "Reliable, global anycast. 8.8.8.8",
+                    "v4":  [
+                               "8.8.8.8",
+                               "8.8.4.4"
+                           ],
+                    "v6":  [
+                               "2001:4860:4860::8888",
+                               "2001:4860:4860::8844"
+                           ],
+                    "doh":  "https://dns.google/dns-query"
+                },
+                {
+                    "name":  "Quad9",
+                    "desc":  "Blocks known malicious domains. 9.9.9.9",
+                    "v4":  [
+                               "9.9.9.9",
+                               "149.112.112.112"
+                           ],
+                    "v6":  [
+                               "2620:fe::fe",
+                               "2620:fe::9"
+                           ],
+                    "doh":  "https://dns.quad9.net/dns-query"
+                },
+                {
+                    "name":  "AdGuard",
+                    "desc":  "Blocks ads and trackers network-wide. 94.140.14.14",
+                    "v4":  [
+                               "94.140.14.14",
+                               "94.140.15.15"
+                           ],
+                    "v6":  [
+                               "2a10:50c0::ad1:ff",
+                               "2a10:50c0::ad2:ff"
+                           ],
+                    "doh":  "https://dns.adguard-dns.com/dns-query"
+                },
+                {
+                    "name":  "OpenDNS",
+                    "desc":  "Cisco OpenDNS. 208.67.222.222",
+                    "v4":  [
+                               "208.67.222.222",
+                               "208.67.220.220"
+                           ],
+                    "v6":  [
+
+                           ],
+                    "doh":  ""
+                },
+                {
+                    "name":  "Automatic (DHCP)",
+                    "desc":  "Reset to the router / ISP default.",
+                    "v4":  [
+
+                           ],
+                    "v6":  [
+
+                           ],
+                    "doh":  ""
+                }
+            ]
+}

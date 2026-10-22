@@ -48,6 +48,9 @@ Non-interactive: `optimaxer tweaks list | apply --preset safe | undo --all`, `op
 
 Safety: every change records the original state in `/var/lib/optimaxer/state.json` (files, config lines, service states, DNS), so `tweaks undo` restores it; edited config files are also copied to `/var/lib/optimaxer/backups`. Package installs by a tweak are kept on undo. Tested here with a simulated system (45 automated tests, including the window, `python -m unittest discover -s linux/tests`); I could not run it on a real Manjaro install, so start with `--dry-run`.
 
+## Desktop app (Rust)
+[`desktop/`](desktop/) holds a single-exe Windows app that puts the [Orion Store](https://github.com/RookieEnough/Orion-Store) catalog and Optimaxer in one window (Rust, eframe/egui). The Optimaxer side is a port of the engine to Rust: 199 of the 216 tweaks with the same undo records, plus services, startup, cleaner, DNS and network tools, and maintenance helpers. Smart optimize reads your hardware and selects only the tweaks that fit. Every change opens a confirmation window that lists what will change. The 17 tweaks that need PowerShell cmdlets stay in this edition. Download `OrionStore-Optimaxer-desktop-v*-win-x64.zip` from [Releases](https://github.com/bliper2/optimaxer/releases/latest), or build it with `cargo build --release` in `desktop/`. The desktop folder is GPL-3.0 (it derives from Orion Store); everything else here stays MIT. See [desktop/README.md](desktop/README.md).
+
 ## Run unattended
 ```powershell
 powershell -ExecutionPolicy Bypass -File Optimaxer.ps1 -Silent -Preset safe          # auto | safe | gaming | privacy | deai | max
@@ -65,6 +68,7 @@ Add `-NoRestorePoint` to skip the restore point. Exit code 0 = everything verifi
 Optimaxer checks GitHub Releases once per launch (Settings > Updates, or Tools > Check for updates). A newer release shows an **Update to vX** button in the title bar. Updating downloads the zip, verifies its published SHA-256, backs up the current files to `%ProgramData%\Optimaxer\backups\app-<version>-<time>`, swaps them in after the app closes and restarts. A git checkout is never overwritten (use `git pull`). For a private fork set `OPTIMAXER_TOKEN` to a GitHub token with read access.
 
 ## Development
+Desktop app tests: `cargo test` in `desktop/`.
 Linux edition tests: `python -m unittest discover -s linux/tests` (runs on any OS with a fake system).
 `Optimaxer.ps1 -NoElevate -Screenshot <dir>` renders every page to PNG. `tools/make-logo.ps1` regenerates the logo files from `assets/logo.xaml`. Bump `VERSION` and include it in the release zip so the updater sees new releases.
 
