@@ -73,6 +73,8 @@ Linux edition tests: `python -m unittest discover -s linux/tests` (runs on any O
 `Optimaxer.ps1 -NoElevate -Screenshot <dir>` renders every page to PNG. `tools/make-logo.ps1` regenerates the logo files from `assets/logo.xaml`. Bump `VERSION` and include it in the release zip so the updater sees new releases.
 
 ## Credits
+The desktop app's Store client and app catalog come from [Orion Store](https://github.com/RookieEnough/Orion-Store) by RookieEnough (GPL-3.0), with catalog data from [Orion-Data](https://github.com/RookieEnough/Orion-Data). Thank you to everyone who works on it.
+
 Tweak ideas draw on [Win11Debloat](https://github.com/Raphire/Win11Debloat) (MIT) and [WinUtil](https://github.com/ChrisTitusTech/winutil) (MIT), plus general knowledge of AtlasOS-style tuning (AtlasOS is GPL-3.0; no code copied). The telemetry hosts list is [WindowsSpyBlocker](https://github.com/crazy-max/WindowsSpyBlocker) (MIT), fetched at apply time.
 
 App icons are fetched at runtime (never bundled) from open icon packs served by jsDelivr and cached in `%ProgramData%\Optimaxer\icons4`: [selfh.st icons](https://selfh.st/icons/) (CC BY 4.0, attribution: selfh.st), [Dashboard Icons](https://github.com/homarr-labs/dashboard-icons) (Apache-2.0) and [Simple Icons](https://simpleicons.org) (CC0). Apps without a pack icon fall back to their product page's favicon (Google favicon service, as WinUtil does). Logos remain the trademarks of their owners.
