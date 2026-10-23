@@ -19,7 +19,7 @@ import tempfile
 import time
 import urllib.request
 
-__version__ = "2.13.1"
+__version__ = "2.13.2"
 REPO = "bliper2/optimaxer"
 STATE_FILE = "/var/lib/optimaxer/state.json"
 BACKUP_DIR = "/var/lib/optimaxer/backups"
@@ -1671,8 +1671,13 @@ def apply_config(data: dict) -> bool:
     return ok
 
 
+def installed_script() -> str:
+    return os.path.join(P(real_home()), ".local", "share", "optimaxer", "optimaxer.py")
+
+
 def desktop_entry() -> str:
-    exe = os.path.realpath(sys.argv[0]) if sys.argv and sys.argv[0] else "optimaxer"
+    own = os.path.realpath(sys.argv[0]) if sys.argv and sys.argv[0] else "optimaxer"
+    exe = installed_script() if os.path.exists(installed_script()) else own
     return ("[Desktop Entry]\nType=Application\nName=Optimaxer\nComment=Tweaks, apps and cleanup for Manjaro, Arch and Fedora\n"
             f"Exec={sys.executable} {exe} gui\nIcon=optimaxer\nTerminal=false\nCategories=System;Settings;\n")
 
@@ -1704,6 +1709,64 @@ def create_launcher() -> list:
         except (KeyError, ImportError, OSError):
             pass
     return made
+
+
+def install_command() -> list:
+    """Keep a copy of this script under ~/.local/share and put an `optimaxer` command in ~/.local/bin, so the app opens
+    without remembering where the file was downloaded. Returns the paths written."""
+    home = P(real_home())
+    target = installed_script()
+    own = os.path.realpath(sys.argv[0])
+    made = []
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    if os.path.realpath(target) != own:
+        shutil.copyfile(own, target)
+    made.append(target)
+    bindir = os.path.join(home, ".local", "bin")
+    os.makedirs(bindir, exist_ok=True)
+    wrapper = os.path.join(bindir, "optimaxer")
+    with open(wrapper, "w", encoding="utf-8") as fh:
+        fh.write(f'#!/bin/sh\nexec "{sys.executable}" "{target}" "$@"\n')
+    os.chmod(wrapper, 0o755)
+    made.append(wrapper)
+    if hasattr(os, "geteuid") and os.geteuid() == 0 and not CTX.root:
+        try:
+            import pwd
+            u = pwd.getpwnam(real_user())
+            for path in made + [os.path.dirname(target), bindir]:
+                os.chown(path, u.pw_uid, u.pw_gid)
+        except (KeyError, ImportError, OSError):
+            pass
+    return made
+
+
+def first_run_offer() -> None:
+    """Once, in a terminal: offer to add Optimaxer to the app menu and the command line. The answer is remembered."""
+    settings = load_settings()
+    if settings.get("setup_offered") or not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return
+    if os.path.realpath(sys.argv[0]) == os.path.realpath(installed_script()):
+        return
+    try:
+        ans = input("Add Optimaxer to the application menu and install an 'optimaxer' command so it opens without this file? [Y/n] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    settings["setup_offered"] = True
+    save_settings(settings)
+    if ans in ("n", "no"):
+        print("Okay. Run  python3 " + os.path.basename(sys.argv[0]) + " launcher  later if you change your mind.")
+        return
+    try:
+        made = install_command() + create_launcher()
+    except OSError as exc:
+        print(f"Setup failed: {exc}", file=sys.stderr)
+        return
+    print("Done. Open Optimaxer from the application menu, or type  optimaxer  in a terminal.")
+    if os.path.join(P(real_home()), ".local", "bin") not in os.environ.get("PATH", "").split(":"):
+        print("If 'optimaxer' is not found, log out and in once so ~/.local/bin is on your PATH.")
+    for path in made:
+        print("  " + path)
 
 
 def tk_available() -> bool:
@@ -2362,6 +2425,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="optimaxer", description="Optimaxer for Manjaro/Arch Linux and Fedora")
     p.add_argument("--dry-run", action="store_true", help="show what would change without changing anything")
     p.add_argument("-y", "--yes", action="store_true", help="do not ask for confirmation")
+    p.add_argument("--text", action="store_true", help="with no command: open the terminal menu instead of the window")
     p.add_argument("--version", action="version", version=f"optimaxer {__version__}")
     sub = p.add_subparsers(dest="cmd")
     t = sub.add_parser("tweaks", help="list/apply/undo tweaks")
@@ -2400,6 +2464,14 @@ def main(argv: list | None = None) -> int:
             print("This edition supports Manjaro and other Arch-based distributions (pacman) and Fedora and other dnf-based distributions.", file=sys.stderr)
             return 2
         select_pm(pm)
+    if args.cmd is None and not args.text and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        # plain `python3 optimaxer-linux.py` on a desktop opens the window; --text keeps the terminal menu
+        if tk_available():
+            args.cmd = "gui"
+        else:
+            print(f"The window needs Tk (install it with:  {PM.install_cmd(PM.tk_pkg)}). Starting the text menu instead.", file=sys.stderr)
+    if args.cmd in (None, "gui") and not CTX.dry_run and not (hasattr(os, "geteuid") and os.geteuid() == 0):
+        first_run_offer()
     mutating = args.cmd in ("tweaks", "apps", "clean", "dns", "config", None) and not (
         (args.cmd == "tweaks" and args.action == "list") or (args.cmd == "apps" and args.action == "list") or (args.cmd == "clean" and args.action == "scan"))
     if args.cmd == "gui":
@@ -2413,7 +2485,7 @@ def main(argv: list | None = None) -> int:
     if args.cmd == "gui":
         rc = run_gui()
     elif args.cmd == "launcher":
-        for path in create_launcher():
+        for path in install_command() + create_launcher():
             print("Created", path)
     elif args.cmd == "config":
         try:
