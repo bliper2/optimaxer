@@ -94,17 +94,32 @@ It 'HAGS needs a discrete GPU and stays Moderate' {
 }
 
 Write-Host 'smart optimize'
-It 'reference gaming desktop gets no Moderate, Advanced or power tweaks' {
+It 'reference gaming desktop gets the performance set but no Advanced, heat or boot tweaks' {
     $plan = Get-SmartPlan $refPC @{}
-    Assert ($plan.Ids.Count -gt 0) 'empty plan'
-    foreach ($id in 'perf-timer', 'perf-cpupower', 'net-nagle', 'perf-prefetch', 'perf-ultimate', 'perf-hags', 'perf-fth') { Assert ($plan.Ids -notcontains $id) "$id selected" }
-    foreach ($id in $plan.Ids) { $t = Get-TweakById $id; Assert ($t.Risk -eq 'Safe') "$id is $($t.Risk)"; Assert ($t.Tags -notcontains 'optin') "$id is opt-in" }
+    foreach ($id in 'perf-hags', 'perf-powerthrottle', 'perf-usbpcie', 'perf-globaltimer', 'game-mode', 'game-dvr', 'perf-trimon') { Assert ($plan.Ids -contains $id) "$id not selected" }
+    foreach ($id in 'perf-timer', 'perf-cpupower', 'net-nagle', 'perf-prefetch', 'perf-ultimate', 'perf-fth', 'game-windowed') { Assert ($plan.Ids -notcontains $id) "$id selected" }
+    foreach ($id in $plan.Ids) {
+        $t = Get-TweakById $id
+        Assert ($t.Risk -ne 'Advanced' -and $t.Tags -notcontains 'optin' -and -not $t.Retired) "$id should never be automatic"
+        Assert ($t.Risk -eq 'Safe' -or $t.Tags -contains 'perf') "$id is Moderate without the perf tag"
+    }
+}
+It 'laptop gets no desktop power tweaks' {
+    $plan = Get-SmartPlan $laptop @{}
+    foreach ($id in 'perf-powerthrottle', 'perf-usbpcie', 'perf-globaltimer', 'perf-hags') { Assert ($plan.Ids -notcontains $id) "$id on a laptop" }
+    Assert ($plan.Skipped['perf-powerthrottle'] -match 'laptop') "reason: $($plan.Skipped['perf-powerthrottle'])"
+}
+It 'retired tweaks are never ticked or offered in presets' {
+    $ret = @($global:OptiCatalog | Where-Object Retired)
+    Assert ($ret.Count -ge 8) "only $($ret.Count) retired"
+    foreach ($p in 'max', 'safe', 'privacy', 'deai', 'gaming') { foreach ($id in Get-PresetTweakIds $p $refPC) { Assert (-not (Get-TweakById $id).Retired) "$id in $p" } }
+    Assert (-not @((Get-SmartPlan $refPC @{}).Ids | Where-Object { (Get-TweakById $_).Retired })) 'retired in Smart optimize'
 }
 It 'skipped Moderate and Advanced tweaks carry a reason' {
     $plan = Get-SmartPlan $refPC @{}
-    Assert ($plan.Skipped['perf-hags'] -match 'Moderate') "perf-hags reason: $($plan.Skipped['perf-hags'])"
-    Assert ([bool]($plan.Notes -match 'Moderate and Advanced are left for you to tick')) 'note missing'
-    $unexplained = @($global:OptiCatalog | Where-Object { $_.Risk -ne 'Safe' -and $_.Tags -notcontains 'optin' -and -not $plan.Skipped.ContainsKey($_.Id) } | ForEach-Object Id)
+    Assert ($plan.Skipped['perf-mmagent'] -match 'Moderate') "perf-mmagent reason: $($plan.Skipped['perf-mmagent'])"
+    Assert ([bool]($plan.Notes -match 'Advanced tweaks and other Moderate ones are left for you to tick')) 'note missing'
+    $unexplained = @($global:OptiCatalog | Where-Object { $_.Risk -ne 'Safe' -and $_.Tags -notcontains 'optin' -and -not $_.Retired -and -not (Test-AutoPick $_) -and -not $plan.Skipped.ContainsKey($_.Id) } | ForEach-Object Id)
     Assert ($unexplained.Count -eq 0) "no reason for: $($unexplained -join ', ')"
 }
 It 'laptop notes name the hardware fact' {
@@ -113,8 +128,8 @@ It 'laptop notes name the hardware fact' {
     Assert ([bool]($plan.Notes -match '8 GB RAM')) 'no RAM note'
     Assert ((Get-TweakFitReason (Get-TweakById 'perf-ultimate') $laptop) -eq 'this PC is a laptop') 'fit reason'
 }
-It 'a Safe tweak tagged gaming only is not auto-selected' {
-    Assert ((Get-SmartPlan $refPC @{}).Ids -notcontains 'game-mode') 'game-mode auto-selected'
+It 'a tweak tagged gaming only (mouse acceleration) is not auto-selected' {
+    Assert ((Get-SmartPlan $refPC @{}).Ids -notcontains 'game-mouse') 'game-mouse auto-selected'
 }
 It 'presets tick at most one tweak per conflict group' {
     foreach ($p in 'max', 'safe') {
@@ -151,6 +166,19 @@ It 'Invoke-TweakUndo keeps the record when the undo script throws' {
         Assert ($global:OptiUndoFailed.ContainsKey('test-undo')) 'failure not reported'
         $all = Invoke-UndoAll
         Assert ($all.Failed.ContainsKey('test-undo')) 'Undo All does not report the failure'
+    } finally { Remove-FakeTweaks }
+}
+It 'undoing one tweak keeps a value another applied tweak still needs' {
+    New-Item -Path $TestKey -Force | Out-Null
+    $a = New-FakeTweak @{ Id = 'test-a'; Reg = @(@{ P = $TestKey; N = 'Shared'; V = 0; T = 'DWord' }) }
+    $b = New-FakeTweak @{ Id = 'test-b'; Reg = @(@{ P = $TestKey; N = 'Shared'; V = 0; T = 'DWord' }) }
+    try {
+        [void](Invoke-TweakApply $a); [void](Invoke-TweakApply $b)
+        [void](Invoke-TweakUndo $b)
+        Assert ((Get-ItemProperty -LiteralPath $TestKey).Shared -eq 0) 'undoing b removed the value a still needs'
+        Assert (Test-Tweak $a) 'a is no longer active'
+        [void](Invoke-TweakUndo $a)
+        Assert ($null -eq (Get-ItemProperty -LiteralPath $TestKey).Shared) 'the last undo did not put the original back'
     } finally { Remove-FakeTweaks }
 }
 It 'a successful undo removes the record' {
@@ -267,6 +295,29 @@ It 'dev folder search finds build trees and skips AppData' {
     foreach ($d in 'proj\node_modules\x', 'proj\.git', 'rust\target', 'AppData\Local\proj\node_modules', 'docs') { New-Item -ItemType Directory -Path (Join-Path $root $d) -Force | Out-Null }
     $hits = @(Find-DevTrees -Root $root | ForEach-Object { $_.Substring($root.Length + 1) })
     Assert (($hits -join ',') -eq 'proj\.git,proj\node_modules,rust\target') "hits: $($hits -join ',')"
+}
+It 'frame statistics match hand-computed values' {
+    $s = Get-FrameStats (@(10.0) * 990 + @(40.0) * 10)
+    Assert ($s.Frames -eq 1000) 'frames'
+    Assert ([math]::Abs($s.AvgFps - 1000 / 10.3) -lt 0.1) "avg $($s.AvgFps)"
+    Assert ($s.Low1 -eq 25) "1% low $($s.Low1)"
+    Assert ($s.Low01 -eq 25) "0.1% low $($s.Low01)"
+    Assert ($s.Stutters -eq 10) "stutters $($s.Stutters)"
+    Assert ($null -eq (Get-FrameStats @(16.6, 16.7))) 'too few frames should give no result'
+}
+It 'measurement comparison reports direction per metric' {
+    $old = $global:OptiMeasurePath
+    $global:OptiMeasurePath = Join-Path $tmp 'm.json'
+    try {
+        $b = [ordered]@{ Label = 'before'; Time = '2026-01-01T00:00:00'; Boot = @{ Ms = 30000; At = 'a' }; Latency = @{ DpcPct = 0.5; IsrPct = 0.2; JitterMs = 3 }; Frames = @{ Process = 'g.exe'; AvgFps = 100; Low1 = 60; Low01 = 40; P99Ms = 20 } }
+        $a = [ordered]@{ Label = 'after'; Time = '2026-01-01T01:00:00'; Boot = @{ Ms = 25000; At = 'b' }; Latency = @{ DpcPct = 0.6; IsrPct = 0.2; JitterMs = 2 }; Frames = @{ Process = 'g.exe'; AvgFps = 110; Low1 = 60; Low01 = 45; P99Ms = 15 } }
+        ConvertTo-Json -InputObject @($b, $a) -Depth 5 | Set-Content -LiteralPath $global:OptiMeasurePath
+        $c = @(Compare-OptiMeasurements)
+        Assert ([bool]($c -match 'Average FPS \(g.exe\): 100 -> 110 \(\+10.0%, better\)')) ($c -join ' | ')
+        Assert ([bool]($c -match '1% low FPS: 60 -> 60 \(0%, same\)')) ($c -join ' | ')
+        Assert ([bool]($c -match 'DPC time: 0.5% -> 0.6% \(\+20.0%, worse\)')) ($c -join ' | ')
+        Assert ([bool]($c -match 'Boot time: 30 s -> 25 s')) ($c -join ' | ')
+    } finally { $global:OptiMeasurePath = $old }
 }
 It 'Appx removal checks provisioned copies' {
     Assert ((Get-Command Test-AppxGone).ScriptBlock.ToString() -match 'Get-AppxProvisionedPackage') 'Test-AppxGone ignores provisioning'

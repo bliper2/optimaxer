@@ -28,6 +28,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -100,6 +101,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -158,6 +160,7 @@
                      "lowend"
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -201,6 +204,7 @@
                      "lowend"
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -255,6 +259,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -298,6 +303,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -340,6 +346,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -355,7 +362,8 @@
         "cat":  "Performance",
         "risk":  "Moderate",
         "tags":  [
-                     "max"
+                     "max",
+                     "perf"
                  ],
         "reg":  [
                     {
@@ -382,6 +390,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -424,6 +433,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -461,6 +471,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -499,6 +510,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -536,6 +548,7 @@
                      "!lowend"
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -587,6 +600,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -627,6 +641,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -664,6 +679,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -679,7 +695,8 @@
         "cat":  "Performance",
         "risk":  "Safe",
         "tags":  [
-                     "max"
+                     "max",
+                     "perf"
                  ],
         "reg":  [
 
@@ -701,6 +718,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -738,6 +756,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -753,7 +772,8 @@
         "cat":  "Performance",
         "risk":  "Moderate",
         "tags":  [
-                     "max"
+                     "max",
+                     "perf"
                  ],
         "reg":  [
                     {
@@ -780,6 +800,7 @@
                      "dgpu"
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -822,6 +843,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -837,7 +859,8 @@
         "cat":  "Performance",
         "risk":  "Moderate",
         "tags":  [
-                     "max"
+                     "max",
+                     "perf"
                  ],
         "reg":  [
                     {
@@ -855,7 +878,7 @@
                  ],
         "restart":  true,
         "explorer":  false,
-        "desktop_only":  false,
+        "desktop_only":  true,
         "ssd_only":  false,
         "vendor":  "",
         "svc_tol":  1,
@@ -864,6 +887,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -901,6 +925,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -917,7 +942,8 @@
         "risk":  "Safe",
         "tags":  [
                      "gaming",
-                     "max"
+                     "max",
+                     "perf"
                  ],
         "reg":  [
                     {
@@ -950,6 +976,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -966,7 +993,8 @@
         "risk":  "Safe",
         "tags":  [
                      "gaming",
-                     "max"
+                     "max",
+                     "perf"
                  ],
         "reg":  [
                     {
@@ -1029,6 +1057,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -1077,6 +1106,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -1137,6 +1167,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -1179,6 +1210,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -1221,6 +1253,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -1293,6 +1326,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "NetworkThrottlingIndex and SystemResponsiveness only affect multimedia-class scheduling; no measured game benefit.",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -1347,6 +1381,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -1402,6 +1437,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -1439,6 +1475,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -1476,6 +1513,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -1518,6 +1556,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -1561,6 +1600,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -1610,6 +1650,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -1647,6 +1688,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -1741,6 +1783,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -1796,6 +1839,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -1851,6 +1895,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -2022,6 +2067,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -2108,6 +2154,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -2177,6 +2224,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -2246,6 +2294,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -2313,6 +2362,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -2362,6 +2412,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -2395,13 +2446,10 @@
                     }
                 ],
         "svc":  [
-                    {
-                        "name":  "WerSvc",
-                        "start":  4
-                    }
+
                 ],
         "task":  [
-                     "Microsoft\\Windows\\Windows Error Reporting\\QueueReporting"
+
                  ],
         "restart":  false,
         "explorer":  false,
@@ -2414,6 +2462,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -2456,6 +2505,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -2505,6 +2555,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -2627,6 +2678,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -2695,6 +2747,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  false,
@@ -2743,6 +2796,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -3091,6 +3145,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3183,6 +3238,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3220,6 +3276,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -3262,6 +3319,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3304,6 +3362,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3346,6 +3405,7 @@
 
                  ],
         "conflict":  "Explorer opens to",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3365,13 +3425,13 @@
                  ],
         "reg":  [
                     {
-                        "p":  "HKLM:\\SOFTWARE\\Classes\\CLSID\\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}",
+                        "p":  "HKCU:\\Software\\Classes\\CLSID\\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}",
                         "n":  "System.IsPinnedToNameSpaceTree",
                         "v":  0,
                         "t":  "DWord"
                     },
                     {
-                        "p":  "HKLM:\\SOFTWARE\\Classes\\CLSID\\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}",
+                        "p":  "HKCU:\\Software\\Classes\\CLSID\\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}",
                         "n":  "System.IsPinnedToNameSpaceTree",
                         "v":  0,
                         "t":  "DWord"
@@ -3400,6 +3460,7 @@
 
                  ],
         "conflict":  "Explorer opens to",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3437,6 +3498,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -3485,6 +3547,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3527,6 +3590,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3569,6 +3633,7 @@
 
                  ],
         "conflict":  "search style",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3611,6 +3676,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3653,6 +3719,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3701,6 +3768,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3749,6 +3817,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3791,6 +3860,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3833,6 +3903,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3875,6 +3946,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3917,6 +3989,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -3959,6 +4032,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4013,6 +4087,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4050,6 +4125,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -4098,6 +4174,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "DisablePagingExecutive has no measurable effect on a PC with enough RAM.",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4135,6 +4212,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "Trades service isolation for a few MB of RAM; no measurable speed gain.",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -4172,6 +4250,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -4209,6 +4288,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -4251,6 +4331,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4293,6 +4374,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "Max Cached Icons has no measurable effect on Windows 10 and 11.",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4335,6 +4417,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4377,6 +4460,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4419,6 +4503,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4461,6 +4546,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4503,6 +4589,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4546,6 +4633,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4595,6 +4683,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4638,6 +4727,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4681,6 +4771,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4724,6 +4815,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4767,6 +4859,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4816,6 +4909,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4859,6 +4953,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "Windows protects this key; the value cannot be written even as administrator.",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4902,6 +4997,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -4945,6 +5041,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5005,6 +5102,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5048,6 +5146,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5090,6 +5189,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5144,6 +5244,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5186,6 +5287,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5228,6 +5330,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5270,6 +5373,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5312,6 +5416,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5372,6 +5477,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5420,6 +5526,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5462,6 +5569,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5504,6 +5612,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5566,6 +5675,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -5622,6 +5732,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5679,6 +5790,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5753,6 +5865,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5845,6 +5958,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5907,6 +6021,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5957,6 +6072,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -5995,6 +6111,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -6034,6 +6151,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -6096,6 +6214,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -6139,6 +6258,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "Windows protects this key, and Windows 11 23H2 and later no longer auto-install Chat.",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -6177,6 +6297,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -6226,6 +6347,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -6276,6 +6398,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -6336,6 +6459,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -6373,6 +6497,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -6415,6 +6540,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -6463,6 +6589,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -6505,6 +6632,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -6547,6 +6675,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -6589,6 +6718,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -6626,6 +6756,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -6663,6 +6794,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -6791,6 +6923,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -6937,6 +7070,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -7053,6 +7187,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -7235,6 +7370,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -7381,6 +7517,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -7443,6 +7580,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -7491,6 +7629,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -7543,6 +7682,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -7580,6 +7720,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -7617,6 +7758,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -7654,6 +7796,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -7691,6 +7834,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -7728,6 +7872,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -7770,6 +7915,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -7818,6 +7964,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -7860,6 +8007,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -7902,6 +8050,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -7944,6 +8093,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -7986,6 +8136,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8028,6 +8179,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8070,6 +8222,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8107,6 +8260,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -8150,6 +8304,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8193,6 +8348,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8235,6 +8391,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8283,6 +8440,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8326,6 +8484,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8369,6 +8528,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8456,6 +8616,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8497,6 +8658,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8539,6 +8701,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8581,6 +8744,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8623,6 +8787,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8671,6 +8836,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8713,6 +8879,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8755,6 +8922,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8803,6 +8971,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8845,6 +9014,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8887,6 +9057,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8929,6 +9100,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -8966,6 +9138,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -9020,6 +9193,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -9062,6 +9236,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -9110,6 +9285,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -9152,6 +9328,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -9189,6 +9366,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -9231,6 +9409,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -9281,6 +9460,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -9324,6 +9504,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -9367,6 +9548,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -9415,6 +9597,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -9458,6 +9641,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -9504,6 +9688,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -9589,6 +9774,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -9631,6 +9817,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -9679,6 +9866,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -9739,6 +9927,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -9787,6 +9976,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -9824,6 +10014,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -9861,6 +10052,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -9898,6 +10090,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -9935,6 +10128,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -9977,6 +10171,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10025,6 +10220,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10067,6 +10263,7 @@
 
                  ],
         "conflict":  "taskbar grouping",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10109,6 +10306,7 @@
 
                  ],
         "conflict":  "taskbar grouping",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10151,6 +10349,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10193,6 +10392,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10235,6 +10435,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10277,6 +10478,7 @@
 
                  ],
         "conflict":  "Explorer opens to",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10319,6 +10521,7 @@
 
                  ],
         "conflict":  "drive letters",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10361,6 +10564,7 @@
 
                  ],
         "conflict":  "drive letters",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10403,6 +10607,7 @@
 
                  ],
         "conflict":  "drive letters",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10445,6 +10650,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10482,6 +10688,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -10524,6 +10731,7 @@
 
                  ],
         "conflict":  "All apps view",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10566,6 +10774,7 @@
 
                  ],
         "conflict":  "All apps view",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10608,6 +10817,7 @@
 
                  ],
         "conflict":  "All apps view",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10650,6 +10860,7 @@
 
                  ],
         "conflict":  "search style",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10692,6 +10903,7 @@
 
                  ],
         "conflict":  "search style",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10734,6 +10946,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10774,6 +10987,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
@@ -10816,6 +11030,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10864,6 +11079,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10912,6 +11128,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10955,6 +11172,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "NtfsMemoryUsage is ignored by the dynamic paged pool of 64-bit Windows 10 and 11.",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -10998,6 +11216,7 @@
                      "hdd"
                  ],
         "conflict":  "",
+        "retired":  "Windows already grows the MFT zone as needed; no measurable gain.",
         "script":  {
                        "apply":  false,
                        "undo":  false,
@@ -11036,6 +11255,7 @@
 
                  ],
         "conflict":  "",
+        "retired":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,

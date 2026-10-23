@@ -1,11 +1,11 @@
 # Hardware-aware tweaks. Tagged 'smart': the auto-detect plan picks them only when the machine fits (-Need / -MinRamGB / -SSDOnly).
 $P = 'Performance'
 
-T -Id 'perf-ntfs-memory' -Cat $P -Name 'NTFS: larger file-system cache pool (16 GB+ RAM)' -Tags max, smart -MinRamGB 15.5 `
+T -Id 'perf-ntfs-memory' -Retired 'NtfsMemoryUsage is ignored by the dynamic paged pool of 64-bit Windows 10 and 11.' -Cat $P -Name 'NTFS: larger file-system cache pool (16 GB+ RAM)' -Tags max, smart -MinRamGB 15.5 `
   -Desc 'NtfsMemoryUsage = 2 lets NTFS keep more metadata in non-paged memory. Faster file listing and builds on busy drives; costs a little RAM.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' 'NtfsMemoryUsage' 2 ) -Restart
 
-T -Id 'perf-mftzone' -Cat $P -Name 'NTFS: bigger MFT zone on hard disks' -Tags max, smart -Need hdd `
+T -Id 'perf-mftzone' -Retired 'Windows already grows the MFT zone as needed; no measurable gain.' -Cat $P -Name 'NTFS: bigger MFT zone on hard disks' -Tags max, smart -Need hdd `
   -Desc 'NtfsMftZoneReservation = 2 reserves 25% of the volume for the file table so it fragments less. Helps HDDs with many small files; ignored on SSDs.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' 'NtfsMftZoneReservation' 2 ) -Restart
 

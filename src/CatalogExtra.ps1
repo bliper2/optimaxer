@@ -26,14 +26,14 @@ T -Id 'perf-sleepstudy' -Cat $P -Name 'Disable SleepStudy and power diagnostic l
   -Apply { param($d) foreach ($l in $global:OptiSleepLogs) { if ($null -ne (Get-EventLogState $l)) { Invoke-Wevtutil @('set-log', $l, '/e:false') } } } `
   -Undo  { param($d) Restore-EventLogStates $d }
 
-T -Id 'perf-paging' -Cat $P -Name 'Keep kernel in RAM (16 GB+ only)' -Tags optin -Risk Advanced -Restart -MinRamGB 15.5 `
+T -Id 'perf-paging' -Retired 'DisablePagingExecutive has no measurable effect on a PC with enough RAM.' -Cat $P -Name 'Keep kernel in RAM (16 GB+ only)' -Tags optin -Risk Advanced -Restart -MinRamGB 15.5 `
   -Desc 'DisablePagingExecutive + DisablePageCombining: kernel and drivers are never paged out. Not recommended on Windows 11: it raises committed memory for little measurable gain, because Windows rarely pages kernel code on a PC with enough RAM.' `
   -Reg @(
       Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' 'DisablePagingExecutive' 1
       Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' 'DisablePageCombining' 1
   )
 
-T -Id 'perf-svchostsplit' -Cat $P -Name 'Do not split service hosts (fewer svchost processes)' -Tags max -Risk Moderate -Restart `
+T -Id 'perf-svchostsplit' -Retired 'Trades service isolation for a few MB of RAM; no measurable speed gain.' -Cat $P -Name 'Do not split service hosts (fewer svchost processes)' -Tags max -Risk Moderate -Restart `
   -Desc 'Services share svchost processes again instead of one process each: roughly 50-70 fewer processes and a little less RAM. Xbox services are left alone.' `
   -Apply {
       $done = @()
@@ -78,7 +78,7 @@ T -Id 'perf-maintenance' -Cat $P -Name 'Automatic Maintenance: never wake the PC
   -Desc 'Scheduled maintenance still runs when the PC is on, but it can no longer wake it from sleep at night.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Task Scheduler\Maintenance' 'WakeUp' 0 )
 
-T -Id 'perf-iconcache' -Cat $P -Name 'Bigger icon cache (4 MB)' -Tags max -Explorer `
+T -Id 'perf-iconcache' -Retired 'Max Cached Icons has no measurable effect on Windows 10 and 11.' -Cat $P -Name 'Bigger icon cache (4 MB)' -Tags max -Explorer `
   -Desc 'Explorer keeps more icons in memory, so big folders redraw faster.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer' 'Max Cached Icons' '4096' 'String' )
 
@@ -132,7 +132,7 @@ T -Id 'priv-ceip' -Cat $V -Name 'Disable Customer Experience Improvement Program
   -Desc 'Turns off CEIP / SQM data collection for Windows and App-V.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Policies\Microsoft\SQMClient\Windows' 'CEIPEnable' 0; Rg 'HKLM:\SOFTWARE\Policies\Microsoft\AppV\CEIP' 'CEIPEnable' 0 )
 
-T -Id 'priv-difftrace' -Cat $V -Name 'Disable diagnostic tracing' -Tags privacy, max `
+T -Id 'priv-difftrace' -Retired 'Windows protects this key; the value cannot be written even as administrator.' -Cat $V -Name 'Disable diagnostic tracing' -Tags privacy, max `
   -Desc 'Turns off Windows performance diagnostic tracing sessions.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Diagnostics\Performance' 'DisableDiagnosticTracing' 1 )
 
@@ -339,7 +339,7 @@ T -Id 'debloat-spotlight' -Cat $D -Name 'Turn off Windows Spotlight and lock-scr
       Rg 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableWindowsSpotlightFeatures' 1
   )
 
-T -Id 'debloat-teamsauto' -Cat $D -Name 'Stop Teams (Chat) from auto-installing' -Tags max, deai `
+T -Id 'debloat-teamsauto' -Retired 'Windows protects this key, and Windows 11 23H2 and later no longer auto-install Chat.' -Cat $D -Name 'Stop Teams (Chat) from auto-installing' -Tags max, deai `
   -Desc 'Prevents Windows from silently installing the consumer Teams app on new sessions and updates.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Communications' 'ConfigureChatAutoInstall' 0 )
 

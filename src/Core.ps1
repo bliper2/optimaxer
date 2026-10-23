@@ -488,6 +488,21 @@ function Find-SharedOriginal {
     return $null
 }
 
+function Find-SharedOwner {
+    # Id of another saved tweak that also changed this registry value / service / task, or $null.
+    param($State, [string]$ExceptId, [string]$Kind, [string]$Key1, [string]$Key2)
+    foreach ($id in $State.Keys) {
+        if ($id -eq $ExceptId) { continue }
+        $rec = $State[$id]
+        switch ($Kind) {
+            'Reg'  { foreach ($r in @($rec.Reg))  { if ($r.P -eq $Key1 -and $r.N -eq $Key2) { return $id } } }
+            'Svc'  { foreach ($s in @($rec.Svc))  { if ($s.Name -eq $Key1) { return $id } } }
+            'Task' { foreach ($t in @($rec.Task)) { if ($t.Full -eq $Key1) { return $id } } }
+        }
+    }
+    return $null
+}
+
 function Invoke-TweakApply {
     # Order matters for undo: every original value (registry, services, tasks and the tweak's own -Snapshot script)
     # is read first and the record is written to state.json BEFORE the first change. A step that fails later
@@ -576,9 +591,23 @@ function Invoke-TweakUndo {
     $rec = $state[$T.Id]
     $failed = @()
     if ($rec) {
-        foreach ($r in @($rec.Reg)) { if (-not (Restore-RegSnapshot $r)) { $failed += "registry $($r.P)\$($r.N)" } }
-        foreach ($s in @($rec.Svc)) { if (-not (Set-SvcStart $s.Name $s.Start $s.Delayed)) { $failed += "service $($s.Name)" } }
-        foreach ($tk in @($rec.Task)) { if ($tk.Enabled -and -not (Set-TaskEnabled $tk.Full $true)) { $failed += "task $($tk.Full)" } }
+        # A value another applied tweak also changed stays as it is until that tweak is undone too; restoring it now
+        # would silently switch the other tweak off. The last one undone puts the original back.
+        foreach ($r in @($rec.Reg)) {
+            $owner = Find-SharedOwner $state $T.Id 'Reg' $r.P $r.N
+            if ($owner) { Write-Log "  kept $($r.P)\$($r.N): still used by $owner"; continue }
+            if (-not (Restore-RegSnapshot $r)) { $failed += "registry $($r.P)\$($r.N)" }
+        }
+        foreach ($s in @($rec.Svc)) {
+            $owner = Find-SharedOwner $state $T.Id 'Svc' $s.Name
+            if ($owner) { Write-Log "  kept service $($s.Name): still used by $owner"; continue }
+            if (-not (Set-SvcStart $s.Name $s.Start $s.Delayed)) { $failed += "service $($s.Name)" }
+        }
+        foreach ($tk in @($rec.Task)) {
+            $owner = Find-SharedOwner $state $T.Id 'Task' $tk.Full
+            if ($owner) { Write-Log "  kept task $($tk.Full): still used by $owner"; continue }
+            if ($tk.Enabled -and -not (Set-TaskEnabled $tk.Full $true)) { $failed += "task $($tk.Full)" }
+        }
     } elseif ($T.Reg.Count -or $T.Svc.Count -or $T.Task.Count) {
         Write-Log '  no saved original values for this tweak (was it applied by Optimaxer?)' 'WARN'
     }
@@ -1349,7 +1378,7 @@ function Get-PresetTweakIds {
     param([string]$Preset, $Traits)
     if ($Preset -eq 'auto') { return @((Get-SmartPlan $Traits).Ids) }
     $ids = foreach ($t in $global:OptiCatalog) {
-        if ($t.Tags -contains 'optin') { continue }
+        if ($t.Tags -contains 'optin' -or $t.Retired) { continue }
         if (-not (Test-TweakFits $t $Traits)) { continue }
         if ($t.Tags -contains $Preset) { $t.Id }
     }
@@ -1357,12 +1386,13 @@ function Get-PresetTweakIds {
 }
 
 function Test-AutoPick {
-    # The one rule every automatic plan uses (Smart optimize, -Preset auto, the desktop app): Risk must be Safe, and
-    # the tweak must be in the recommended set or be a hardware-gated 'smart' tweak. Gaming tags never auto-select.
+    # The one rule every automatic plan uses (Smart optimize, -Preset auto, the desktop app). Never: opt-in, retired or
+    # Advanced. Yes: the performance set (tag 'perf', Safe or Moderate; its hardware gate is checked by the caller),
+    # and Safe tweaks from the recommended set or hardware-gated 'smart' tweaks.
     param($T)
-    if ($T.Tags -contains 'optin') { return $false }
-    if ($T.Risk -ne 'Safe') { return $false }
-    return ($T.Tags -contains 'safe') -or ($T.Tags -contains 'smart')
+    if ($T.Tags -contains 'optin' -or $T.Retired -or $T.Risk -eq 'Advanced') { return $false }
+    if ($T.Tags -contains 'perf') { return $true }
+    return ($T.Risk -eq 'Safe') -and (($T.Tags -contains 'safe') -or ($T.Tags -contains 'smart'))
 }
 
 function Get-TweakFitReason {
@@ -1382,16 +1412,17 @@ function Get-TweakFitReason {
 }
 
 function Get-SmartPlan {
-    # Picks tweaks for THIS machine with Test-AutoPick: Safe-risk recommended tweaks plus Safe 'smart' tweaks whose
-    # hardware gate fits. Moderate and Advanced tweaks are never ticked, whatever their tags; nor are opt-in or unfit ones.
+    # Picks tweaks for THIS machine with Test-AutoPick: the performance set where its hardware gate fits, Safe
+    # recommended tweaks and Safe 'smart' tweaks. Advanced, opt-in, retired and unfit tweaks are never ticked; other
+    # Moderate tweaks are left for the user.
     # Returns @{ Ids; Notes; Skipped = @{ id = reason } } - Notes and Skipped explain the choices in plain language.
     param($Traits, $Applied)
     $ids = @(); $notes = New-Object System.Collections.ArrayList; $skipped = @{}
     foreach ($t in $global:OptiCatalog) {
         $why = Get-TweakFitReason $t $Traits
-        $tagged = ($t.Tags -contains 'safe') -or ($t.Tags -contains 'smart') -or ($t.Tags -contains 'gaming')
-        if ($t.Tags -contains 'optin') { continue }
-        if ($t.Risk -ne 'Safe') {
+        $tagged = ($t.Tags -contains 'safe') -or ($t.Tags -contains 'smart') -or ($t.Tags -contains 'gaming') -or ($t.Tags -contains 'perf')
+        if ($t.Tags -contains 'optin' -or $t.Retired) { continue }
+        if ($t.Risk -ne 'Safe' -and -not (Test-AutoPick $t)) {
             # every Moderate or Advanced tweak gets a reason, so the Tweaks page can say why it stayed unticked
             $skipped[$t.Id] = $(if ($why) { "$($t.Risk) risk, and $why" } else { "$($t.Risk) risk: left for you to tick" })
             continue
@@ -1403,11 +1434,11 @@ function Get-SmartPlan {
     }
     $ids = @(Resolve-ConflictIds $ids)
     $tg = @($Traits.Tags)
-    [void]$notes.Add('Only Safe tweaks are ticked. Moderate and Advanced are left for you to tick.')
-    [void]$notes.Add($(if ($tg -contains 'laptop') { 'Laptop: desktop-only tweaks are skipped.' } else { 'Desktop: no power-plan or CPU-power change is ticked; pick those yourself if you want them.' }))
+    [void]$notes.Add('Ticked: the recommended set and the performance tweaks that fit this hardware. Advanced tweaks and other Moderate ones are left for you to tick.')
+    [void]$notes.Add($(if ($tg -contains 'laptop') { 'Laptop: desktop-only tweaks (power throttling, USB/PCIe power saving, timer) are skipped to protect battery life.' } else { 'Desktop: CPU power throttling off, no USB/PCIe link sleep, per-app timer requests honored. The Ultimate plan and 100% minimum CPU stay off (heat, no measured gain).' }))
     [void]$notes.Add($(if ($tg -contains 'ssd') { 'SSD: TRIM check included.' } else { 'Hard disk: SSD-only tweaks are skipped; run Defragment in Tools.' }))
     if ($Traits.RamGB) { [void]$notes.Add(('{0:N0} GB RAM: tweaks that need more memory than this are skipped.' -f $Traits.RamGB)) }
-    if ($tg -contains 'dgpu') { [void]$notes.Add('Discrete GPU found: gaming tweaks are not ticked automatically; use the Gaming preset if you want them.') }
+    [void]$notes.Add($(if ($tg -contains 'dgpu') { 'Discrete GPU: hardware-accelerated GPU scheduling, Game Mode and Game DVR capture off are ticked.' } else { 'No discrete GPU: GPU scheduling is skipped.' }))
     return @{ Ids = @($ids); Notes = @($notes); Skipped = $skipped }
 }
 

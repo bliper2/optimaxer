@@ -218,6 +218,9 @@ fn tweak_notes(t: &Tweak) -> String {
     if !t.conflict.is_empty() {
         n.push(format!("one choice per group: {}", t.conflict));
     }
+    if !t.retired.is_empty() {
+        n.push(format!("retired: {} Undo it to put your old value back", t.retired));
+    }
     n.join(", ")
 }
 
@@ -1096,7 +1099,9 @@ impl OptiUi {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for c in cats {
                 let rows: Vec<&Tweak> = cat.tweaks.iter().filter(|tw| {
-                    tw.cat == c
+                    // a retired tweak is listed only while it has a saved record, so it can still be undone
+                    (tw.retired.is_empty() || self.status.get(&tw.id).copied().unwrap_or(false))
+                        && tw.cat == c
                         && (q.is_empty() || tw.name.to_lowercase().contains(&q) || tw.desc.to_lowercase().contains(&q))
                         && (risk_filter.is_empty() || tw.risk == risk_filter)
                         && in_group(tw, group_filter, self.status.get(&tw.id).copied().unwrap_or(false))

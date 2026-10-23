@@ -396,8 +396,12 @@ $UI.TwSearch.Add_TextChanged({
     $global:OptiFilters['tw'] = $UI.TwSearch.Text
     foreach ($v in $global:TwViews) { $v.Refresh() }
 })
+$retiredSaved = Get-OptiState
 foreach ($t in $global:OptiCatalog) {
+    # a retired tweak is listed only while it has a saved record, so it can still be undone
+    if ($t.Retired -and -not $retiredSaved.ContainsKey($t.Id)) { continue }
     $notes = @()
+    if ($t.Retired) { $notes += "retired: $($t.Retired) Undo it to put your old value back" }
     if ($t.DesktopOnly) { $notes += 'desktop PCs' }
     if ($t.SSDOnly) { $notes += 'SSD only' }
     if ($t.Vendor) { $notes += "$($t.Vendor) systems only" }
@@ -1086,7 +1090,7 @@ $global:Tools = [ordered]@{
     gameundo = @{ Title = 'Remove per-game profiles';   Desc = 'Puts back the GPU and compatibility values each game had before.' }
     searchex = @{ Title = 'Search: skip build folders'; Desc = 'Finds node_modules, .git, target and build folders in your profile and excludes them from Windows Search. The indexer stays on. Run again with none ticked to undo.' }
     wake     = @{ Title = 'Wake sources';               Desc = 'Lists devices and scheduled tasks that can wake this PC. You pick what to disarm; update and Defender tasks are never offered. Run again to re-arm.' }
-    sample   = @{ Title = 'Before/after sample';        Desc = 'Records the last boot time and a 10-second idle CPU sample. Take one before tweaking and one after a restart. A sample, not an FPS benchmark.' }
+    measure  = @{ Title = 'Measure (before / after)';   Desc = 'Real numbers from this PC: frame times of a running game with Intel PresentMon (average FPS, 1% and 0.1% lows, stutters), DPC and interrupt load, timer, ping jitter and boot time. Measure before, optimize and restart, then measure after.' }
     revert  = @{ Title = 'Undo ALL Optimaxer tweaks';   Desc = 'Restores every setting changed by this tool to its original value.'; Danger = $true }
 }
 
@@ -1313,7 +1317,22 @@ function Invoke-FeatureTool {
                 [void](Start-OptiJob 'Disarming wake sources' -ArgList @($dev, $tsk) -Script { param($d, $t) Disable-WakeSources $d $t })
             })
         }
-        'sample' { [void](Start-OptiJob 'Taking a before/after sample (10 s, keep the PC idle)' -Script { Save-OptiEvidence } -OnDone { $UI.EvidenceInfo.Text = Get-EvidenceText }) }
+        'measure' {
+            # which run this is, and optionally one game that is running now to record for 30 s
+            $hasBefore = @(Get-OptiMeasurements | Where-Object Label -eq 'before').Count -gt 0
+            $items = @(@{ Key = 'label|after'; Label = 'This is the AFTER measurement (leave unticked for BEFORE)'; Checked = $hasBefore })
+            $procs = @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.ProcessName -notin 'explorer', 'powershell', 'ApplicationFrameHost', 'TextInputHost', 'SystemSettings' } | Sort-Object ProcessName -Unique)
+            foreach ($p in $procs) { $items += @{ Key = "proc|$($p.ProcessName)"; Label = "Record frames of: $($p.ProcessName)  ($($p.MainWindowTitle))"; Checked = $false } }
+            $pick = Show-PickList 'Measure' 'Tick a running game to record 30 s of its frames with PresentMon (switch to the game right after you press Measure and keep playing the same scene). With no game ticked, only latency, timer and boot time are measured.' $items 'Measure'
+            if ($null -eq $pick) { return }
+            $label = if ($pick -contains 'label|after') { 'after' } else { 'before' }
+            $proc = @($pick | Where-Object { $_ -like 'proc|*' } | ForEach-Object { $_.Substring(5) })[0]
+            [void](Start-OptiJob "Measuring ($label)" -ArgList @($label, $proc) -Script {
+                param($label, $proc)
+                [void](Save-OptiMeasurement -Label $label -Process $proc -Seconds 30)
+                foreach ($l in Compare-OptiMeasurements) { Write-Log "  $l" 'OK' }
+            } -OnDone { $UI.EvidenceInfo.Text = Get-EvidenceText })
+        }
     }
 }
 
@@ -1330,7 +1349,7 @@ function Invoke-Tool {
     if (-not (Test-Elevated)) { return }
     if ($Key -eq 'defrag' -and -not (Confirm-Action 'Defragmenting hard disks can take an hour or more and the app stays busy until it finishes. Continue?')) { return }
     if ($Key -eq 'revert' -and -not (Confirm-Action 'Restore ALL settings changed by Optimaxer to their original values?')) { return }
-    if ($Key -in 'bootcost', 'gameprof', 'gameundo', 'searchex', 'wake', 'sample') { Invoke-FeatureTool $Key; return }
+    if ($Key -in 'bootcost', 'gameprof', 'gameundo', 'searchex', 'wake', 'measure') { Invoke-FeatureTool $Key; return }
     $after = if ($Key -eq 'revert') { { Update-TweakStatus } } else { $null }
     [void](Start-OptiJob $global:Tools[$Key].Title -Catalog:($Key -eq 'revert') -Script $toolJobs[$Key] -OnDone $after)
 }

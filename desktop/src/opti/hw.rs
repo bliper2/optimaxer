@@ -283,22 +283,22 @@ pub fn resolve_conflicts(cat: &Catalog, ids: Vec<String>) -> Vec<String> {
 
 /// Ids of the tweaks a preset button selects on this machine. Opt-in tweaks never; one per conflict group.
 pub fn preset_ids(cat: &Catalog, tr: &Traits, preset: &str) -> Vec<String> {
-    let ids = cat.tweaks.iter().filter(|t| !t.has_tag("optin") && fits(t, tr) && t.has_tag(preset)).map(|t| t.id.clone()).collect();
+    let ids = cat.tweaks.iter().filter(|t| !t.has_tag("optin") && t.retired.is_empty() && fits(t, tr) && t.has_tag(preset)).map(|t| t.id.clone()).collect();
     resolve_conflicts(cat, ids)
 }
 
-/// Auto-detect with the same rule as the PowerShell Get-SmartPlan (`Tweak::auto_pick`): Safe-risk recommended
-/// tweaks plus Safe 'smart' tweaks whose hardware gate fits. Moderate and Advanced are never ticked, whatever their
-/// tags; every one of them gets a reason in `skipped`. Opt-in, unfit and already applied tweaks never appear.
+/// Auto-detect with the same rule as the PowerShell Get-SmartPlan (`Tweak::auto_pick`): the performance set where
+/// its hardware gate fits, Safe recommended tweaks and Safe 'smart' tweaks. Advanced, opt-in, retired, unfit and
+/// already applied tweaks never appear; every other Moderate tweak gets a reason in `skipped`.
 pub fn smart_plan(cat: &Catalog, tr: &Traits, applied: &HashMap<String, bool>) -> Plan {
     let mut ids = Vec::new();
     let mut skipped = BTreeMap::new();
     for t in &cat.tweaks {
-        if t.has_tag("optin") {
+        if t.has_tag("optin") || !t.retired.is_empty() {
             continue;
         }
         let why = fit_reason(t, tr);
-        if t.risk != "Safe" {
+        if t.risk != "Safe" && !t.auto_pick() {
             let r = match &why {
                 Some(w) => format!("{} risk, and {w}", t.risk),
                 None => format!("{} risk: left for you to tick", t.risk),
@@ -306,7 +306,7 @@ pub fn smart_plan(cat: &Catalog, tr: &Traits, applied: &HashMap<String, bool>) -
             skipped.insert(t.id.clone(), r);
             continue;
         }
-        let listed = t.has_tag("safe") || t.has_tag("smart") || t.has_tag("gaming");
+        let listed = t.has_tag("safe") || t.has_tag("smart") || t.has_tag("gaming") || t.has_tag("perf");
         if let Some(w) = why {
             if listed {
                 skipped.insert(t.id.clone(), format!("does not fit: {w}"));
@@ -318,15 +318,17 @@ pub fn smart_plan(cat: &Catalog, tr: &Traits, applied: &HashMap<String, bool>) -
         }
     }
     let ids = resolve_conflicts(cat, ids);
-    let mut notes = vec!["Only Safe tweaks are ticked. Moderate and Advanced are left for you to tick.".to_string()];
-    notes.push(if tr.laptop { "Laptop: desktop-only tweaks are skipped.".into() } else { "Desktop: no power-plan or CPU-power change is ticked; pick those yourself if you want them.".into() });
+    let mut notes = vec!["Ticked: the recommended set and the performance tweaks that fit this hardware. Advanced tweaks and other Moderate ones are left for you to tick.".to_string()];
+    notes.push(if tr.laptop {
+        "Laptop: desktop-only tweaks (power throttling, USB/PCIe power saving, timer) are skipped to protect battery life.".into()
+    } else {
+        "Desktop: CPU power throttling off, no USB/PCIe link sleep, per-app timer requests honored. The Ultimate plan and 100% minimum CPU stay off (heat, no measured gain).".into()
+    });
     notes.push(if tr.ssd { "SSD: TRIM check included.".into() } else { "Hard disk: SSD-only tweaks are skipped; run a defrag from Windows.".into() });
     if tr.ram_gb > 0.0 {
         notes.push(format!("{:.0} GB RAM: tweaks that need more memory than this are skipped.", tr.ram_gb));
     }
-    if tr.has("dgpu") {
-        notes.push("Discrete GPU found: gaming tweaks are not ticked automatically; use the Gaming preset if you want them.".into());
-    }
+    notes.push(if tr.has("dgpu") { "Discrete GPU: hardware-accelerated GPU scheduling, Game Mode and Game DVR capture off are ticked.".into() } else { "No discrete GPU: GPU scheduling is skipped.".into() });
     Plan { ids, notes, skipped }
 }
 
@@ -407,23 +409,27 @@ mod tests {
         let pc = traits(false, true, 63.8, 28, &["NVIDIA GeForce RTX 3090"]);
         let plan = smart_plan(&cat, &pc, &HashMap::new());
         assert!(!plan.ids.is_empty());
-        for id in ["perf-timer", "perf-cpupower", "net-nagle", "perf-prefetch", "perf-ultimate", "perf-hags", "perf-fth", "game-mode"] {
+        for id in ["perf-hags", "perf-powerthrottle", "perf-usbpcie", "perf-globaltimer", "game-mode", "game-dvr"] {
+            assert!(plan.ids.iter().any(|i| i == id), "{id} was not selected");
+        }
+        for id in ["perf-timer", "perf-cpupower", "net-nagle", "perf-prefetch", "perf-ultimate", "perf-fth", "game-windowed", "game-mouse"] {
             assert!(!plan.ids.iter().any(|i| i == id), "{id} was selected");
         }
         for id in &plan.ids {
             let t = cat.find(id).unwrap();
-            assert_eq!(t.risk, "Safe", "{id}");
-            assert!(t.auto_pick(), "{id}");
+            assert!(t.auto_pick() && t.risk != "Advanced", "{id}");
+            assert!(t.risk == "Safe" || t.has_tag("perf"), "{id} is Moderate without the perf tag");
         }
-        assert!(plan.skipped["perf-hags"].contains("Moderate"));
-        assert!(plan.notes.iter().any(|n| n.contains("Moderate and Advanced are left for you to tick")));
-        // every Moderate or Advanced tweak that is not opt-in says why it stayed unticked
-        for t in cat.tweaks.iter().filter(|t| t.risk != "Safe" && !t.has_tag("optin")) {
+        assert!(plan.notes.iter().any(|n| n.contains("other Moderate ones are left for you to tick")));
+        // every other Moderate or Advanced tweak that is not opt-in says why it stayed unticked
+        for t in cat.tweaks.iter().filter(|t| t.risk != "Safe" && !t.has_tag("optin") && t.retired.is_empty() && !t.auto_pick()) {
             assert!(plan.skipped.contains_key(&t.id), "{} has no reason", t.id);
         }
-        // the 5060 Ti answer is the same
-        let other = smart_plan(&cat, &traits(false, true, 32.0, 16, &["NVIDIA GeForce RTX 5060 Ti"]), &HashMap::new());
-        assert!(other.ids.iter().all(|i| cat.find(i).unwrap().risk == "Safe"));
+        // a laptop gets none of the desktop power tweaks
+        let lap = smart_plan(&cat, &traits(true, true, 16.0, 16, &["NVIDIA GeForce RTX 4060 Laptop GPU"]), &HashMap::new());
+        for id in ["perf-powerthrottle", "perf-usbpcie", "perf-globaltimer"] {
+            assert!(!lap.ids.iter().any(|i| i == id), "{id} on a laptop");
+        }
     }
 
     #[test]
