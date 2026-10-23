@@ -77,4 +77,6 @@ This folder is GPL-3.0 (see `LICENSE` here) because the Store client is derived 
 
 ## Credits
 
-Optimaxer is MIT licensed, with tweak ideas from WinUtil and Win11Debloat (both MIT, see Optimaxer's `THIRD-PARTY-NOTICES.md`). The app catalog is the Orion Data project.
+The Store half is built on [Orion Store](https://github.com/RookieEnough/Orion-Store) by RookieEnough (GPL-3.0): the client code, the embedded offline catalog and the catalog format. Live catalog data comes from [Orion-Data](https://github.com/RookieEnough/Orion-Data). Thank you to everyone who works on it.
+
+Optimaxer is MIT licensed, with tweak ideas from WinUtil and Win11Debloat (both MIT, see Optimaxer's `THIRD-PARTY-NOTICES.md`).
