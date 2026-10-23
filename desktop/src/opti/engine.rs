@@ -268,19 +268,27 @@ impl<'a> Engine<'a> {
         let mut failed = Vec::new();
         match &rec {
             Some(rec) => {
+                // a value another applied tweak also changed stays until that tweak is undone too (same as PowerShell)
                 for r in &rec.reg {
+                    if find_shared_reg(state, &t.id, &r.p, &r.n).is_some() {
+                        log(&format!("  kept {}\\{}: another applied tweak still uses it", r.p, r.n));
+                        continue;
+                    }
                     if !restore_reg(self.sys, r, log) {
                         failed.push(format!("registry {}\\{}", r.p, r.n));
                     }
                 }
                 for s in &rec.svc {
+                    if find_shared_svc(state, &t.id, &s.name).is_some() {
+                        continue;
+                    }
                     if !self.sys.svc_set(&s.name, s.start as u32, s.delayed != 0) {
                         log(&format!("  WARN service {}: could not restore", s.name));
                         failed.push(format!("service {}", s.name));
                     }
                 }
                 for tk in &rec.task {
-                    if tk.enabled != 0 {
+                    if tk.enabled != 0 && find_shared_task(state, &t.id, &tk.full).is_none() {
                         if let Err(e) = self.sys.task_set(&tk.full, true) {
                             log(&format!("  WARN task {}: {e}", tk.full));
                             failed.push(format!("task {}", tk.full));
@@ -431,6 +439,8 @@ mod tests {
             assert_eq!(st.records["b"].reg[0].value, serde_json::json!(9));
             let (x, y) = if first_a { (&a, &b) } else { (&b, &a) };
             e.undo(x, &mut st, &mut |_| {});
+            assert_eq!(sys.reg_get(K, "Shared"), Some(RegData::Dword(0)), "the first undo must keep the value the other tweak still needs");
+            assert!(e.test(y, &st));
             e.undo(y, &mut st, &mut |_| {});
             assert_eq!(sys.reg_get(K, "Shared"), Some(RegData::Dword(9)), "undo order a-first={first_a}");
         }

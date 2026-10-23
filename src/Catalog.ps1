@@ -4,7 +4,9 @@
 # Automatic plans (Smart optimize, -Preset auto) take only Risk 'Safe' tweaks tagged safe or smart; see Test-AutoPick.
 # -Snapshot reads the original values a script tweak needs for undo. It runs before anything changes, its result is
 # saved first, and it is passed to both -Apply and -Undo. -Conflict names a group of tweaks that write the same setting
-# (only one of them can be ticked).
+# (only one of them can be ticked). -Retired keeps a tweak that no longer has a measurable effect (or that Windows
+# blocks) only so an earlier apply can still be undone: it is hidden unless it has a saved record, and never ticked.
+# Tag 'perf' marks the performance tweaks Smart optimize may tick on hardware they fit, even at Moderate risk.
 
 $global:OptiCatalog = New-Object System.Collections.ArrayList
 
@@ -15,12 +17,12 @@ function T {
     param(
         [string]$Id, [string]$Name, [string]$Desc, [string]$Cat, [string]$Risk = 'Safe', [string[]]$Tags = @(),
         [object[]]$Reg = @(), [object[]]$Svc = @(), [string[]]$Task = @(),
-        [scriptblock]$Apply, [scriptblock]$Undo, [scriptblock]$Test, [scriptblock]$Snapshot, [string]$Conflict = '',
+        [scriptblock]$Apply, [scriptblock]$Undo, [scriptblock]$Test, [scriptblock]$Snapshot, [string]$Conflict = '', [string]$Retired = '',
         [switch]$Restart, [switch]$Explorer, [switch]$DesktopOnly, [switch]$SSDOnly, [string]$Vendor = '', [double]$SvcTol = 1.0, [double]$MinRamGB = 0, [string[]]$Need = @()
     )
     [void]$global:OptiCatalog.Add([pscustomobject]@{
         Id = $Id; Name = $Name; Desc = $Desc; Cat = $Cat; Risk = $Risk; Tags = $Tags
-        Reg = $Reg; Svc = $Svc; Task = $Task; Apply = $Apply; Undo = $Undo; Test = $Test; Snapshot = $Snapshot; Conflict = $Conflict
+        Reg = $Reg; Svc = $Svc; Task = $Task; Apply = $Apply; Undo = $Undo; Test = $Test; Snapshot = $Snapshot; Conflict = $Conflict; Retired = $Retired
         Restart = [bool]$Restart; Explorer = [bool]$Explorer; DesktopOnly = [bool]$DesktopOnly; SSDOnly = [bool]$SSDOnly; Vendor = $Vendor; SvcTol = $SvcTol; MinRamGB = $MinRamGB; Need = $Need
     })
 }
@@ -94,7 +96,7 @@ T -Id 'perf-priosep' -Cat $P -Name 'Prioritize foreground apps' -Tags optin -Ris
   -Desc 'Win32PrioritySeparation = 0x26: short, fixed quanta with a strong foreground boost. Not recommended on Windows 11: it changes scheduling for every process on the PC, not only games, and the Windows default already favours the foreground app.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl' 'Win32PrioritySeparation' 38 )
 
-T -Id 'perf-powerthrottle' -Cat $P -Name 'Disable CPU power throttling' -Tags max -Risk Moderate -DesktopOnly `
+T -Id 'perf-powerthrottle' -Cat $P -Name 'Disable CPU power throttling' -Tags max, perf -Risk Moderate -DesktopOnly `
   -Desc 'Stops Windows from throttling background-process CPU speed. Useful on desktops; costs battery on laptops.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling' 'PowerThrottlingOff' 1 )
 
@@ -141,7 +143,7 @@ T -Id 'perf-cpupower' -Cat $P -Name 'CPU: no core parking, always full speed (pl
         @{ Sub = '54533251-82be-4824-96c1-47b60b740d00'; Set = '0cc5b647-c1df-4637-891a-dec35c318583'; Val = 100 }
         @{ Sub = '54533251-82be-4824-96c1-47b60b740d00'; Set = 'bc5038f7-23e0-4960-96da-33abaf5935ec'; Val = 100 }) }
 
-T -Id 'perf-usbpcie' -Cat $P -Name 'No USB selective suspend / PCIe link power saving' -Tags max -DesktopOnly `
+T -Id 'perf-usbpcie' -Cat $P -Name 'No USB selective suspend / PCIe link power saving' -Tags max, perf -DesktopOnly `
   -Desc 'Prevents devices and GPU links from sleeping mid-use: fixes USB stutter/disconnects and PCIe latency spikes.' `
   -Apply { Set-PowerAC @(
         @{ Sub = '2a737441-1930-4402-8d77-b2bebba308a3'; Set = '48e6b7a6-50f5-4782-a5d4-53bb8f07e226'; Val = 0 }
@@ -158,7 +160,7 @@ T -Id 'perf-timer' -Cat $P -Name 'Low-latency timer (disable dynamic tick)' -Tag
   -Undo  { param($d) Restore-BcdTimerValues $d } `
   -Test  { (Get-BcdTimerValues).disabledynamictick -eq 'Yes' }
 
-T -Id 'perf-hags' -Cat $P -Name 'Hardware-accelerated GPU scheduling' -Tags max -Risk Moderate -Restart -Need dgpu `
+T -Id 'perf-hags' -Cat $P -Name 'Hardware-accelerated GPU scheduling' -Tags max, perf -Risk Moderate -Restart -Need dgpu `
   -Desc 'Lets the GPU manage its own VRAM scheduling. Lower latency on modern NVIDIA/AMD GPUs (needs recent drivers).' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers' 'HwSchMode' 2 )
 
@@ -166,7 +168,7 @@ T -Id 'perf-vbs' -Cat $P -Name 'Disable Memory Integrity (VBS/HVCI)' -Tags optin
   -Desc 'WARNING: lowers kernel security. Can give 5-10% FPS in some games. Only for dedicated gaming rigs.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' 'Enabled' 0 )
 
-T -Id 'perf-globaltimer' -Cat $P -Name 'Honor per-app timer resolution requests' -Tags max -Risk Moderate -Restart `
+T -Id 'perf-globaltimer' -Cat $P -Name 'Honor per-app timer resolution requests' -Tags max, perf -Risk Moderate -Restart -DesktopOnly `
   -Desc 'GlobalTimerResolutionRequests = 1 (Windows 11 / Server 2022 behaviour restored): games and tools that request a 0.5 ms timer apply it system-wide again. Slightly higher idle power.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' 'GlobalTimerResolutionRequests' 1 )
 
@@ -186,11 +188,11 @@ T -Id 'perf-mmagent' -Cat $P -Name 'Disable app pre-launch and page combining' -
 
 # ======================================================================= GAMING
 $G = 'Gaming'
-T -Id 'game-mode' -Cat $G -Name 'Enable Game Mode' -Tags gaming, max `
+T -Id 'game-mode' -Cat $G -Name 'Enable Game Mode' -Tags gaming, max, perf `
   -Desc 'Prioritizes the running game and suppresses driver/Windows-Update interruptions.' `
   -Reg @( Rg 'HKCU:\Software\Microsoft\GameBar' 'AutoGameModeEnabled' 1; Rg 'HKCU:\Software\Microsoft\GameBar' 'AllowAutoGameMode' 1 )
 
-T -Id 'game-dvr' -Cat $G -Name 'Disable Game DVR background capture (this account)' -Tags gaming, max `
+T -Id 'game-dvr' -Cat $G -Name 'Disable Game DVR background capture (this account)' -Tags gaming, max, perf `
   -Desc 'Stops Xbox Game Bar background recording for your account: saved clips, microphone and cursor capture. Game Bar itself still opens. Nothing machine-wide is changed; that is the separate opt-in "Game DVR machine policy".' `
   -Reg @(
       Rg $GCS 'GameDVR_Enabled' 0
@@ -226,7 +228,7 @@ T -Id 'game-windowed' -Cat $G -Name 'Optimizations for windowed games' -Risk Mod
   -Desc 'Enables flip-model presentation for borderless/windowed DirectX 10/11 games: lower latency, VRR support. It replaces the whole DirectX user setting, so an existing Auto HDR choice (AutoHDREnable=1) is removed until you undo it.' `
   -Reg @( Rg 'HKCU:\Software\Microsoft\DirectX\UserGpuPreferences' 'DirectXUserGlobalSettings' 'SwapEffectUpgradeEnable=1;' 'String' )
 
-T -Id 'game-mmcss' -Cat $G -Name 'Multimedia scheduler: favor games and remove network throttle' -Tags max `
+T -Id 'game-mmcss' -Retired 'NetworkThrottlingIndex and SystemResponsiveness only affect multimedia-class scheduling; no measured game benefit.' -Cat $G -Name 'Multimedia scheduler: favor games and remove network throttle' -Tags max `
   -Desc 'MMCSS Games task gets high GPU/CPU priority and network throttling is lifted. Standard low-latency setup.' `
   -Reg @(
       Rg $MMP 'NetworkThrottlingIndex' 4294967295
@@ -411,7 +413,7 @@ T -Id 'priv-wer' -Cat $V -Name 'Disable Windows Error Reporting' -Tags privacy, 
   -Reg @(
       Rg 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' 'Disabled' 1
       Rg "$POL\Windows Error Reporting" 'Disabled' 1
-  ) -Svc @( Sx 'WerSvc' 4 ) -Task @( 'Microsoft\Windows\Windows Error Reporting\QueueReporting' )
+  )
 
 T -Id 'priv-clipboard' -Cat $V -Name 'Disable clipboard cloud sync' -Tags privacy `
   -Desc 'Clipboard history stays local; nothing is synced to your Microsoft account.' `
@@ -508,8 +510,8 @@ T -Id 'ui-thispc' -Conflict 'Explorer opens to' -Cat $I -Name 'Open Explorer to 
   -Reg @( Rg $EXA 'LaunchTo' 1 )
 T -Id 'ui-nohome' -Conflict 'Explorer opens to' -Cat $I -Name 'Hide Home and Gallery in Explorer' -Explorer -Desc 'Removes the Home and Gallery entries from the navigation pane.' `
   -Reg @(
-      Rg 'HKLM:\SOFTWARE\Classes\CLSID\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}' 'System.IsPinnedToNameSpaceTree' 0
-      Rg 'HKLM:\SOFTWARE\Classes\CLSID\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}' 'System.IsPinnedToNameSpaceTree' 0
+      Rg 'HKCU:\Software\Classes\CLSID\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}' 'System.IsPinnedToNameSpaceTree' 0
+      Rg 'HKCU:\Software\Classes\CLSID\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}' 'System.IsPinnedToNameSpaceTree' 0
       Rg $EXA 'LaunchTo' 1
   )
 T -Id 'ui-classicmenu' -Cat $I -Name 'Classic right-click menu (Windows 11)' -Explorer -Risk Safe `

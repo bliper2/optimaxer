@@ -77,6 +77,9 @@ pub struct Tweak {
     pub need: Vec<String>,
     /// Tweaks that write the same setting (search style, drive letters, ...) share a group; only one can be selected.
     pub conflict: String,
+    /// Why the tweak was retired (no measurable effect, or Windows blocks it). Kept only so an earlier apply can be
+    /// undone: hidden unless it has a saved record, never ticked.
+    pub retired: String,
     pub script: ScriptFlags,
     #[serde(skip)]
     pub special: Option<Special>,
@@ -90,10 +93,14 @@ impl Tweak {
         self.tags.iter().any(|t| t == tag)
     }
 
-    /// The rule every automatic plan uses, same as the PowerShell Test-AutoPick: Risk must be Safe, and the tweak must
-    /// be in the recommended set or be a hardware-gated 'smart' tweak. Opt-in never; gaming tags never on their own.
+    /// The rule every automatic plan uses, same as the PowerShell Test-AutoPick. Never: opt-in, retired, Advanced.
+    /// Yes: the performance set (tag 'perf', Safe or Moderate; the caller checks its hardware gate), and Safe tweaks
+    /// from the recommended set or hardware-gated 'smart' tweaks.
     pub fn auto_pick(&self) -> bool {
-        !self.has_tag("optin") && self.risk == "Safe" && (self.has_tag("safe") || self.has_tag("smart"))
+        if self.has_tag("optin") || !self.retired.is_empty() || self.risk == "Advanced" {
+            return false;
+        }
+        self.has_tag("perf") || (self.risk == "Safe" && (self.has_tag("safe") || self.has_tag("smart")))
     }
 }
 
@@ -224,7 +231,11 @@ mod tests {
         for t in c.tweaks.iter().filter(|t| t.has_tag("safe")) {
             assert_eq!(t.risk, "Safe", "{} is tagged safe", t.id);
         }
-        for id in ["perf-prefetch", "perf-paging", "perf-timer", "perf-cpupower", "perf-priosep", "game-mpo", "game-fso", "net-nagle", "perf-bgapps", "perf-memcompress", "perf-fth"] {
+        for t in c.tweaks.iter().filter(|t| t.has_tag("perf")) {
+            assert!(t.risk != "Advanced" && !t.has_tag("optin") && t.retired.is_empty(), "{} in the performance set", t.id);
+        }
+        assert!(c.tweaks.iter().filter(|t| !t.retired.is_empty()).count() >= 7);
+        for id in ["perf-prefetch", "perf-timer", "perf-cpupower", "perf-priosep", "game-mpo", "game-fso", "net-nagle", "perf-bgapps", "perf-memcompress", "perf-fth"] {
             // a few (memory compression) need PowerShell cmdlets and are listed as not ported
             let Some(t) = c.find(id) else {
                 assert!(c.not_ported.iter().any(|s| s.id == id), "{id} missing");

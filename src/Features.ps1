@@ -1,9 +1,10 @@
 # Tools that change settings outside the tweak catalog: boot cost, per-game profiles, Search exclusions, wake sources,
-# Appx checks and the before/after sample. Each change saves what was there first (features.json) and has a Test and
+# Appx checks and measurements (frame times, latency, boot). Each change saves what was there first (features.json) and has a Test and
 # an Undo; Undo ALL in Tools calls Undo-OptiFeatures. Dot-sourced by Core.ps1.
 
 $global:OptiFeaturesPath = Join-Path $global:OptiData 'features.json'
-$global:OptiEvidencePath = Join-Path $global:OptiData 'evidence.json'
+$global:OptiMeasurePath = Join-Path $global:OptiData 'measurements.json'
+$global:OptiToolsDir = Join-Path $global:OptiData 'tools'
 
 function Get-OptiFeatures {
     $h = @{ GameProfiles = @{}; SearchExclusions = @{}; Wake = @{ Devices = @(); Tasks = @() } }
@@ -330,41 +331,167 @@ function Test-AppxGone {
     return $true
 }
 
-# ---------------------------------------------------------------- before/after sample (not an FPS measurement)
-function Get-EvidenceSample {
-    # Last boot time from the Diagnostics-Performance log and the average CPU load over a short idle sample.
-    param([int]$Seconds = 10)
-    $boot = $null; $bootAt = $null
-    try {
-        $e = Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Diagnostics-Performance/Operational'; Id = 100 } -MaxEvents 1 -ErrorAction Stop
-        $boot = [int](Get-EventData $e)['BootTime']; $bootAt = $e.TimeCreated.ToString('s')
-    } catch {}
-    $vals = @()
-    for ($i = 0; $i -lt $Seconds; $i++) {
-        try { $vals += [double](Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'" -ErrorAction Stop).PercentProcessorTime } catch {}
-        Start-Sleep -Seconds 1
-    }
-    $cpu = if ($vals.Count) { [math]::Round(($vals | Measure-Object -Average).Average, 1) } else { $null }
-    return @{ Time = (Get-Date).ToString('s'); BootMs = $boot; BootAt = $bootAt; IdleCpu = $cpu; Seconds = $Seconds }
+# ---------------------------------------------------------------- measurements (Tools > Measure)
+# Real numbers from this PC, saved as labelled runs so before/after can be compared:
+#   frames  : Intel PresentMon (MIT, fetched from its GitHub release on first use, checked against the published
+#             SHA-256) records every frame of a game you name: average FPS, 1% and 0.1% lows, 99th percentile
+#             frame time, stutters.
+#   latency : timer resolution, DPC and interrupt CPU time, ping and jitter to 1.1.1.1.
+#   boot    : the last boot time Windows logged.
+
+function Get-PresentMonPath {
+    $exe = Join-Path $global:OptiToolsDir 'PresentMon.exe'
+    if (Test-Path -LiteralPath $exe) { return $exe }
+    New-Item -ItemType Directory -Path $global:OptiToolsDir -Force | Out-Null
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $r = Invoke-RestMethod -Uri 'https://api.github.com/repos/GameTechDev/PresentMon/releases/latest' -Headers @{ 'User-Agent' = 'Optimaxer' } -TimeoutSec 20 -ErrorAction Stop
+    $asset = @($r.assets | Where-Object { $_.name -like 'PresentMon-*-x64.exe' })[0]
+    if (-not $asset) { throw 'the PresentMon release has no x64 exe' }
+    if ([string]$asset.digest -notmatch '^sha256:(?<h>[0-9a-fA-F]{64})$') { throw 'the PresentMon release has no published checksum' }
+    $want = $Matches['h']
+    $tmp = "$exe.download"
+    Write-Log "Downloading $($asset.name) from GitHub (Intel PresentMon, MIT licence)..."
+    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tmp -UseBasicParsing -TimeoutSec 120 -ErrorAction Stop
+    $got = (Get-FileHash -LiteralPath $tmp -Algorithm SHA256).Hash
+    if ($got -ne $want) { Remove-Item -LiteralPath $tmp -Force; throw "PresentMon rejected: checksum mismatch (expected $want, got $got)" }
+    Move-Item -LiteralPath $tmp -Destination $exe -Force
+    Write-Log 'PresentMon verified (SHA-256).' 'OK'
+    return $exe
 }
 
-function Save-OptiEvidence {
-    # The first sample is "before"; every later one replaces "after".
-    $ev = @{}
-    if (Test-Path -LiteralPath $global:OptiEvidencePath) { try { $o = Get-Content -LiteralPath $global:OptiEvidencePath -Raw | ConvertFrom-Json; if ($o.Before) { $ev.Before = $o.Before }; if ($o.After) { $ev.After = $o.After } } catch {} }
-    $s = Get-EvidenceSample
-    if (-not $ev.Before) { $ev.Before = $s } else { $ev.After = $s }
-    $ev | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $global:OptiEvidencePath -Encoding UTF8
-    Write-Log ("Sample saved as '{0}': last boot {1}, idle CPU {2}% over {3} s." -f $(if ($ev.After) { 'after' } else { 'before' }), $(if ($s.BootMs) { '{0:N1} s' -f ($s.BootMs / 1000) } else { 'not recorded' }), $s.IdleCpu, $s.Seconds) 'OK'
+function Get-FrameStats {
+    # Frame times in ms -> the numbers reviewers use. Lows are the average FPS of the slowest 1% / 0.1% of frames.
+    param([double[]]$FrameTimes)
+    $ft = @($FrameTimes | Where-Object { $_ -gt 0 })
+    if ($ft.Count -lt 10) { return $null }
+    $sorted = @($ft | Sort-Object -Descending)
+    $avg = ($ft | Measure-Object -Average).Average
+    $worst = { param($pct) $n = [math]::Max(1, [int][math]::Floor($sorted.Count * $pct)); 1000 / (($sorted | Select-Object -First $n | Measure-Object -Average).Average) }
+    $median = @($ft | Sort-Object)[[int]($ft.Count / 2)]
+    return [ordered]@{
+        Frames   = $ft.Count
+        AvgFps   = [math]::Round(1000 / $avg, 1)
+        Low1     = [math]::Round((& $worst 0.01), 1)
+        Low01    = [math]::Round((& $worst 0.001), 1)
+        P99Ms    = [math]::Round($sorted[[int][math]::Floor($sorted.Count * 0.01)], 2)
+        Stutters = @($ft | Where-Object { $_ -gt 2 * $median }).Count
+    }
+}
+
+function Measure-FrameTimes {
+    # Records the named process for $Seconds with PresentMon. The game must be running and drawing frames.
+    param([string]$Process, [int]$Seconds = 30)
+    $pm = Get-PresentMonPath
+    $csv = Join-Path $global:OptiToolsDir ('frames-{0}.csv' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    $name = if ($Process -like '*.exe') { $Process } else { "$Process.exe" }
+    $o = Invoke-Native $pm @('--process_name', $name, '--output_file', $csv, '--timed', "$Seconds", '--terminate_after_timed', '--stop_existing_session', '--no_console_stats', '--session_name', 'Optimaxer', '--v2_metrics')
+    if (-not (Test-Path -LiteralPath $csv)) { throw "no frames from $name in $Seconds s. Keep the game running in the foreground while it records. $($o.Trim())" }
+    $rows = Import-Csv -LiteralPath $csv
+    $col = if ($rows.Count -and $rows[0].PSObject.Properties.Name -contains 'FrameTime') { 'FrameTime' } else { 'MsBetweenPresents' }
+    $ft = foreach ($r in $rows) { $v = 0.0; if ([double]::TryParse([string]$r.$col, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$v)) { $v } }
+    Remove-Item -LiteralPath $csv -Force -ErrorAction SilentlyContinue
+    $st = Get-FrameStats @($ft)
+    if (-not $st) { throw "only $(@($ft).Count) frames from $name; is it in the foreground?" }
+    $st.Process = $name; $st.Seconds = $Seconds
+    return $st
+}
+
+function Initialize-OptiTimer {
+    if ('OptiTimer' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public static class OptiTimer {
+    [DllImport("ntdll.dll")] static extern int NtQueryTimerResolution(out uint min, out uint max, out uint cur);
+    // current system timer resolution in milliseconds (100 ns units from ntdll)
+    public static double CurrentMs() { uint a, b, c; return NtQueryTimerResolution(out a, out b, out c) == 0 ? c / 10000.0 : -1; }
+}
+'@
+}
+
+function Measure-Latency {
+    # Timer resolution, DPC/interrupt CPU time over $Seconds, and ping/jitter to 1.1.1.1.
+    param([int]$Seconds = 10, [string]$PingHost = '1.1.1.1')
+    Initialize-OptiTimer
+    $dpc = @(); $isr = @()
+    for ($i = 0; $i -lt $Seconds; $i++) {
+        try {
+            $p = Get-CimInstance Win32_PerfFormattedData_Counters_ProcessorInformation -Filter "Name='_Total'" -ErrorAction Stop
+            $dpc += [double]$p.PercentDPCTime; $isr += [double]$p.PercentInterruptTime
+        } catch {}
+        Start-Sleep -Seconds 1
+    }
+    $ms = @()
+    try { $ms = @(Test-Connection -ComputerName $PingHost -Count 20 -ErrorAction Stop | ForEach-Object { [double]$_.ResponseTime }) } catch {}
+    $jit = if ($ms.Count -gt 1) { ((1..($ms.Count - 1) | ForEach-Object { [math]::Abs($ms[$_] - $ms[$_ - 1]) }) | Measure-Object -Average).Average } else { $null }
+    $avg = { param($a) if (@($a).Count) { [math]::Round((@($a) | Measure-Object -Average).Average, 2) } else { $null } }
+    return [ordered]@{
+        TimerMs  = [math]::Round([OptiTimer]::CurrentMs(), 3)
+        DpcPct   = & $avg $dpc
+        DpcMax   = $(if ($dpc.Count) { [math]::Round(($dpc | Measure-Object -Maximum).Maximum, 2) } else { $null })
+        IsrPct   = & $avg $isr
+        PingMs   = & $avg $ms
+        JitterMs = $(if ($null -ne $jit) { [math]::Round($jit, 2) } else { $null })
+        PingLost = 20 - $ms.Count
+    }
+}
+
+function Get-LastBootMs {
+    try {
+        $e = Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Diagnostics-Performance/Operational'; Id = 100 } -MaxEvents 1 -ErrorAction Stop
+        return @{ Ms = [int](Get-EventData $e)['BootTime']; At = $e.TimeCreated.ToString('s') }
+    } catch { return @{ Ms = $null; At = $null } }
+}
+
+function Get-OptiMeasurements {
+    if (-not (Test-Path -LiteralPath $global:OptiMeasurePath)) { return @() }
+    # PowerShell 5.1 hands a JSON array over as one object; the ForEach unrolls it
+    try { return @(Get-Content -LiteralPath $global:OptiMeasurePath -Raw | ConvertFrom-Json | ForEach-Object { $_ }) } catch { return @() }
+}
+
+function Save-OptiMeasurement {
+    # One labelled run ('before' or 'after'): latency and boot always, frames when a process is given.
+    param([ValidateSet('before', 'after')][string]$Label, [string]$Process, [int]$Seconds = 30)
+    $run = [ordered]@{ Label = $Label; Time = (Get-Date).ToString('s'); Boot = (Get-LastBootMs); Latency = (Measure-Latency); Frames = $null; FramesError = '' }
+    if ($Process) { try { $run.Frames = Measure-FrameTimes $Process $Seconds } catch { $run.FramesError = $_.Exception.Message; Write-Log "  frames: $($run.FramesError)" 'WARN' } }
+    $all = @(Get-OptiMeasurements) + @([pscustomobject]$run)
+    ConvertTo-Json -InputObject @($all | Select-Object -Last 40) -Depth 6 | Set-Content -LiteralPath $global:OptiMeasurePath -Encoding UTF8
+    $l = $run.Latency
+    Write-Log ("Measured ({0}): timer {1} ms, DPC {2}% (max {3}%), interrupts {4}%, ping {5} ms, jitter {6} ms{7}" -f $Label, $l.TimerMs, $l.DpcPct, $l.DpcMax, $l.IsrPct, $l.PingMs, $l.JitterMs, $(if ($run.Boot.Ms) { (', last boot {0:N1} s' -f ($run.Boot.Ms / 1000)) } else { '' })) 'OK'
+    if ($run.Frames) { $f = $run.Frames; Write-Log ("  {0}: {1} FPS average, 1% low {2}, 0.1% low {3}, 99th pct frame {4} ms, {5} stutters ({6} frames)" -f $f.Process, $f.AvgFps, $f.Low1, $f.Low01, $f.P99Ms, $f.Stutters, $f.Frames) 'OK' }
+    return $run
+}
+
+function Compare-OptiMeasurements {
+    # Latest 'before' against latest 'after' (same game for frames). Lines like "Average FPS: 141.2 -> 150.8 (+6.8%)".
+    $all = @(Get-OptiMeasurements)
+    $b = @($all | Where-Object Label -eq 'before')[-1]; $a = @($all | Where-Object Label -eq 'after')[-1]
+    if (-not $b -or -not $a) { return @() }
+    $line = { param($name, $x, $y, $unit, [bool]$higherBetter)
+        if ($null -eq $x -or $null -eq $y) { return }
+        $d = if ([double]$x) { 100 * ([double]$y - [double]$x) / [double]$x } else { 0 }
+        $better = if ($higherBetter) { $y -gt $x } else { $y -lt $x }
+        '{0}: {1}{4} -> {2}{4} ({3:+0.0;-0.0;0}%{5})' -f $name, $x, $y, $d, $unit, $(if ([math]::Abs($d) -lt 2) { ', same' } elseif ($better) { ', better' } else { ', worse' })
+    }
+    $out = @()
+    if ($b.Frames -and $a.Frames -and $b.Frames.Process -eq $a.Frames.Process) {
+        $out += & $line "Average FPS ($($a.Frames.Process))" $b.Frames.AvgFps $a.Frames.AvgFps '' $true
+        $out += & $line '1% low FPS' $b.Frames.Low1 $a.Frames.Low1 '' $true
+        $out += & $line '0.1% low FPS' $b.Frames.Low01 $a.Frames.Low01 '' $true
+        $out += & $line '99th percentile frame time' $b.Frames.P99Ms $a.Frames.P99Ms ' ms' $false
+    }
+    $out += & $line 'DPC time' $b.Latency.DpcPct $a.Latency.DpcPct '%' $false
+    $out += & $line 'Interrupt time' $b.Latency.IsrPct $a.Latency.IsrPct '%' $false
+    $out += & $line 'Ping jitter' $b.Latency.JitterMs $a.Latency.JitterMs ' ms' $false
+    if ($b.Boot.Ms -and $a.Boot.Ms -and $b.Boot.At -ne $a.Boot.At) { $out += & $line 'Boot time' ([math]::Round($b.Boot.Ms / 1000, 1)) ([math]::Round($a.Boot.Ms / 1000, 1)) ' s' $false }
+    return @($out | Where-Object { $_ })
 }
 
 function Get-EvidenceText {
-    if (-not (Test-Path -LiteralPath $global:OptiEvidencePath)) { return 'No sample yet. Tools > Before/after sample records boot time and idle CPU.' }
-    try { $o = Get-Content -LiteralPath $global:OptiEvidencePath -Raw | ConvertFrom-Json } catch { return '' }
-    $fmt = { param($x) if (-not $x) { return '-' }; '{0} boot, {1}% idle CPU' -f $(if ($x.BootMs) { '{0:N1} s' -f ($x.BootMs / 1000) } else { '?' }), $x.IdleCpu }
-    $t = 'Sample, not an FPS measurement. Before: ' + (& $fmt $o.Before)
-    if ($o.After) { $t += '. After: ' + (& $fmt $o.After) + '.' } else { $t += '. Restart, then take the after sample.' }
-    return $t
+    $cmp = @(Compare-OptiMeasurements)
+    if ($cmp.Count) { return 'Measured on this PC, before vs after: ' + ($cmp -join '; ') + '.' }
+    $all = @(Get-OptiMeasurements)
+    if ($all.Count) { return "Measured 'before' on $([datetime]$all[-1].Time). Optimize, restart, play the same scene, then measure 'after'." }
+    return 'No measurements yet. Tools > Measure records frame times of a game (PresentMon), DPC/interrupt load, timer, ping jitter and boot time.'
 }
 
 function Undo-OptiFeatures {
