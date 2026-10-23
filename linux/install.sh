@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Optimaxer for Manjaro / Arch Linux
+# Optimaxer for Manjaro / Arch Linux and Fedora
 #   curl -fsSL https://raw.githubusercontent.com/bliper2/optimaxer/main/linux/install.sh | bash
 # Downloads the latest release script, verifies its SHA-256, installs it to ~/.local/bin/optimaxer.
 set -euo pipefail
@@ -9,8 +9,8 @@ DEST="${OPTIMAXER_DEST:-$HOME/.local/bin}"
 need() { command -v "$1" >/dev/null 2>&1 || { echo "optimaxer: '$1' is required" >&2; exit 1; }; }
 need curl
 need python3
-if ! grep -qiE 'manjaro|arch' /etc/os-release 2>/dev/null; then
-    echo "warning: this edition targets Manjaro and other Arch-based distributions (pacman)." >&2
+if ! grep -qiE 'manjaro|arch|fedora|rhel|centos|rocky|alma|nobara' /etc/os-release 2>/dev/null; then
+    echo "warning: this edition supports Manjaro and other Arch-based distributions (pacman) and Fedora and other dnf-based distributions." >&2
 fi
 
 tmp="$(mktemp -d)"
@@ -51,4 +51,6 @@ echo "Try:  optimaxer --dry-run        (interactive menu, nothing is changed)"
 echo "      optimaxer                  (interactive menu; asks for sudo when needed)"
 echo "      optimaxer gui              (graphical window; also in your application menu as Optimaxer)"
 "$DEST/optimaxer" launcher >/dev/null 2>&1 || true
-python3 -c 'import tkinter' >/dev/null 2>&1 || echo "Note: the graphical window needs Tk:  sudo pacman -S tk"
+python3 -c 'import tkinter' >/dev/null 2>&1 || {
+    if command -v dnf >/dev/null 2>&1; then echo "Note: the graphical window needs Tk:  sudo dnf install python3-tkinter"; else echo "Note: the graphical window needs Tk:  sudo pacman -S tk"; fi
+}

@@ -98,7 +98,8 @@ pub static READ_ONLY: AtomicBool = AtomicBool::new(false);
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    pub dark: bool,
+    /// "system" (follow Windows), "light" or "dark".
+    pub theme: String,
     pub download_dir: String,
     pub sort: model::Sort,
     pub platform: String,
@@ -108,16 +109,29 @@ pub struct Settings {
     pub opti_restore_point: bool,
     /// No transitions or pulses. Defaults to the Windows "animation effects" setting.
     pub reduce_motion: bool,
+    /// Windows (Fluent), Classic or Material.
+    pub style: crate::theme::Style,
+    /// Look for a newer release when the app starts. Nothing is downloaded until you press the update button.
+    pub auto_update: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         let dir = dirs::download_dir().unwrap_or_else(|| PathBuf::from(".")).join("Orion");
-        Self { dark: true, download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), opti_restore_point: true, reduce_motion: crate::theme::system_reduces_motion() }
+        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), opti_restore_point: true, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, auto_update: true }
     }
 }
 
 impl Settings {
+    /// Whether the app draws dark: the saved choice, or Windows' own setting when it follows the system.
+    pub fn effective_dark(&self) -> bool {
+        match self.theme.as_str() {
+            "light" => false,
+            "dark" => true,
+            _ => crate::theme::system_dark(),
+        }
+    }
+
     pub fn load() -> Self {
         fs::read(data_dir().join("settings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
     }

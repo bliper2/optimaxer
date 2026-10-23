@@ -2,16 +2,32 @@ use crate::kit;
 use crate::model::{self, AppItem, Catalog, Sort, ANDROID, PC, TV};
 use crate::net::{self, DlStatus, Download, Settings};
 use crate::opti_ui::{OptiEvent, OptiUi};
-use crate::theme::{self, ease_out, mix, motion, semibold, tokens, Tone, LIME, R_LG, R_MD, S1, S2, S3, S4, S5, T_BODY, T_CAPTION, T_DISPLAY, T_HEADING, T_SMALL};
+use crate::update::{self, Release};
+use crate::theme::{self, ease_out, mix, motion, semibold, tokens, Tone, R_LG, R_MD, S1, S2, S3, S4, S5, T_BODY, T_CAPTION, T_DISPLAY, T_HEADING, T_SMALL};
 use egui::{Align, Color32, CornerRadius, FontId, Layout, Margin, RichText, Sense, Stroke, StrokeKind, Ui, WidgetInfo, Role, vec2};
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const CARD_H: f32 = 108.0;
 const GAP: f32 = 12.0;
 const PLATFORMS: [&str; 4] = [PC, ANDROID, TV, "All"];
+
+enum UpdateState {
+    Idle,
+    Checking,
+    Available(Release),
+    Downloading { rel: Release, done: u64, total: u64 },
+    Failed(String),
+}
+
+enum UpdateMsg {
+    Checked { manual: bool, result: Result<Option<Release>, String> },
+    Progress(u64, u64),
+    Installed(Result<(), String>),
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Section {
@@ -56,6 +72,15 @@ pub struct OrionApp {
     search_id: egui::Id,
     /// `ctx.input(|i| i.time)` of the last view switch, for the page-enter transition.
     view_started: f64,
+    update: UpdateState,
+    update_tx: Sender<UpdateMsg>,
+    update_rx: Receiver<UpdateMsg>,
+    update_cancel: Arc<AtomicBool>,
+    /// Result of the last update check, shown in Settings.
+    update_note: String,
+    /// Windows' dark mode and accent colour as last read, so the app follows them while it runs.
+    sys_look: (bool, Color32),
+    sys_checked: Instant,
 }
 
 fn spawn_refresh(ctx: &egui::Context) -> Receiver<Catalog> {
@@ -97,13 +122,25 @@ impl OrionApp {
             // developer screenshots: nothing below may be written to the user's settings file
             net::READ_ONLY.store(true, std::sync::atomic::Ordering::Relaxed);
             if let Ok(t) = std::env::var("ORION_SHOTS_THEME") {
-                settings.dark = t != "light";
+                settings.theme = t;
+            }
+            if let Ok(p) = std::env::var("ORION_SHOTS_PLATFORM") {
+                settings.platform = p;
+            }
+            match std::env::var("ORION_SHOTS_STYLE").as_deref() {
+                Ok("classic") => settings.style = theme::Style::Classic,
+                Ok("material") => settings.style = theme::Style::Material,
+                Ok("windows") => settings.style = theme::Style::Windows,
+                _ => {}
             }
         }
-        theme::apply(&cc.egui_ctx, settings.dark, settings.reduce_motion);
+        theme::apply(&cc.egui_ctx, settings.effective_dark(), settings.reduce_motion, settings.style, theme::system_accent());
         let catalog = net::load_cache().unwrap_or_else(net::embedded);
         let rx = spawn_refresh(&cc.egui_ctx);
-        Self {
+        let (update_tx, update_rx) = channel();
+        update::cleanup_old();
+        let auto_check = settings.auto_update && std::env::var_os("ORION_SHOTS").is_none();
+        let mut app = Self {
             shots: crate::shots::Shots::from_env(),
             section: if settings.section == "Optimaxer" { Section::Optimaxer } else { Section::Store },
             opti: OptiUi::new(),
@@ -113,7 +150,7 @@ impl OrionApp {
             rx,
             loading: true,
             note: String::new(),
-            query: String::new(),
+            query: if std::env::var_os("ORION_SHOTS").is_some() { std::env::var("ORION_SHOTS_QUERY").unwrap_or_default() } else { String::new() },
             category: "All".into(),
             view: Vec::new(),
             featured: Vec::new(),
@@ -127,6 +164,164 @@ impl OrionApp {
             toast: None,
             search_id: egui::Id::unique("orion-search"),
             view_started: 0.0,
+            update: UpdateState::Idle,
+            update_tx,
+            update_rx,
+            update_cancel: Arc::new(AtomicBool::new(false)),
+            update_note: String::new(),
+            sys_look: (theme::system_dark(), theme::system_accent()),
+            sys_checked: Instant::now(),
+        };
+        if auto_check {
+            app.start_check(&cc.egui_ctx, false);
+        }
+        if std::env::var_os("ORION_SHOTS_FAKE_UPDATE").is_some() {
+            // developer screenshots: show the update banner without a real release
+            app.update = UpdateState::Available(Release { version: (9, 9, 9), tag: "v9.9.9".into(), notes: String::new(), page: String::new(), url: String::new(), digest: String::new(), size: 0 });
+        }
+        app
+    }
+
+    fn reapply_theme(&mut self, ctx: &egui::Context) {
+        theme::apply(ctx, self.settings.effective_dark(), self.settings.reduce_motion, self.settings.style, theme::system_accent());
+        self.sys_look = (theme::system_dark(), theme::system_accent());
+    }
+
+    /// Follows Windows' dark mode and accent colour while the app runs (checked every couple of seconds).
+    fn follow_windows(&mut self, ctx: &egui::Context) {
+        if self.sys_checked.elapsed() < Duration::from_secs(2) {
+            return;
+        }
+        self.sys_checked = Instant::now();
+        let now = (theme::system_dark(), theme::system_accent());
+        if now != self.sys_look && (self.settings.theme == "system" || self.settings.style == theme::Style::Windows) {
+            self.reapply_theme(ctx);
+        }
+        ctx.request_repaint_after(Duration::from_secs(2));
+    }
+
+    fn start_check(&mut self, ctx: &egui::Context, manual: bool) {
+        self.update = UpdateState::Checking;
+        let (tx, ctx) = (self.update_tx.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            let result = update::check();
+            let _ = tx.send(UpdateMsg::Checked { manual, result });
+            ctx.request_repaint();
+        });
+    }
+
+    /// Downloads, verifies and installs a release, then restarts. Runs only after the user presses the button.
+    fn start_install(&mut self, ctx: &egui::Context, rel: Release) {
+        self.update_cancel.store(false, Ordering::Relaxed);
+        self.update = UpdateState::Downloading { rel: rel.clone(), done: 0, total: rel.size };
+        let (tx, ctx, cancel) = (self.update_tx.clone(), ctx.clone(), self.update_cancel.clone());
+        std::thread::spawn(move || {
+            let (ptx, pctx) = (tx.clone(), ctx.clone());
+            let result = update::install(
+                &rel,
+                &move |d, t| {
+                    let _ = ptx.send(UpdateMsg::Progress(d, t));
+                    pctx.request_repaint();
+                },
+                &|| cancel.load(Ordering::Relaxed),
+            );
+            let _ = tx.send(UpdateMsg::Installed(result));
+            ctx.request_repaint();
+        });
+    }
+
+    fn poll_update(&mut self, ctx: &egui::Context) {
+        while let Ok(m) = self.update_rx.try_recv() {
+            match m {
+                UpdateMsg::Checked { manual, result } => match result {
+                    Ok(Some(rel)) => {
+                        self.update_note = format!("Version {} is available.", rel.label());
+                        self.update = UpdateState::Available(rel);
+                    }
+                    Ok(None) => {
+                        self.update_note = format!("You have the latest version (v{}).", update::CURRENT);
+                        self.update = UpdateState::Idle;
+                    }
+                    Err(e) => {
+                        self.update_note = format!("Could not check for updates: {e}");
+                        self.update = if manual { UpdateState::Failed(e) } else { UpdateState::Idle };
+                    }
+                },
+                UpdateMsg::Progress(d, t) => {
+                    if let UpdateState::Downloading { done, total, .. } = &mut self.update {
+                        *done = d;
+                        *total = t;
+                    }
+                }
+                UpdateMsg::Installed(Ok(())) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                UpdateMsg::Installed(Err(e)) => {
+                    self.update = if e == "cancelled" { UpdateState::Idle } else { UpdateState::Failed(e) };
+                }
+            }
+        }
+    }
+
+    fn update_banner(&mut self, root: &mut Ui) {
+        let ctx = root.ctx().clone();
+        let ctx = &ctx;
+        let t = tokens(ctx);
+        let show = matches!(self.update, UpdateState::Available(_) | UpdateState::Downloading { .. } | UpdateState::Failed(_));
+        if !show {
+            return;
+        }
+        let fill = if matches!(self.update, UpdateState::Failed(_)) { mix(t.rail, t.warn, 0.16) } else { mix(t.rail, t.brand, 0.16) };
+        let mut start: Option<Release> = None;
+        let mut action: Option<&str> = None;
+        egui::Panel::top("update").show_separator_line(false).frame(egui::Frame::new().fill(fill).inner_margin(Margin::symmetric(S5 as i8, S2 as i8))).show(root, |ui| {
+            ui.horizontal(|ui| match &self.update {
+                UpdateState::Available(rel) => {
+                    ui.label(RichText::new(format!("Version {} is available", rel.label())).font(FontId::new(T_BODY, semibold())).color(t.text));
+                    ui.label(RichText::new(format!("You have v{}.", update::CURRENT)).size(T_SMALL).color(t.muted));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if kit::primary(ui, "Update and restart", true).on_hover_text("Downloads the new version, checks its checksum, then restarts the app").clicked() {
+                            start = Some(rel.clone());
+                        }
+                        if kit::ghost(ui, "Later", true).clicked() {
+                            action = Some("later");
+                        }
+                        if !rel.page.is_empty() && kit::ghost(ui, "What's new", true).clicked() {
+                            let _ = open::that(&rel.page);
+                        }
+                    });
+                }
+                UpdateState::Downloading { rel, done, total } => {
+                    ui.label(RichText::new(format!("Updating to version {}", rel.label())).font(FontId::new(T_BODY, semibold())).color(t.text));
+                    let f = if *total > 0 { (*done as f32 / *total as f32).clamp(0.0, 1.0) } else { 0.0 };
+                    ui.add(egui::ProgressBar::new(f).fill(t.action).desired_height(8.0).corner_radius(4).desired_width(260.0).animate(*total == 0));
+                    ui.label(RichText::new(format!("{} of {}", model::format_size(Some(*done)), model::format_size(Some((*total).max(*done))))).size(T_SMALL).color(t.muted));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if kit::ghost(ui, "Cancel", true).clicked() {
+                            action = Some("cancel");
+                        }
+                    });
+                }
+                UpdateState::Failed(e) => {
+                    ui.add(egui::Label::new(RichText::new(format!("The update did not install: {e}")).color(t.text)).truncate());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if kit::ghost(ui, "Dismiss", true).clicked() {
+                            action = Some("later");
+                        }
+                        if kit::secondary(ui, "Try again", true).clicked() {
+                            action = Some("retry");
+                        }
+                    });
+                }
+                _ => {}
+            });
+        });
+        if let Some(rel) = start {
+            self.start_install(ctx, rel);
+        }
+        match action {
+            Some("later") => self.update = UpdateState::Idle,
+            Some("cancel") => self.update_cancel.store(true, Ordering::Relaxed),
+            Some("retry") => self.start_check(ctx, true),
+            _ => {}
         }
     }
 
@@ -315,12 +510,12 @@ fn app_card(ui: &mut Ui, app: &AppItem, w: f32) -> bool {
     resp.widget_info(|| WidgetInfo::labeled(Role::Button, true, &app.name));
     let h = ctx.animate_bool_with_time_and_easing(resp.id.with("h"), resp.hovered() || resp.has_focus(), m.fast(), ease_out);
     if ui.is_rect_visible(rect) {
-        let r = CornerRadius::same(R_LG);
+        let r = CornerRadius::same(t.card_radius());
         let pressed = resp.is_pointer_button_down_on();
         let fill = if pressed { t.surface3 } else { mix(t.surface1, t.surface2, h) };
         ui.painter().rect_filled(rect, r, fill);
         let ring = if resp.has_focus() { 2.0 } else { 1.0 };
-        let edge = if resp.has_focus() { if t.dark { t.brand } else { t.brand_text } } else { mix(t.hairline, t.brand, h * 0.85) };
+        let edge = if resp.has_focus() { t.ring() } else { mix(t.hairline, t.brand, h * 0.85) };
         ui.painter().rect_stroke(rect, r, Stroke::new(ring, edge), StrokeKind::Inside);
         paint_icon(ui, app, egui::Rect::from_min_size(rect.min + vec2(S4, S4 + 2.0), vec2(64.0, 64.0)));
         let text_rect = egui::Rect::from_min_max(rect.min + vec2(88.0, S3), rect.max - vec2(S3, S2));
@@ -349,6 +544,10 @@ impl eframe::App for OrionApp {
         let ctx = root.ctx().clone();
         let ctx = &ctx;
         self.poll_catalog();
+        self.poll_update(ctx);
+        if self.shots.is_none() {
+            self.follow_windows(ctx);
+        }
         self.opti.tick(ctx, &mut self.settings);
         self.handle_opti_events(ctx);
         self.drive_shots(ctx);
@@ -371,6 +570,7 @@ impl eframe::App for OrionApp {
         }
 
         self.top_bar(root);
+        self.update_banner(root);
         self.status_bar(root);
         if self.show_downloads {
             self.downloads_panel(root);
@@ -380,6 +580,7 @@ impl eframe::App for OrionApp {
         }
         self.side_panel(root);
         let t = tokens(ctx);
+        // Windows 11 layering: the content area is one step lighter than the rail around it
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.canvas).inner_margin(Margin { left: S5 as i8, right: S5 as i8, top: S3 as i8, bottom: 0 })).show(root, |ui| {
             let started = self.view_started;
             kit::enter(ui, started, |ui| {
@@ -761,7 +962,7 @@ impl OrionApp {
                                         Some(f) => (f, format!("{:.0}%   {} of {}", f * 100.0, model::format_size(Some(done)), model::format_size(Some(total)))),
                                         None => (0.0, model::format_size(Some(done))),
                                     };
-                                    ui.add(egui::ProgressBar::new(f).fill(LIME).desired_height(8.0).corner_radius(4).animate(d.fraction().is_none()).desired_width(240.0));
+                                    ui.add(egui::ProgressBar::new(f).fill(t.action).desired_height(8.0).corner_radius(4).animate(d.fraction().is_none()).desired_width(240.0));
                                     ui.label(RichText::new(text).size(T_SMALL).color(t.muted));
                                     if kit::ghost(ui, "Cancel", true).clicked() {
                                         d.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -831,18 +1032,53 @@ impl OrionApp {
             kit::card(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(RichText::new("Appearance").font(FontId::new(T_BODY, semibold())).color(t.text));
-                let mut dark = self.settings.dark;
-                if ui.checkbox(&mut dark, "Dark theme").changed() {
-                    self.settings.dark = dark;
-                    theme::apply(ctx, dark, self.settings.reduce_motion);
-                    self.settings.save();
-                }
+                let mut ti = match self.settings.theme.as_str() {
+                    "light" => 1,
+                    "dark" => 2,
+                    _ => 0,
+                };
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Theme").color(t.muted));
+                    if kit::segmented(ui, &mut ti, &["Windows", "Light", "Dark"]) {
+                        self.settings.theme = ["system", "light", "dark"][ti].into();
+                        self.reapply_theme(ctx);
+                        self.settings.save();
+                    }
+                });
+                let mut si = theme::Style::ALL.iter().position(|x| *x == self.settings.style).unwrap_or(0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Style").color(t.muted));
+                    if kit::segmented(ui, &mut si, &["Windows", "Classic", "Material"]) {
+                        self.settings.style = theme::Style::ALL[si];
+                        self.reapply_theme(ctx);
+                        self.settings.save();
+                    }
+                });
+                ui.add(egui::Label::new(RichText::new("Windows follows your Windows light or dark mode and accent colour. Classic is the original indigo and lime. Material uses Material Design 3 colours.").size(T_CAPTION).color(t.subtle)).wrap());
                 let mut reduce = self.settings.reduce_motion;
                 if ui.checkbox(&mut reduce, "Reduce motion").on_hover_text("Turns off transitions and the loading pulse. Follows the Windows setting by default.").changed() {
                     self.settings.reduce_motion = reduce;
-                    theme::apply(ctx, self.settings.dark, reduce);
+                    self.reapply_theme(ctx);
                     self.settings.save();
                 }
+            });
+            ui.add_space(S2);
+            kit::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new("Updates").font(FontId::new(T_BODY, semibold())).color(t.text));
+                let mut auto = self.settings.auto_update;
+                if ui.checkbox(&mut auto, "Check for updates when the app starts").on_hover_text("Only checks. Nothing is downloaded until you press Update and restart.").changed() {
+                    self.settings.auto_update = auto;
+                    self.settings.save();
+                }
+                ui.horizontal(|ui| {
+                    let busy = matches!(self.update, UpdateState::Checking | UpdateState::Downloading { .. });
+                    if kit::secondary(ui, if matches!(self.update, UpdateState::Checking) { "Checking" } else { "Check now" }, !busy).clicked() {
+                        self.start_check(ctx, true);
+                    }
+                    let text = if self.update_note.is_empty() { format!("Version v{}", update::CURRENT) } else { self.update_note.clone() };
+                    ui.add(egui::Label::new(RichText::new(text).size(T_SMALL).color(t.muted)).wrap());
+                });
             });
             ui.add_space(S2);
             kit::card(ui, |ui| {

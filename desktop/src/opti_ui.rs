@@ -26,6 +26,7 @@ const LOG_LINES: usize = 600;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Page {
+    Overview,
     Tweaks,
     Services,
     Startup,
@@ -35,9 +36,23 @@ pub enum Page {
 }
 
 impl Page {
-    const ALL: [Page; 6] = [Page::Tweaks, Page::Services, Page::Startup, Page::Cleaner, Page::Network, Page::Tools];
+    const ALL: [Page; 7] = [Page::Overview, Page::Tweaks, Page::Services, Page::Startup, Page::Cleaner, Page::Network, Page::Tools];
+    /// Segoe Fluent Icons glyph shown in the sidebar.
+    fn icon(self) -> char {
+        match self {
+            Page::Overview => '\u{E80F}',
+            Page::Tweaks => '\u{E9E9}',
+            Page::Services => '\u{E9F5}',
+            Page::Startup => '\u{E7E8}',
+            Page::Cleaner => '\u{E74D}',
+            Page::Network => '\u{E774}',
+            Page::Tools => '\u{E90F}',
+        }
+    }
+
     fn label(self) -> &'static str {
         match self {
+            Page::Overview => "Overview",
             Page::Tweaks => "Tweaks",
             Page::Services => "Services",
             Page::Startup => "Startup",
@@ -144,6 +159,8 @@ pub struct OptiUi {
     events: Vec<OptiEvent>,
     /// `ctx.input(|i| i.time)` when the page last changed, for the enter transition.
     page_started: f64,
+    sampler: crate::opti::sysmon::Sampler,
+    info: Option<crate::opti::sysmon::SysInfo>,
     services_loaded: bool,
     startup_loaded: bool,
 }
@@ -210,7 +227,7 @@ impl OptiUi {
     pub fn new() -> Self {
         let (tx, rx) = channel();
         Self {
-            page: Page::Tweaks,
+            page: Page::Overview,
             cat: Arc::new(Catalog::load()),
             data: Arc::new(Data::load()),
             traits: None,
@@ -236,6 +253,8 @@ impl OptiUi {
             bench: Vec::new(),
             events: Vec::new(),
             page_started: 0.0,
+            sampler: crate::opti::sysmon::Sampler::new(),
+            info: None,
             services_loaded: false,
             startup_loaded: false,
         }
@@ -601,7 +620,7 @@ impl OptiUi {
         ui.label(RichText::new("Optimaxer").font(FontId::new(T_SMALL, semibold())).color(t.subtle));
         ui.add_space(S1);
         for p in Page::ALL {
-            if kit::nav_item(ui, self.page == p, p.label(), None).clicked() && self.page != p {
+            if kit::nav_item_icon(ui, self.page == p, Some(p.icon()), p.label(), None).clicked() && self.page != p {
                 self.set_page(ctx, p);
             }
         }
@@ -620,7 +639,7 @@ impl OptiUi {
 
     pub fn log_panel(&mut self, root: &mut Ui) {
         let t = tokens(root.ctx());
-        egui::Panel::bottom("opti-log").resizable(true).default_size(136.0).show_separator_line(false).frame(egui::Frame::new().fill(t.surface1).inner_margin(Margin::symmetric(S5 as i8, S3 as i8))).show(root, |ui| {
+        egui::Panel::bottom("opti-log").resizable(true).default_size(96.0).show_separator_line(false).frame(egui::Frame::new().fill(t.surface1).inner_margin(Margin::symmetric(S5 as i8, S3 as i8))).show(root, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Activity").font(FontId::new(T_HEADING, semibold())).color(t.text));
                 if self.busy.is_some() {
@@ -688,6 +707,7 @@ impl OptiUi {
         let started = self.page_started;
         kit::enter(ui, started, |ui| {
             ui.add_enabled_ui(self.pending.is_none(), |ui| match self.page {
+                Page::Overview => self.overview_page(ui, ctx),
                 Page::Tweaks => self.tweaks_page(ui, ctx),
                 Page::Services => self.services_page(ui, ctx),
                 Page::Startup => self.startup_page(ui, ctx),
@@ -753,6 +773,93 @@ impl OptiUi {
 
     fn toolbar_search(&self, ui: &mut Ui, text: &mut String, hint: &str) {
         ui.add_sized([260.0, 34.0], egui::TextEdit::singleline(text).hint_text(hint).margin(Margin::symmetric(S3 as i8, 8)));
+    }
+
+    fn overview_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        use crate::opti::sysmon::{format_uptime, read_info};
+        let t = tokens(ctx);
+        self.sampler.tick();
+        ctx.request_repaint_after(std::time::Duration::from_millis(1000));
+        let info = self.info.get_or_insert_with(|| read_info(&WinSystem)).clone();
+        let s = self.sampler.latest;
+        kit::page_header(ui, "Overview", "Live readings from this PC, and the quickest ways to tune it.");
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            let gap = S3;
+            let w3 = ((ui.available_width() - 2.0 * gap) / 3.0 - 1.0).floor();
+            let gauge_size = (w3 - 2.0 * S4 - 4.0).clamp(130.0, 190.0);
+            ui.spacing_mut().item_spacing = vec2(gap, gap);
+            ui.horizontal_top(|ui| {
+                let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+                let cards = [
+                    ("Processor", s.cpu / 100.0, format!("{:.0}%", s.cpu), format!("{} threads", info.threads), kit::load_color(&t, s.cpu)),
+                    ("Memory", s.ram_fraction(), format!("{:.0}%", s.ram_fraction() * 100.0), format!("{} of {}", format_size(Some(s.ram_used)), format_size(Some(s.ram_total))), kit::load_color(&t, s.ram_fraction() * 100.0)),
+                    ("Storage", s.disk_fraction(), format!("{:.0}%", s.disk_fraction() * 100.0), format!("{drive} {} of {}", format_size(Some(s.disk_used)), format_size(Some(s.disk_total))), kit::load_color(&t, s.disk_fraction() * 100.0)),
+                ];
+                for (name, frac, value, sub, color) in cards {
+                    ui.allocate_ui_with_layout(vec2(w3, gauge_size + 84.0), Layout::top_down(Align::Center), |ui| {
+                        kit::card(ui, |ui| {
+                            ui.set_width(w3 - 2.0 * S4 - 2.0);
+                            ui.vertical_centered(|ui| {
+                                ui.label(RichText::new(name).font(FontId::new(T_BODY, semibold())).color(t.text));
+                                kit::gauge(ui, gauge_size, frac, color, &value, "in use");
+                                ui.add(egui::Label::new(RichText::new(sub).size(T_SMALL).color(t.muted)).truncate());
+                            });
+                        });
+                    });
+                }
+            });
+            let w2 = ((ui.available_width() - gap) / 2.0 - 1.0).floor();
+            ui.horizontal_top(|ui| {
+                for (title, data, color) in [("Processor, last 60 seconds", &self.sampler.cpu_history, kit::load_color(&t, s.cpu)), ("Memory, last 60 seconds", &self.sampler.ram_history, kit::load_color(&t, s.ram_fraction() * 100.0))] {
+                    ui.allocate_ui_with_layout(vec2(w2, 150.0), Layout::top_down(Align::Min), |ui| {
+                        kit::card(ui, |ui| {
+                            ui.set_width(w2 - 2.0 * S4 - 2.0);
+                            ui.label(RichText::new(title).font(FontId::new(T_BODY, semibold())).color(t.text));
+                            ui.add_space(S1);
+                            kit::sparkline(ui, vec2(w2 - 2.0 * S4 - 2.0, 86.0), data, color);
+                        });
+                    });
+                }
+            });
+            kit::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new("This PC").font(FontId::new(T_HEADING, semibold())).color(t.text));
+                ui.add_space(S1);
+                egui::Grid::new("pc-info").num_columns(2).spacing(vec2(S5, S1 + 2.0)).show(ui, |ui| {
+                    let mut row = |k: &str, v: String| {
+                        ui.label(RichText::new(k).size(T_SMALL).color(t.muted));
+                        ui.add(egui::Label::new(RichText::new(v).size(T_BODY).color(t.text)).wrap());
+                        ui.end_row();
+                    };
+                    row("Processor", if info.cpu.is_empty() { "Unknown".into() } else { info.cpu.clone() });
+                    row("Graphics", if info.gpus.is_empty() { "Unknown".into() } else { info.gpus.join(", ") });
+                    row("Windows", info.os.clone());
+                    row("Uptime", format_uptime(s.uptime));
+                    row("Processes", s.processes.to_string());
+                    if let Some(tr) = &self.traits {
+                        row("Detected", tr.tags.join(", "));
+                    }
+                });
+            });
+            ui.horizontal(|ui| {
+                let ready = self.busy.is_none() && self.traits.is_some();
+                if kit::primary(ui, "Smart optimize", ready).on_hover_text("Reads your hardware and selects only the tweaks that fit this PC").clicked() {
+                    self.select_preset("auto");
+                    if !self.selected.is_empty() {
+                        self.set_page(ctx, Page::Tweaks);
+                        self.preview_apply(ctx);
+                    }
+                }
+                if kit::secondary(ui, "Free RAM", self.busy.is_none()).clicked() && self.need_admin() {
+                    self.pending = Some(Pending { title: "Free RAM now".into(), intro: "Trims the working set of running processes. Windows re-caches as you work.".into(), lines: vec![], action: Action::RunTool(Tool::FreeRam), restore_option: false, ok_label: "Free RAM".into() });
+                }
+                if kit::secondary(ui, "Scan for junk", self.busy.is_none()).clicked() {
+                    self.set_page(ctx, Page::Cleaner);
+                    self.scan_cleaner(ctx);
+                }
+            });
+            ui.add_space(S5);
+        });
     }
 
     fn tweaks_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
@@ -868,7 +975,7 @@ impl OptiUi {
                             ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
                         }
                         if click.has_focus() {
-                            ui.painter().rect_stroke(r.response.rect, CornerRadius::same(R_MD), Stroke::new(2.0, if t.dark { t.brand } else { t.brand_text }), StrokeKind::Inside);
+                            ui.painter().rect_stroke(r.response.rect, CornerRadius::same(R_MD), Stroke::new(2.0, t.ring()), StrokeKind::Inside);
                         }
                         if click.clicked() {
                             if on {

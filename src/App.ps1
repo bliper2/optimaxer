@@ -183,7 +183,50 @@ try {
     $compInfo   = New-Object Microsoft.VisualBasic.Devices.ComputerInfo
 } catch {}
 $sysDrive = New-Object IO.DriveInfo $env:SystemDrive
-$UI.DiskLabel.Text = "Disk ($($env:SystemDrive))"
+
+# Ring gauge: a 270 degree arc from the bottom-left, drawn as a path inside a 120 x 120 box.
+function Get-ArcGeometry {
+    param([double]$Fraction)
+    $inv = [Globalization.CultureInfo]::InvariantCulture
+    $r = 48.0; $cx = 60.0; $cy = 60.0
+    $f = [math]::Max(0.001, [math]::Min(1.0, $Fraction))
+    $start = 135 * [math]::PI / 180
+    $end = $start + (270 * [math]::PI / 180) * $f
+    $large = if ((270 * $f) -gt 180) { 1 } else { 0 }
+    $d = [string]::Format($inv, 'M {0:0.###},{1:0.###} A {2},{2} 0 {3} 1 {4:0.###},{5:0.###}', ($cx + $r * [math]::Cos($start)), ($cy + $r * [math]::Sin($start)), $r, $large, ($cx + $r * [math]::Cos($end)), ($cy + $r * [math]::Sin($end)))
+    return [Windows.Media.Geometry]::Parse($d)
+}
+
+function Set-Gauge {
+    # Name = Cpu | Ram | Disk. The arc turns amber above 75% and red above 90%.
+    param([string]$Name, [double]$Percent)
+    $UI["${Name}Track"].Data = Get-ArcGeometry 1.0
+    $arc = $UI["${Name}Arc"]
+    $arc.Data = Get-ArcGeometry ($Percent / 100.0)
+    $key = if ($Percent -ge 90) { 'Bad' } elseif ($Percent -ge 75) { 'Warn' } else { 'Accent' }
+    $arc.SetResourceReference([Windows.Shapes.Shape]::StrokeProperty, $key)
+}
+
+$global:CpuHist = New-Object 'System.Collections.Generic.List[double]'
+$global:RamHist = New-Object 'System.Collections.Generic.List[double]'
+
+function Set-Spark {
+    param([string]$Name, $History, [string]$Color = 'Accent')
+    $cv = $UI["${Name}Spark"]; $line = $UI["${Name}Line"]
+    $w = if ($cv.ActualWidth -gt 20) { $cv.ActualWidth } else { 260 }
+    $h = if ($cv.ActualHeight -gt 10) { $cv.ActualHeight } else { 64 }
+    $step = $w / 59.0
+    $pts = New-Object Windows.Media.PointCollection
+    $x0 = $w - $step * ($History.Count - 1)
+    for ($i = 0; $i -lt $History.Count; $i++) { [void]$pts.Add((New-Object Windows.Point(($x0 + $step * $i), ($h - 3 - ($h - 6) * [math]::Min(100.0, $History[$i]) / 100.0)))) }
+    $line.Points = $pts
+}
+
+function Add-History {
+    param($List, [double]$Value)
+    $List.Add($Value)
+    while ($List.Count -gt 60) { $List.RemoveAt(0) }
+}
 
 function Update-Live {
     try {
@@ -194,18 +237,23 @@ function Update-Live {
             $UI.BarRam.Text = 'RAM {0:N1} GB' -f (($tot - $av) / 1GB)
         }
         if ($UI.Page_dash.Visibility -ne 'Visible') { return }
-        $UI.CpuText.Text = "$c%"; Set-Bar $UI.CpuBar $c
+        $UI.CpuText.Text = "$c%"; Set-Gauge 'Cpu' $c
+        Add-History $global:CpuHist $c; Set-Spark 'Cpu' $global:CpuHist
         if ($compInfo) {
             $p = [math]::Round(100 * ($tot - $av) / $tot)
-            $UI.RamText.Text = '{0:N1} / {1:N0} GB' -f (($tot - $av) / 1GB), ($tot / 1GB); Set-Bar $UI.RamBar $p
+            $UI.RamText.Text = "$p%"; Set-Gauge 'Ram' $p
+            $UI.RamSub.Text = '{0:N1} of {1:N0} GB' -f (($tot - $av) / 1GB), ($tot / 1GB)
+            Add-History $global:RamHist $p; Set-Spark 'Ram' $global:RamHist
         }
-        $UI.DiskText.Text = '{0:N0} GB free' -f ($sysDrive.AvailableFreeSpace / 1GB)
-        Set-Bar $UI.DiskBar ([math]::Round(100 * (1 - $sysDrive.AvailableFreeSpace / $sysDrive.TotalSize)))
+        $dp = [math]::Round(100 * (1 - $sysDrive.AvailableFreeSpace / $sysDrive.TotalSize))
+        $UI.DiskText.Text = "$dp%"; Set-Gauge 'Disk' $dp
+        $UI.DiskSub.Text = '{0} {1:N0} GB free of {2:N0} GB' -f $env:SystemDrive, ($sysDrive.AvailableFreeSpace / 1GB), ($sysDrive.TotalSize / 1GB)
         if ($upCounter) {
             $ts = [TimeSpan]::FromSeconds($upCounter.NextValue())
             $UI.UpText.Text = '{0}d {1}h {2}m' -f $ts.Days, $ts.Hours, $ts.Minutes
             $UI.UpHint.Text = if ($ts.TotalDays -gt 7) { 'Restart recommended' } else { ' ' }
         }
+        $UI.ProcText.Text = [string]@(Get-Process).Count
     } catch {}
 }
 
