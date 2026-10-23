@@ -139,6 +139,12 @@ pub struct OptiUi {
     status: HashMap<String, bool>,
     selected: HashSet<String>,
     tw_search: String,
+    /// Risk filter on the Tweaks page: 0 all, 1 Safe, 2 Moderate, 3 Advanced.
+    tw_risk: usize,
+    /// Group filter on the Tweaks page, an index into `TWEAK_GROUPS`.
+    tw_group: usize,
+    /// Tweaks whose technical details are expanded.
+    tw_open: HashSet<String>,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     busy: Option<String>,
@@ -207,6 +213,72 @@ fn tweak_notes(t: &Tweak) -> String {
     n.join(", ")
 }
 
+/// Groups the Tweaks page can be filtered by. The first entry shows everything.
+const TWEAK_GROUPS: [&str; 8] = ["All", "Recommended", "Gaming", "Privacy", "AI and debloat", "Opt-in", "Applied", "Not applied"];
+
+/// Whether a tweak belongs to the chosen group (an index into `TWEAK_GROUPS`).
+fn in_group(tw: &Tweak, group: usize, applied: bool) -> bool {
+    match group {
+        1 => tw.has_tag("safe"),
+        2 => tw.has_tag("gaming"),
+        3 => tw.has_tag("privacy"),
+        4 => tw.has_tag("deai"),
+        5 => tw.has_tag("optin"),
+        6 => applied,
+        7 => !applied,
+        _ => true,
+    }
+}
+
+/// The exact changes a tweak makes, for the expandable technical details: registry values, services, tasks and flags.
+fn tweak_technical(t: &Tweak) -> Vec<String> {
+    use crate::opti::catalog::RegVal;
+    let mut out = vec![format!("id {}   risk {}   tags {}", t.id, t.risk, if t.tags.is_empty() { "none".to_string() } else { t.tags.join(", ") })];
+    for r in &t.reg {
+        let (value, kind) = match &r.v {
+            RegVal::Num(n) => (format!("{n} (0x{:X})", n & 0xFFFF_FFFF), if r.t.is_empty() { "REG_DWORD".to_string() } else { format!("REG_{}", r.t.to_uppercase()) }),
+            RegVal::Text(v) => (format!("\"{v}\""), if r.t == "ExpandString" { "REG_EXPAND_SZ".to_string() } else { "REG_SZ".to_string() }),
+            RegVal::Bytes(b) => (format!("{} bytes", b.len()), "REG_BINARY".to_string()),
+            RegVal::Multi(m) => (m.join(" | "), "REG_MULTI_SZ".to_string()),
+        };
+        out.push(format!("registry  {}\\{} = {}  [{}]", r.p, r.n, value, kind));
+    }
+    for sv in &t.svc {
+        let start = match sv.start {
+            0 => "Boot",
+            1 => "System",
+            2 => "Automatic",
+            3 => "Manual",
+            4 => "Disabled",
+            _ => "other",
+        };
+        out.push(format!("service  {} start type -> {} ({})", sv.name, start, sv.start));
+    }
+    for tk in &t.task {
+        out.push(format!("scheduled task  {tk} -> disabled"));
+    }
+    if t.special.is_some() || t.script.apply {
+        out.push("also runs a built-in routine (not only registry, service and task changes)".into());
+    }
+    let mut flags: Vec<&str> = Vec::new();
+    if t.restart {
+        flags.push("restart needed");
+    }
+    if t.explorer {
+        flags.push("restarts Explorer");
+    }
+    if t.script.undo {
+        flags.push("custom undo step");
+    }
+    if !flags.is_empty() {
+        out.push(flags.join(", "));
+    }
+    if out.len() == 1 {
+        out.push("no registry, service or task entries".into());
+    }
+    out
+}
+
 fn plan_lines(eng: &Engine, tweaks: &[&Tweak]) -> Vec<Line> {
     let mut out = Vec::new();
     for t in tweaks {
@@ -234,6 +306,9 @@ impl OptiUi {
             status: HashMap::new(),
             selected: HashSet::new(),
             tw_search: String::new(),
+            tw_risk: 0,
+            tw_group: 0,
+            tw_open: HashSet::new(),
             tx,
             rx,
             busy: None,
@@ -935,8 +1010,28 @@ impl OptiUi {
             });
         });
         ui.add_space(S2);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Risk").size(T_SMALL).color(t.muted));
+            kit::segmented(ui, &mut self.tw_risk, &["All", "Safe", "Moderate", "Advanced"]);
+            ui.add_space(S3);
+            ui.label(RichText::new("Show").size(T_SMALL).color(t.muted));
+            egui::ComboBox::from_id_salt("tw-group").selected_text(TWEAK_GROUPS[self.tw_group.min(TWEAK_GROUPS.len() - 1)]).show_ui(ui, |ui| {
+                for (i, g) in TWEAK_GROUPS.iter().enumerate() {
+                    ui.selectable_value(&mut self.tw_group, i, *g);
+                }
+            });
+            if self.tw_risk != 0 || self.tw_group != 0 {
+                if kit::ghost(ui, "Reset filters", true).clicked() {
+                    self.tw_risk = 0;
+                    self.tw_group = 0;
+                }
+            }
+        });
+        ui.add_space(S2);
 
         let q = self.tw_search.trim().to_lowercase();
+        let risk_filter = ["", "Safe", "Moderate", "Advanced"][self.tw_risk.min(3)];
+        let group_filter = self.tw_group;
         let mut cats: Vec<&str> = Vec::new();
         for tw in &self.cat.tweaks {
             if !cats.contains(&tw.cat.as_str()) {
@@ -948,7 +1043,12 @@ impl OptiUi {
         let mut shown = 0;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for c in cats {
-                let rows: Vec<&Tweak> = cat.tweaks.iter().filter(|tw| tw.cat == c && (q.is_empty() || tw.name.to_lowercase().contains(&q) || tw.desc.to_lowercase().contains(&q))).collect();
+                let rows: Vec<&Tweak> = cat.tweaks.iter().filter(|tw| {
+                    tw.cat == c
+                        && (q.is_empty() || tw.name.to_lowercase().contains(&q) || tw.desc.to_lowercase().contains(&q))
+                        && (risk_filter.is_empty() || tw.risk == risk_filter)
+                        && in_group(tw, group_filter, self.status.get(&tw.id).copied().unwrap_or(false))
+                }).collect();
                 if rows.is_empty() {
                     continue;
                 }
@@ -958,6 +1058,8 @@ impl OptiUi {
                         let applied = self.status.get(&tw.id).copied().unwrap_or(false);
                         let fits = traits.as_ref().is_none_or(|tr| hw::fits(tw, tr));
                         let on = self.selected.contains(&tw.id);
+                        let open = self.tw_open.contains(&tw.id);
+                        let mut details_rect = egui::Rect::NOTHING;
                         let r = kit::row(ui, ("tw", &tw.id), on, |ui| {
                             ui.horizontal(|ui| {
                                 kit::check(ui, on);
@@ -979,6 +1081,13 @@ impl OptiUi {
                                     if !notes.is_empty() {
                                         ui.label(RichText::new(notes).size(T_CAPTION).color(t.subtle));
                                     }
+                                    let toggle = ui.add(egui::Label::new(RichText::new(if open { "Hide technical details" } else { "Technical details" }).size(T_CAPTION).color(t.brand_text)).sense(Sense::click()));
+                                    details_rect = toggle.rect;
+                                    if open {
+                                        for line in tweak_technical(tw) {
+                                            ui.add(egui::Label::new(RichText::new(line).monospace().size(T_CAPTION).color(t.muted)).wrap());
+                                        }
+                                    }
                                 });
                             });
                         });
@@ -989,7 +1098,11 @@ impl OptiUi {
                         if click.has_focus() {
                             ui.painter().rect_stroke(r.response.rect, CornerRadius::same(R_MD), Stroke::new(2.0, t.ring()), StrokeKind::Inside);
                         }
-                        if click.clicked() {
+                        if click.clicked() && ctx.pointer_interact_pos().is_some_and(|p| details_rect.contains(p)) {
+                            if !self.tw_open.remove(&tw.id) {
+                                self.tw_open.insert(tw.id.clone());
+                            }
+                        } else if click.clicked() {
                             if on {
                                 self.selected.remove(&tw.id);
                             } else {
@@ -1000,7 +1113,7 @@ impl OptiUi {
                 });
             }
             if shown == 0 {
-                kit::empty_state(ui, "No tweaks match", "Try a shorter search.");
+                kit::empty_state(ui, "No tweaks match", "Try a shorter search or reset the filters.");
             }
             if !cat.not_ported.is_empty() && q.is_empty() {
                 ui.add_space(S4);
@@ -1413,6 +1526,30 @@ mod tests {
         sys.put(&t.reg[0].p, &t.reg[0].n, RegData::Str("20000".into()));
         let todo = plan_lines(&eng, &[t]);
         assert!(todo.iter().any(|l| l.text.contains("20000") && l.text.contains("5000")));
+    }
+
+    #[test]
+    fn technical_details_list_the_exact_changes() {
+        let cat = Catalog::load();
+        let t = cat.find("perf-shutdown").unwrap();
+        let lines = tweak_technical(t);
+        assert!(lines[0].contains("perf-shutdown") && lines[0].contains(&t.risk));
+        assert!(lines.iter().any(|l| l.starts_with("registry") && l.contains("WaitToKillAppTimeout") && l.contains("REG_SZ")));
+        // every tweak produces at least its header and one more line
+        assert!(cat.tweaks.iter().all(|t| tweak_technical(t).len() >= 2));
+    }
+
+    #[test]
+    fn group_filter_matches_tags_and_applied_state() {
+        let cat = Catalog::load();
+        let all = cat.tweaks.len();
+        for g in 0..6 {
+            let n = cat.tweaks.iter().filter(|t| in_group(t, g, false)).count();
+            assert!(n > 0 && n <= all, "group {} is empty", TWEAK_GROUPS[g]);
+        }
+        let t = &cat.tweaks[0];
+        assert!(in_group(t, 6, true) && !in_group(t, 6, false) && in_group(t, 7, false));
+        assert!(cat.tweaks.iter().filter(|t| in_group(t, 1, false)).all(|t| t.has_tag("safe")));
     }
 
     #[test]
