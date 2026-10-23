@@ -76,6 +76,8 @@ enum Action {
     ApplyTweaks(Vec<String>),
     UndoTweaks(Vec<String>),
     UndoAll,
+    /// Second step after a failed restore point: the user confirmed to go on without one.
+    ApplyWithoutRestore(Vec<String>),
     SetServices { names: Vec<String>, start: u32 },
     RestoreServices,
     SetStartup { items: Vec<startup::Item>, enable: bool },
@@ -145,6 +147,8 @@ pub struct OptiUi {
     tw_group: usize,
     /// Tweaks whose technical details are expanded.
     tw_open: HashSet<String>,
+    /// Why Smart optimize left a tweak unticked (risk or the hardware fact). Cleared by the other presets.
+    tw_skip: std::collections::BTreeMap<String, String>,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     busy: Option<String>,
@@ -174,7 +178,8 @@ pub struct OptiUi {
 // region pure logic (unit tested)
 /// (active, applicable) among the recommended tweaks that fit this PC.
 pub fn score(cat: &Catalog, tr: &Traits, status: &HashMap<String, bool>) -> (usize, usize) {
-    let applicable: Vec<&Tweak> = cat.tweaks.iter().filter(|t| (t.has_tag("safe") || t.has_tag("smart")) && !t.has_tag("optin") && hw::fits(t, tr)).collect();
+    // the same tweaks Smart optimize would tick on this PC
+    let applicable: Vec<&Tweak> = cat.tweaks.iter().filter(|t| t.auto_pick() && hw::fits(t, tr)).collect();
     let on = applicable.iter().filter(|t| status.get(&t.id).copied().unwrap_or(false)).count();
     (on, applicable.len())
 }
@@ -209,6 +214,9 @@ fn tweak_notes(t: &Tweak) -> String {
     }
     if t.partial {
         n.push("one PowerShell-only step skipped".into());
+    }
+    if !t.conflict.is_empty() {
+        n.push(format!("one choice per group: {}", t.conflict));
     }
     n.join(", ")
 }
@@ -279,6 +287,36 @@ fn tweak_technical(t: &Tweak) -> Vec<String> {
     out
 }
 
+struct Batch {
+    restore_failed: bool,
+    ok: usize,
+    restart: bool,
+    explorer: bool,
+    now: HashMap<String, bool>,
+}
+
+/// Applies or undoes a list of tweaks. With a requested restore point that fails, nothing is changed and
+/// `restore_failed` is set, so the window can ask before going on without one.
+fn run_batch(sys: &dyn System, eng: &Engine, cat: &Catalog, ids: &[String], apply: bool, restore_point: bool, st: &mut State, log: &mut dyn FnMut(&str)) -> Batch {
+    let mut b = Batch { restore_failed: false, ok: 0, restart: false, explorer: false, now: HashMap::new() };
+    if apply && restore_point && !tools::create_restore_point(sys, "Optimaxer - before tweaks", log) {
+        log("WARN No restore point, so nothing was changed.");
+        b.restore_failed = true;
+        return b;
+    }
+    for id in ids {
+        let Some(t) = cat.find(id) else { continue };
+        let (on, failed) = if apply { (eng.apply(t, st, log), Vec::new()) } else { eng.undo_checked(t, st, log) };
+        b.restart |= t.restart;
+        b.explorer |= t.explorer;
+        if on == apply && failed.is_empty() {
+            b.ok += 1;
+        }
+        b.now.insert(id.clone(), on);
+    }
+    b
+}
+
 fn plan_lines(eng: &Engine, tweaks: &[&Tweak]) -> Vec<Line> {
     let mut out = Vec::new();
     for t in tweaks {
@@ -309,6 +347,7 @@ impl OptiUi {
             tw_risk: 0,
             tw_group: 0,
             tw_open: HashSet::new(),
+            tw_skip: Default::default(),
             tx,
             rx,
             busy: None,
@@ -543,6 +582,7 @@ impl OptiUi {
         match p.action {
             Action::ApplyTweaks(ids) => self.run_tweaks(ctx, ids, true, restore_point),
             Action::UndoTweaks(ids) => self.run_tweaks(ctx, ids, false, false),
+            Action::ApplyWithoutRestore(ids) => self.run_tweaks(ctx, ids, true, false),
             Action::UndoAll => {
                 let cat = self.cat.clone();
                 self.spawn(ctx, "Undo all Optimaxer tweaks", move |w| {
@@ -550,14 +590,22 @@ impl OptiUi {
                     let mut st = State::load();
                     let eng = Engine::new(&sys, backup_dir());
                     let ids: Vec<String> = st.records.keys().cloned().collect();
-                    let mut n = 0;
+                    let (mut n, mut bad) = (0, Vec::new());
                     for id in &ids {
                         if let Some(t) = cat.find(id) {
-                            eng.undo(t, &mut st, &mut |l| w.log(l));
-                            n += 1;
+                            let (_, failed) = eng.undo_checked(t, &mut st, &mut |l| w.log(l));
+                            if failed.is_empty() {
+                                n += 1;
+                            } else {
+                                bad.push(format!("{id} ({})", failed.join("; ")));
+                            }
                         }
                     }
-                    w.log(&format!("Reverted {n} tweak(s)."));
+                    if bad.is_empty() {
+                        w.log(&format!("Reverted {n} tweak(s)."));
+                    } else {
+                        w.log(&format!("WARN Reverted {n} tweak(s); {} NOT undone, their saved values are kept: {}", bad.len(), bad.join(", ")));
+                    }
                     w.send(Msg::Status(eng.status_all(&cat.tweaks, &st)));
                 });
             }
@@ -635,23 +683,21 @@ impl OptiUi {
         let title = format!("{} {} tweak(s)", if apply { "Apply" } else { "Undo" }, ids.len());
         self.spawn(ctx, &title, move |w| {
             let sys = WinSystem;
-            if apply && restore_point {
-                tools::create_restore_point(&sys, "Optimaxer - before tweaks", &mut |l| w.log(l));
-            }
             let mut st = State::load();
             let eng = Engine::new(&sys, backup_dir());
-            let (mut ok, mut restart, mut explorer) = (0, false, false);
-            let mut now = HashMap::new();
-            for id in &ids {
-                let Some(t) = cat.find(id) else { continue };
-                let on = if apply { eng.apply(t, &mut st, &mut |l| w.log(l)) } else { eng.undo(t, &mut st, &mut |l| w.log(l)) };
-                restart |= t.restart;
-                explorer |= t.explorer;
-                if on == apply {
-                    ok += 1;
-                }
-                now.insert(id.clone(), on);
+            let b = run_batch(&sys, &eng, &cat, &ids, apply, restore_point, &mut st, &mut |l| w.log(l));
+            if b.restore_failed {
+                w.send(Msg::Plan(Pending {
+                    title: "No restore point".into(),
+                    intro: format!("The restore point could not be created, so nothing was changed. Apply the {} tweak(s) anyway, without a restore point? Every tweak still saves its original values for undo.", ids.len()),
+                    lines: vec![],
+                    action: Action::ApplyWithoutRestore(ids),
+                    restore_option: false,
+                    ok_label: "Apply without a restore point".into(),
+                }));
+                return;
             }
+            let (ok, restart, explorer, now) = (b.ok, b.restart, b.explorer, b.now);
             if explorer {
                 w.log("Restarting Explorer to apply interface changes");
                 sys.run("taskkill.exe", &["/F", "/IM", "explorer.exe"]);
@@ -670,6 +716,7 @@ impl OptiUi {
             return;
         };
         self.selected.clear();
+        self.tw_skip.clear();
         match preset {
             "none" => {}
             "auto" => {
@@ -677,6 +724,11 @@ impl OptiUi {
                 for n in &plan.notes {
                     self.say(&format!("  {n}"));
                 }
+                for (id, why) in &plan.skipped {
+                    let name = self.cat.find(id).map(|t| t.name.clone()).unwrap_or_else(|| id.clone());
+                    self.say(&format!("  not ticked: {name} ({why})"));
+                }
+                self.tw_skip = plan.skipped.clone();
                 self.say(&format!("Auto-detect: {} tweak(s) selected for this PC ({}).", plan.ids.len(), tr.tags.join(", ")));
                 if plan.ids.is_empty() {
                     self.events.push(OptiEvent::Toast("This PC is already optimized: every fitting tweak is applied.".into()));
@@ -1081,6 +1133,9 @@ impl OptiUi {
                                     if !notes.is_empty() {
                                         ui.label(RichText::new(notes).size(T_CAPTION).color(t.subtle));
                                     }
+                                    if let Some(why) = self.tw_skip.get(&tw.id) {
+                                        ui.add(egui::Label::new(RichText::new(format!("Smart optimize did not tick this: {why}")).size(T_CAPTION).color(t.warn)).wrap());
+                                    }
                                     let toggle = ui.add(egui::Label::new(RichText::new(if open { "Hide technical details" } else { "Technical details" }).size(T_CAPTION).color(t.brand_text)).sense(Sense::click()));
                                     details_rect = toggle.rect;
                                     if open {
@@ -1106,6 +1161,13 @@ impl OptiUi {
                             if on {
                                 self.selected.remove(&tw.id);
                             } else {
+                                if !tw.conflict.is_empty() {
+                                    // one choice per group: ticking this unticks the other tweaks that write the same setting
+                                    let peers: Vec<String> = cat.tweaks.iter().filter(|p| p.conflict == tw.conflict && p.id != tw.id).map(|p| p.id.clone()).collect();
+                                    for p in peers {
+                                        self.selected.remove(&p);
+                                    }
+                                }
                                 self.selected.insert(tw.id.clone());
                             }
                         }
@@ -1504,7 +1566,7 @@ mod tests {
         let cat = Catalog::load();
         let t = tr(false);
         let (_, total) = score(&cat, &t, &HashMap::new());
-        assert!(total > 40);
+        assert!(total >= 10);
         let all: HashMap<String, bool> = cat.tweaks.iter().map(|t| (t.id.clone(), true)).collect();
         assert_eq!(score(&cat, &t, &all), (total, total));
         assert_eq!(score(&cat, &t, &HashMap::new()).0, 0);
@@ -1526,6 +1588,26 @@ mod tests {
         sys.put(&t.reg[0].p, &t.reg[0].n, RegData::Str("20000".into()));
         let todo = plan_lines(&eng, &[t]);
         assert!(todo.iter().any(|l| l.text.contains("20000") && l.text.contains("5000")));
+    }
+
+    #[test]
+    fn failed_restore_point_applies_nothing() {
+        use crate::opti::backend::fake::FakeSystem;
+        let sys = FakeSystem::default();
+        sys.fail.borrow_mut().insert("powershell.exe".into());
+        let cat = Catalog::load();
+        let d = std::env::temp_dir().join(format!("opti-ui-batch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let mut st = State::load_from(d.join("state.json"), None);
+        let eng = Engine::new(&sys, PathBuf::new());
+        let ids = vec!["ui-ext".to_string(), "game-mode".to_string()];
+        let b = run_batch(&sys, &eng, &cat, &ids, true, true, &mut st, &mut |_| {});
+        assert!(b.restore_failed && b.now.is_empty());
+        assert!(st.records.is_empty(), "a tweak was applied after the restore point failed");
+        assert!(sys.values.borrow().is_empty(), "the registry was written");
+        let b = run_batch(&sys, &eng, &cat, &ids, true, false, &mut st, &mut |_| {});
+        assert!(!b.restore_failed && b.now.len() == 2, "without a restore point the batch runs");
     }
 
     #[test]

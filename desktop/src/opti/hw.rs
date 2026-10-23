@@ -4,7 +4,7 @@
 
 use super::backend::{RegData, System};
 use super::catalog::{Catalog, Tweak};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
 use windows_sys::Win32::System::IO::DeviceIoControl;
@@ -33,6 +33,8 @@ impl Traits {
 pub struct Plan {
     pub ids: Vec<String>,
     pub notes: Vec<String>,
+    /// Why a Moderate or Advanced tweak, or a recommended tweak that does not fit, was left unticked.
+    pub skipped: BTreeMap<String, String>,
 }
 
 /// Vendors with their own driver/support page. Optimaxer never downloads or installs a driver; the page is opened on request.
@@ -232,38 +234,100 @@ pub fn fits(t: &Tweak, tr: &Traits) -> bool {
     })
 }
 
-/// Ids of the tweaks a preset button selects on this machine.
-pub fn preset_ids(cat: &Catalog, tr: &Traits, preset: &str) -> Vec<String> {
-    cat.tweaks.iter().filter(|t| fits(t, tr) && t.has_tag(preset)).map(|t| t.id.clone()).collect()
+/// The hardware fact that rules a tweak out on this PC, in plain words; None when it fits. Same wording as the
+/// PowerShell Get-TweakFitReason.
+pub fn fit_reason(t: &Tweak, tr: &Traits) -> Option<String> {
+    if t.desktop_only && tr.laptop {
+        return Some("this PC is a laptop".into());
+    }
+    if t.ssd_only && !tr.ssd {
+        return Some("the system drive is a hard disk".into());
+    }
+    if !t.vendor.is_empty() && t.vendor != tr.vendor {
+        return Some(format!("not a {} system", t.vendor));
+    }
+    if t.min_ram > 0.0 && tr.ram_gb > 0.0 && tr.ram_gb < t.min_ram {
+        return Some(format!("{:.0} GB RAM, needs {:.0} GB", tr.ram_gb, t.min_ram));
+    }
+    let name = |k: &str| match k {
+        "dgpu" => "a discrete GPU".to_string(),
+        "hdd" => "a hard disk".into(),
+        "ssd" => "an SSD".into(),
+        "laptop" => "a laptop".into(),
+        "desktop" => "a desktop".into(),
+        "lowend" => "low-end hardware".into(),
+        "nvidia" => "an NVIDIA GPU".into(),
+        "win11" => "Windows 11".into(),
+        other => other.to_string(),
+    };
+    for n in t.need.iter().filter(|n| !n.is_empty()) {
+        match n.strip_prefix('!') {
+            Some(neg) if tr.has(neg) => return Some(format!("not for {}", name(neg))),
+            None if !tr.has(n) => return Some(format!("needs {}", name(n))),
+            _ => {}
+        }
+    }
+    None
 }
 
-/// Auto-detect: the recommended set, plus 'smart' tweaks whose hardware condition fits, plus the gaming set on PCs
-/// with a discrete GPU. Opt-in and unfit tweaks never appear, and neither do tweaks that are already applied.
+/// Keeps the first id of each conflict group (search style, drive letters, ...): one choice per group.
+pub fn resolve_conflicts(cat: &Catalog, ids: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    ids.into_iter()
+        .filter(|id| match cat.find(id).map(|t| t.conflict.as_str()).filter(|g| !g.is_empty()) {
+            Some(g) => seen.insert(g.to_string()),
+            None => true,
+        })
+        .collect()
+}
+
+/// Ids of the tweaks a preset button selects on this machine. Opt-in tweaks never; one per conflict group.
+pub fn preset_ids(cat: &Catalog, tr: &Traits, preset: &str) -> Vec<String> {
+    let ids = cat.tweaks.iter().filter(|t| !t.has_tag("optin") && fits(t, tr) && t.has_tag(preset)).map(|t| t.id.clone()).collect();
+    resolve_conflicts(cat, ids)
+}
+
+/// Auto-detect with the same rule as the PowerShell Get-SmartPlan (`Tweak::auto_pick`): Safe-risk recommended
+/// tweaks plus Safe 'smart' tweaks whose hardware gate fits. Moderate and Advanced are never ticked, whatever their
+/// tags; every one of them gets a reason in `skipped`. Opt-in, unfit and already applied tweaks never appear.
 pub fn smart_plan(cat: &Catalog, tr: &Traits, applied: &HashMap<String, bool>) -> Plan {
-    let gaming = tr.has("dgpu");
-    let ids = cat
-        .tweaks
-        .iter()
-        .filter(|t| !t.has_tag("optin") && fits(t, tr))
-        .filter(|t| t.has_tag("safe") || t.has_tag("smart") || (gaming && t.has_tag("gaming")))
-        .filter(|t| !applied.get(&t.id).copied().unwrap_or(false))
-        .map(|t| t.id.clone())
-        .collect();
-    let mut notes = vec![if tr.laptop { "Laptop: battery-friendly set, no always-max-power tweaks.".to_string() } else { "Desktop: performance power plan and CPU tweaks included.".to_string() }];
-    notes.push(if tr.ssd { "SSD: TRIM and disk-wear tweaks included.".into() } else { "Hard disk: prefetch/SysMain left on; run a defrag from Windows.".into() });
-    if gaming {
-        notes.push("Discrete GPU: gaming latency set included.".into());
+    let mut ids = Vec::new();
+    let mut skipped = BTreeMap::new();
+    for t in &cat.tweaks {
+        if t.has_tag("optin") {
+            continue;
+        }
+        let why = fit_reason(t, tr);
+        if t.risk != "Safe" {
+            let r = match &why {
+                Some(w) => format!("{} risk, and {w}", t.risk),
+                None => format!("{} risk: left for you to tick", t.risk),
+            };
+            skipped.insert(t.id.clone(), r);
+            continue;
+        }
+        let listed = t.has_tag("safe") || t.has_tag("smart") || t.has_tag("gaming");
+        if let Some(w) = why {
+            if listed {
+                skipped.insert(t.id.clone(), format!("does not fit: {w}"));
+            }
+            continue;
+        }
+        if t.auto_pick() && !applied.get(&t.id).copied().unwrap_or(false) {
+            ids.push(t.id.clone());
+        }
     }
-    if tr.has("ram8") {
-        notes.push("8 GB or less RAM: memory compression stays on, background load trimmed.".into());
+    let ids = resolve_conflicts(cat, ids);
+    let mut notes = vec!["Only Safe tweaks are ticked. Moderate and Advanced are left for you to tick.".to_string()];
+    notes.push(if tr.laptop { "Laptop: desktop-only tweaks are skipped.".into() } else { "Desktop: no power-plan or CPU-power change is ticked; pick those yourself if you want them.".into() });
+    notes.push(if tr.ssd { "SSD: TRIM check included.".into() } else { "Hard disk: SSD-only tweaks are skipped; run a defrag from Windows.".into() });
+    if tr.ram_gb > 0.0 {
+        notes.push(format!("{:.0} GB RAM: tweaks that need more memory than this are skipped.", tr.ram_gb));
     }
-    if tr.has("ram16") {
-        notes.push("16 GB or more RAM: RAM-heavy tweaks included.".into());
+    if tr.has("dgpu") {
+        notes.push("Discrete GPU found: gaming tweaks are not ticked automatically; use the Gaming preset if you want them.".into());
     }
-    if tr.has("lowend") {
-        notes.push("Low-end hardware: visual effects trimmed for speed.".into());
-    }
-    Plan { ids, notes }
+    Plan { ids, notes, skipped }
 }
 
 #[cfg(test)]
@@ -337,15 +401,52 @@ mod tests {
     }
 
     #[test]
-    fn dgpu_pc_gets_the_gaming_set() {
+    fn reference_gaming_desktop_gets_only_safe_tweaks() {
+        // i7-14700KF, RTX 3090, 64 GB, Windows 11, in a hot room: no power, timer, Nagle or prefetch changes
         let cat = Catalog::load();
-        let gaming = traits(false, true, 32.0, 16, &["NVIDIA GeForce RTX 4060"]);
-        let office = traits(false, true, 32.0, 16, &["Intel(R) UHD Graphics"]);
-        let a = smart_plan(&cat, &gaming, &HashMap::new()).ids;
-        let b = smart_plan(&cat, &office, &HashMap::new()).ids;
-        assert!(a.iter().any(|i| i == "perf-hags"));
-        assert!(!b.iter().any(|i| i == "perf-hags"));
-        assert!(a.len() > b.len());
+        let pc = traits(false, true, 63.8, 28, &["NVIDIA GeForce RTX 3090"]);
+        let plan = smart_plan(&cat, &pc, &HashMap::new());
+        assert!(!plan.ids.is_empty());
+        for id in ["perf-timer", "perf-cpupower", "net-nagle", "perf-prefetch", "perf-ultimate", "perf-hags", "perf-fth", "game-mode"] {
+            assert!(!plan.ids.iter().any(|i| i == id), "{id} was selected");
+        }
+        for id in &plan.ids {
+            let t = cat.find(id).unwrap();
+            assert_eq!(t.risk, "Safe", "{id}");
+            assert!(t.auto_pick(), "{id}");
+        }
+        assert!(plan.skipped["perf-hags"].contains("Moderate"));
+        assert!(plan.notes.iter().any(|n| n.contains("Moderate and Advanced are left for you to tick")));
+        // every Moderate or Advanced tweak that is not opt-in says why it stayed unticked
+        for t in cat.tweaks.iter().filter(|t| t.risk != "Safe" && !t.has_tag("optin")) {
+            assert!(plan.skipped.contains_key(&t.id), "{} has no reason", t.id);
+        }
+        // the 5060 Ti answer is the same
+        let other = smart_plan(&cat, &traits(false, true, 32.0, 16, &["NVIDIA GeForce RTX 5060 Ti"]), &HashMap::new());
+        assert!(other.ids.iter().all(|i| cat.find(i).unwrap().risk == "Safe"));
+    }
+
+    #[test]
+    fn laptop_reasons_name_the_hardware() {
+        let cat = Catalog::load();
+        let tr = traits(true, true, 8.0, 8, &["Intel(R) UHD Graphics"]);
+        assert_eq!(fit_reason(cat.find("perf-ultimate").unwrap(), &tr).as_deref(), Some("this PC is a laptop"));
+        assert!(smart_plan(&cat, &tr, &HashMap::new()).notes.iter().any(|n| n.contains("8 GB RAM")));
+    }
+
+    #[test]
+    fn presets_never_tick_two_tweaks_of_one_group() {
+        let cat = Catalog::load();
+        let tr = traits(false, true, 32.0, 16, &["NVIDIA GeForce RTX 3090"]);
+        for p in ["max", "safe", "privacy"] {
+            let ids = preset_ids(&cat, &tr, p);
+            let mut groups = HashSet::new();
+            for id in &ids {
+                let g = &cat.find(id).unwrap().conflict;
+                assert!(g.is_empty() || groups.insert(g.clone()), "{p} ticks two of {g}");
+                assert!(!cat.find(id).unwrap().has_tag("optin"));
+            }
+        }
     }
 
     #[test]
@@ -353,7 +454,7 @@ mod tests {
         let cat = Catalog::load();
         let tr = traits(false, true, 32.0, 16, &["NVIDIA GeForce RTX 3090"]);
         let ids = preset_ids(&cat, &tr, "safe");
-        assert!(ids.len() > 40);
+        assert!(ids.len() >= 10);
         assert!(ids.iter().all(|i| cat.find(i).unwrap().has_tag("safe")));
     }
 }

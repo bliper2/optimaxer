@@ -1,4 +1,4 @@
-//! The tweak catalog. The 216 tweaks come from Optimaxer's PowerShell catalog, exported once by
+//! The tweak catalog. The 217 tweaks come from Optimaxer's PowerShell catalog, exported once by
 //! `tools/export-optimaxer.ps1` into `assets/optimaxer/tweaks.json`. Registry, service and scheduled-task tweaks
 //! are plain data. Tweaks that ran scripts are mapped to a `Special` port, or listed as not ported.
 
@@ -51,6 +51,8 @@ pub struct ScriptFlags {
     pub apply: bool,
     pub undo: bool,
     pub test: bool,
+    /// The PowerShell tweak reads its originals in a -Snapshot script before it changes anything.
+    pub snapshot: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -73,6 +75,8 @@ pub struct Tweak {
     pub svc_tol: f64,
     pub min_ram: f64,
     pub need: Vec<String>,
+    /// Tweaks that write the same setting (search style, drive letters, ...) share a group; only one can be selected.
+    pub conflict: String,
     pub script: ScriptFlags,
     #[serde(skip)]
     pub special: Option<Special>,
@@ -84,6 +88,12 @@ pub struct Tweak {
 impl Tweak {
     pub fn has_tag(&self, tag: &str) -> bool {
         self.tags.iter().any(|t| t == tag)
+    }
+
+    /// The rule every automatic plan uses, same as the PowerShell Test-AutoPick: Risk must be Safe, and the tweak must
+    /// be in the recommended set or be a hardware-gated 'smart' tweak. Opt-in never; gaming tags never on their own.
+    pub fn auto_pick(&self) -> bool {
+        !self.has_tag("optin") && self.risk == "Safe" && (self.has_tag("safe") || self.has_tag("smart"))
     }
 }
 
@@ -164,7 +174,7 @@ mod tests {
     #[test]
     fn embedded_catalog_parses_and_ids_are_unique() {
         let c = Catalog::parse(EMBEDDED).unwrap();
-        assert_eq!(c.tweaks.len() + c.not_ported.len(), 216);
+        assert_eq!(c.tweaks.len() + c.not_ported.len(), 217);
         let ids: HashSet<_> = c.tweaks.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids.len(), c.tweaks.len());
         assert!(c.tweaks.len() > 190, "most of the catalog should be ported, got {}", c.tweaks.len());
@@ -200,5 +210,33 @@ mod tests {
         assert!(!c.find("net-smb1").unwrap().reg.is_empty());
         assert!(c.not_ported.iter().any(|s| s.id == "debloat-onedrive"));
         assert!(c.find("ai-recall").map(|t| t.partial).unwrap_or(false));
+        // the snapshot-based ports must exist, and perf-fth is plain registry now (no FTH list reset)
+        for id in ["net-nagle", "perf-timer", "perf-sleepstudy"] {
+            assert!(c.find(id).is_some_and(|t| t.special.is_some() && t.script.snapshot), "{id}");
+        }
+        let fth = c.find("perf-fth").unwrap();
+        assert!(fth.special.is_none() && !fth.script.apply && !fth.reg.is_empty());
+    }
+
+    #[test]
+    fn risk_rule_and_presets_match_the_powershell_catalog() {
+        let c = Catalog::load();
+        for t in c.tweaks.iter().filter(|t| t.has_tag("safe")) {
+            assert_eq!(t.risk, "Safe", "{} is tagged safe", t.id);
+        }
+        for id in ["perf-prefetch", "perf-paging", "perf-timer", "perf-cpupower", "perf-priosep", "game-mpo", "game-fso", "net-nagle", "perf-bgapps", "perf-memcompress", "perf-fth"] {
+            // a few (memory compression) need PowerShell cmdlets and are listed as not ported
+            let Some(t) = c.find(id) else {
+                assert!(c.not_ported.iter().any(|s| s.id == id), "{id} missing");
+                continue;
+            };
+            assert!(t.has_tag("optin") && !t.has_tag("safe") && !t.has_tag("gaming") && !t.has_tag("max"), "{id} tags {:?}", t.tags);
+            assert!(!t.auto_pick(), "{id}");
+        }
+        let mut gaming: Vec<_> = c.tweaks.iter().filter(|t| t.has_tag("gaming")).map(|t| t.id.as_str()).collect();
+        gaming.sort();
+        assert_eq!(gaming, ["game-dvr", "game-mode", "game-mouse", "game-sticky"]);
+        assert!(c.find("game-dvr-policy").is_some_and(|t| t.has_tag("optin")));
+        assert!(c.tweaks.iter().filter(|t| t.conflict == "search style").count() >= 2);
     }
 }

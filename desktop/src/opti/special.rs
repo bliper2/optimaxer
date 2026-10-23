@@ -1,6 +1,8 @@
 //! Hand-ported tweaks whose PowerShell versions ran scripts: powercfg, fsutil, bcdedit, netsh, wevtutil, dism and
 //! registry key removal. Each one reports what it will do (`describe`), whether it is active (`test`), and how to
 //! apply and undo itself. Whatever `apply` returns is stored in the undo record and handed back to `undo`.
+//! Ports that change many values (Nagle, the boot timer, event logs) first take a `snapshot` of every original; the
+//! engine saves it before anything changes and `undo` puts exactly that back, failing loudly when it cannot.
 
 use super::backend::{RegData, System};
 use serde_json::{json, Value};
@@ -42,7 +44,6 @@ pub enum Special {
     ReservedStorage,
     RemoveKeys { keys: &'static [&'static str], test: &'static [&'static str], tag: &'static str },
     KillProcs(&'static [&'static str]),
-    FthReset,
 }
 
 pub struct Ctx<'a> {
@@ -108,6 +109,52 @@ fn has_pair(text: &str, key: &str, val: &str) -> bool {
     })
 }
 
+/// Second word of the bcdedit row whose first word is `key`, e.g. "Yes" for "disabledynamictick  Yes".
+fn bcd_value(text: &str, key: &str) -> Option<String> {
+    text.lines().find_map(|l| {
+        let mut w = l.split_whitespace();
+        if w.next().is_some_and(|k| k.eq_ignore_ascii_case(key)) { w.next().map(str::to_string) } else { None }
+    })
+}
+
+const BCD_TIMER: [&str; 3] = ["disabledynamictick", "useplatformclock", "useplatformtick"];
+
+fn checked(sys: &dyn System, exe: &str, args: &[&str]) -> Result<String, String> {
+    let out = sys.run(exe, args);
+    if out.code == 0 { Ok(out.text) } else { Err(format!("{exe} {} failed: {}", args.join(" "), out.text.trim())) }
+}
+
+/// The log's enabled flag from `wevtutil gl`, or None when this Windows has no such log.
+fn log_enabled(sys: &dyn System, log: &str) -> Option<bool> {
+    let out = sys.run("wevtutil.exe", &["gl", log]);
+    if out.code != 0 {
+        return None;
+    }
+    out.text.lines().find_map(|l| {
+        let l = l.trim().to_lowercase();
+        l.strip_prefix("enabled:").map(|v| v.trim() == "true")
+    })
+}
+
+fn reg_snapshot(sys: &dyn System, path: &str, name: &str) -> Value {
+    match sys.reg_get(path, name) {
+        Some(d) => json!({ "Exists": true, "Value": d.to_json(), "Type": d.type_name() }),
+        None => json!({ "Exists": false, "Value": null, "Type": null }),
+    }
+}
+
+fn reg_restore(sys: &dyn System, path: &str, name: &str, snap: &Value) -> Result<(), String> {
+    if snap.get("Exists").and_then(Value::as_bool).unwrap_or(false) {
+        let ty = snap.get("Type").and_then(Value::as_str).unwrap_or("DWord");
+        let d = snap.get("Value").and_then(|v| RegData::from_json(v, ty)).ok_or_else(|| format!("{path}\\{name}: saved value is unreadable"))?;
+        sys.reg_set(path, name, &d)
+    } else if sys.reg_get(path, name).is_some() {
+        sys.reg_delete_value(path, name)
+    } else {
+        Ok(())
+    }
+}
+
 fn active_scheme(sys: &dyn System) -> Option<String> {
     find_guid(&sys.run("powercfg", &["/getactivescheme"]).text)
 }
@@ -164,10 +211,10 @@ impl Special {
             Special::Fsutil(Fs::Trim) => "fsutil behavior set DisableDeleteNotify 0 (TRIM on)".into(),
             Special::Fsutil(Fs::Short8dot3) => "fsutil 8dot3name set 1".into(),
             Special::PowerAc(items) => format!("Set {} power-plan value(s) on AC power with powercfg", items.len()),
-            Special::BcdDynamicTick => "bcdedit /set disabledynamictick yes (restart needed)".into(),
+            Special::BcdDynamicTick => "bcdedit /set disabledynamictick yes (restart needed; the current boot values are saved first)".into(),
             Special::BcdLegacyBootMenu => "bcdedit /set {default} bootmenupolicy legacy".into(),
             Special::Teredo => "netsh interface teredo set state disabled".into(),
-            Special::Nagle => "Set TcpAckFrequency=1 and TCPNoDelay=1 on every active network interface".into(),
+            Special::Nagle => "Set TcpAckFrequency=1 and TCPNoDelay=1 on every active network interface (old values saved first)".into(),
             Special::SvcHostSplit => "Set SvcHostSplitDisable=1 on every service key (Xbox services excluded)".into(),
             Special::DropRegValue { path, name } => format!("Remove {path}\\{name} (the old value is saved for undo)"),
             Special::CreateKey { create, .. } => format!("Create registry key {create}"),
@@ -175,7 +222,6 @@ impl Special {
             Special::ReservedStorage => "DISM: disable Reserved Storage".into(),
             Special::RemoveKeys { keys, .. } => format!("Export, then delete {} registry key(s); undo imports the backup", keys.len()),
             Special::KillProcs(p) => format!("End running process(es): {}", p.join(", ")),
-            Special::FthReset => "Reset the Fault Tolerant Heap list (rundll32 fthsvc.dll,FthSysprepSpecialize)".into(),
         }
     }
 
@@ -204,6 +250,80 @@ impl Special {
             Special::CreateKey { create, .. } => Some(sys.reg_key_exists(create)),
             Special::RemoveKeys { test, .. } => Some(test.iter().all(|k| !sys.reg_key_exists(k))),
             _ => None,
+        }
+    }
+
+    /// Reads the originals of a port that changes many values, without changing anything. `None` for ports whose
+    /// `apply` returns its own undo data.
+    pub fn snapshot(&self, ctx: &Ctx) -> Result<Option<Value>, String> {
+        let sys = ctx.sys;
+        Ok(match self {
+            Special::Nagle => {
+                let base = format!(r"{SVC_ROOT}\Tcpip\Parameters\Interfaces");
+                let mut out = Vec::new();
+                for k in sys.reg_subkeys(&base) {
+                    let p = format!(r"{base}\{k}");
+                    let has_ip = matches!(sys.reg_get(&p, "DhcpIPAddress"), Some(RegData::Str(s)) if !s.is_empty())
+                        || matches!(sys.reg_get(&p, "IPAddress"), Some(RegData::Multi(m)) if m.iter().any(|s| !s.is_empty()))
+                        || matches!(sys.reg_get(&p, "IPAddress"), Some(RegData::Str(s)) if !s.is_empty());
+                    if has_ip {
+                        out.push(json!({ "If": k, "TcpAckFrequency": reg_snapshot(sys, &p, "TcpAckFrequency"), "TCPNoDelay": reg_snapshot(sys, &p, "TCPNoDelay") }));
+                    }
+                }
+                Some(Value::Array(out))
+            }
+            Special::BcdDynamicTick => {
+                let text = checked(sys, "bcdedit", &["/enum", "{current}"])?;
+                let mut m = serde_json::Map::new();
+                for n in BCD_TIMER {
+                    m.insert(n.into(), bcd_value(&text, n).map(Value::String).unwrap_or(Value::Null));
+                }
+                Some(Value::Object(m))
+            }
+            Special::EventLogs(logs) => {
+                let mut m = serde_json::Map::new();
+                for l in logs.iter() {
+                    if let Some(on) = log_enabled(sys, l) {
+                        m.insert(l.to_string(), Value::Bool(on));
+                    }
+                }
+                Some(Value::Object(m))
+            }
+            _ => None,
+        })
+    }
+
+    /// Applies a snapshot port with the originals the engine already saved.
+    pub fn apply_snapshot(&self, ctx: &Ctx, snap: &Value, log: &mut dyn FnMut(&str)) -> Result<(), String> {
+        let sys = ctx.sys;
+        match self {
+            Special::Nagle => {
+                let base = format!(r"{SVC_ROOT}\Tcpip\Parameters\Interfaces");
+                let mut n = 0;
+                for i in snap.as_array().into_iter().flatten() {
+                    let Some(k) = i.get("If").and_then(Value::as_str) else { continue };
+                    let p = format!(r"{base}\{k}");
+                    sys.reg_set(&p, "TcpAckFrequency", &RegData::Dword(1))?;
+                    sys.reg_set(&p, "TCPNoDelay", &RegData::Dword(1))?;
+                    n += 1;
+                }
+                log(&format!("  {n} network interface(s) updated"));
+                Ok(())
+            }
+            Special::BcdDynamicTick => {
+                checked(sys, "bcdedit", &["/set", "disabledynamictick", "yes"])?;
+                if snap.get("useplatformclock").is_some_and(|v| !v.is_null()) {
+                    checked(sys, "bcdedit", &["/deletevalue", "useplatformclock"])?;
+                }
+                Ok(())
+            }
+            Special::EventLogs(_) => {
+                for (l, _) in snap.as_object().into_iter().flatten() {
+                    checked(sys, "wevtutil.exe", &["set-log", l, "/e:false"])?;
+                }
+                Ok(())
+            }
+            other => other.apply(ctx, log).map(|_| ()),
         }
     }
 
@@ -245,11 +365,10 @@ impl Special {
                 let want: Vec<_> = items.iter().map(|i| (i.sub.to_string(), i.setting.to_string(), i.val)).collect();
                 Ok(Value::Array(set_ac(sys, &want)))
             }
-            Special::BcdDynamicTick => {
-                let before = sys.run("bcdedit", &["/enum", "{current}"]).text;
-                sys.run("bcdedit", &["/set", "disabledynamictick", "yes"]);
-                sys.run("bcdedit", &["/deletevalue", "useplatformclock"]);
-                Ok(json!({ "HadPlatformClock": has_pair(&before, "useplatformclock", "yes") }))
+            Special::BcdDynamicTick | Special::Nagle | Special::EventLogs(_) => {
+                let snap = self.snapshot(ctx)?.unwrap_or(Value::Null);
+                self.apply_snapshot(ctx, &snap, log)?;
+                Ok(snap)
             }
             Special::BcdLegacyBootMenu => {
                 sys.run("bcdedit", &["/set", "{default}", "bootmenupolicy", "legacy"]);
@@ -258,23 +377,6 @@ impl Special {
             Special::Teredo => {
                 sys.run("netsh", &["interface", "teredo", "set", "state", "disabled"]);
                 Ok(Value::Null)
-            }
-            Special::Nagle => {
-                let base = format!(r"{SVC_ROOT}\Tcpip\Parameters\Interfaces");
-                let mut done = Vec::new();
-                for k in sys.reg_subkeys(&base) {
-                    let p = format!(r"{base}\{k}");
-                    let has_ip = matches!(sys.reg_get(&p, "DhcpIPAddress"), Some(RegData::Str(s)) if !s.is_empty())
-                        || matches!(sys.reg_get(&p, "IPAddress"), Some(RegData::Multi(m)) if m.iter().any(|s| !s.is_empty()))
-                        || matches!(sys.reg_get(&p, "IPAddress"), Some(RegData::Str(s)) if !s.is_empty());
-                    if has_ip {
-                        sys.reg_set(&p, "TcpAckFrequency", &RegData::Dword(1))?;
-                        sys.reg_set(&p, "TCPNoDelay", &RegData::Dword(1))?;
-                        done.push(k);
-                    }
-                }
-                log(&format!("  {} network interface(s) updated", done.len()));
-                Ok(json!(done))
             }
             Special::SvcHostSplit => {
                 let mut done = Vec::new();
@@ -306,12 +408,6 @@ impl Special {
                 sys.reg_set(create, "", &RegData::Str(String::new()))?;
                 Ok(Value::Null)
             }
-            Special::EventLogs(logs) => {
-                for l in logs.iter() {
-                    sys.run("wevtutil.exe", &["set-log", l, "/e:false"]);
-                }
-                Ok(Value::Null)
-            }
             Special::ReservedStorage => {
                 sys.run("dism.exe", &["/Online", "/Set-ReservedStorageState", "/State:Disabled"]);
                 Ok(Value::Null)
@@ -341,14 +437,11 @@ impl Special {
                 }
                 Ok(Value::Null)
             }
-            Special::FthReset => {
-                sys.run("rundll32.exe", &["fthsvc.dll,FthSysprepSpecialize"]);
-                Ok(Value::Null)
-            }
         }
     }
 
-    pub fn undo(&self, ctx: &Ctx, data: &Value, log: &mut dyn FnMut(&str)) {
+    /// Puts the saved originals back. An error means something was not restored; the engine then keeps the record.
+    pub fn undo(&self, ctx: &Ctx, data: &Value, log: &mut dyn FnMut(&str)) -> Result<(), String> {
         let sys = ctx.sys;
         match self {
             Special::Ultimate => {
@@ -383,9 +476,29 @@ impl Special {
                 }
             }
             Special::BcdDynamicTick => {
-                sys.run("bcdedit", &["/deletevalue", "disabledynamictick"]);
-                if data.get("HadPlatformClock").and_then(Value::as_bool).unwrap_or(false) {
-                    sys.run("bcdedit", &["/set", "useplatformclock", "yes"]);
+                if let Some(had) = data.get("HadPlatformClock") {
+                    // record from v2.13.5 or older, which kept only this flag
+                    checked(sys, "bcdedit", &["/deletevalue", "disabledynamictick"])?;
+                    if had.as_bool().unwrap_or(false) {
+                        checked(sys, "bcdedit", &["/set", "useplatformclock", "yes"])?;
+                    }
+                    return Ok(());
+                }
+                if !data.is_object() {
+                    return Err("no saved boot values".into());
+                }
+                let now = checked(sys, "bcdedit", &["/enum", "{current}"])?;
+                for n in BCD_TIMER {
+                    let cur = bcd_value(&now, n);
+                    match data.get(n).and_then(Value::as_str) {
+                        Some(old) if cur.as_deref() != Some(old) => {
+                            checked(sys, "bcdedit", &["/set", n, old])?;
+                        }
+                        None if cur.is_some() => {
+                            checked(sys, "bcdedit", &["/deletevalue", n])?;
+                        }
+                        _ => {}
+                    }
                 }
             }
             Special::BcdLegacyBootMenu => {
@@ -396,10 +509,27 @@ impl Special {
             }
             Special::Nagle => {
                 let base = format!(r"{SVC_ROOT}\Tcpip\Parameters\Interfaces");
-                for i in data.as_array().into_iter().flatten().filter_map(Value::as_str) {
-                    let p = format!(r"{base}\{i}");
-                    let _ = sys.reg_delete_value(&p, "TcpAckFrequency");
-                    let _ = sys.reg_delete_value(&p, "TCPNoDelay");
+                let mut bad = Vec::new();
+                for i in data.as_array().into_iter().flatten() {
+                    if let Some(k) = i.as_str() {
+                        // record from v2.13.5 or older: only the interface name was kept, and both values were deleted
+                        let p = format!(r"{base}\{k}");
+                        let _ = sys.reg_delete_value(&p, "TcpAckFrequency");
+                        let _ = sys.reg_delete_value(&p, "TCPNoDelay");
+                        continue;
+                    }
+                    let Some(k) = i.get("If").and_then(Value::as_str) else { continue };
+                    let p = format!(r"{base}\{k}");
+                    for n in ["TcpAckFrequency", "TCPNoDelay"] {
+                        if let Some(snap) = i.get(n) {
+                            if let Err(e) = reg_restore(sys, &p, n, snap) {
+                                bad.push(format!("{p}\\{n}: {e}"));
+                            }
+                        }
+                    }
+                }
+                if !bad.is_empty() {
+                    return Err(format!("could not restore {}", bad.join("; ")));
                 }
             }
             Special::SvcHostSplit => {
@@ -410,19 +540,30 @@ impl Special {
             Special::DropRegValue { path, name } => {
                 if data.get("Existed").and_then(Value::as_bool).unwrap_or(false) {
                     let ty = data.get("Type").and_then(Value::as_str).unwrap_or("String");
-                    if let Some(d) = data.get("Value").and_then(|v| RegData::from_json(v, ty)) {
-                        if let Err(e) = sys.reg_set(path, name, &d) {
-                            log(&format!("  restore failed {path}\\{name}: {e}"));
-                        }
+                    let d = data.get("Value").and_then(|v| RegData::from_json(v, ty)).ok_or_else(|| format!("{path}\\{name}: saved value is unreadable"))?;
+                    if let Err(e) = sys.reg_set(path, name, &d) {
+                        log(&format!("  restore failed {path}\\{name}: {e}"));
+                        return Err(e);
                     }
                 }
             }
             Special::CreateKey { remove, .. } => {
-                let _ = sys.reg_delete_key(remove);
+                sys.reg_delete_key(remove)?;
             }
             Special::EventLogs(logs) => {
-                for l in logs.iter() {
-                    sys.run("wevtutil.exe", &["set-log", l, "/e:true"]);
+                let mut bad = Vec::new();
+                let pairs: Vec<(String, bool)> = match data.as_object() {
+                    Some(m) => m.iter().map(|(k, v)| (k.clone(), v.as_bool().unwrap_or(true))).collect(),
+                    // records from v2.13.5 or older saved nothing; those versions always turned the logs back on
+                    None => logs.iter().filter(|l| log_enabled(sys, l).is_some()).map(|l| (l.to_string(), true)).collect(),
+                };
+                for (l, on) in pairs {
+                    if let Err(e) = checked(sys, "wevtutil.exe", &["set-log", &l, if on { "/e:true" } else { "/e:false" }]) {
+                        bad.push(e);
+                    }
+                }
+                if !bad.is_empty() {
+                    return Err(bad.join("; "));
                 }
             }
             Special::ReservedStorage => {
@@ -435,8 +576,9 @@ impl Special {
                     }
                 }
             }
-            Special::KillProcs(_) | Special::FthReset => {}
+            Special::KillProcs(_) => {}
         }
+        Ok(())
     }
 }
 
@@ -500,7 +642,6 @@ pub fn special_for(id: &str) -> Option<Special> {
         "ui-thispc-clean" => Special::RemoveKeys { keys: &THISPC_KEYS, test: &THISPC_TEST, tag: "thispc" },
         "debloat-oobeapps" => Special::RemoveKeys { keys: &OOBE_KEYS, test: &OOBE_KEYS, tag: "oobe" },
         "debloat-widgets" => Special::KillProcs(&WIDGET_PROCS),
-        "perf-fth" => Special::FthReset,
         _ => return None,
     })
 }
@@ -534,7 +675,7 @@ mod tests {
         let data = Special::Ultimate.apply(&c, &mut |_| {}).unwrap();
         assert!(sys.ran("powercfg -setactive 11111111-2222-3333-4444-555555555555"));
         assert_eq!(data["Prev"], "381b4222-f694-41f0-9685-ff5bb260df2e");
-        Special::Ultimate.undo(&c, &data, &mut |_| {});
+        Special::Ultimate.undo(&c, &data, &mut |_| {}).unwrap();
         assert!(sys.ran("powercfg -setactive 381b4222-f694-41f0-9685-ff5bb260df2e"));
         assert!(sys.ran("powercfg -delete 11111111-2222-3333-4444-555555555555"));
     }
@@ -556,7 +697,7 @@ mod tests {
         let data = s.apply(&c, &mut |_| {}).unwrap();
         assert_eq!(data["Prev"], 2);
         assert!(sys.ran("fsutil behavior set disablelastaccess 1"));
-        s.undo(&c, &data, &mut |_| {});
+        s.undo(&c, &data, &mut |_| {}).unwrap();
         assert!(sys.ran("fsutil behavior set disablelastaccess 2"));
     }
 
@@ -578,7 +719,7 @@ mod tests {
         let data = s.apply(&c, &mut |_| {}).unwrap();
         assert!(sys.ran("reg.exe export"));
         assert_eq!(s.test(&c), Some(true));
-        s.undo(&c, &data, &mut |_| {});
+        s.undo(&c, &data, &mut |_| {}).unwrap();
         assert!(sys.ran("reg.exe import"));
     }
 
@@ -591,14 +732,70 @@ mod tests {
         let dir = PathBuf::new();
         let c = ctx(&sys, &dir);
         let data = Special::Nagle.apply(&c, &mut |_| {}).unwrap();
-        assert_eq!(data, json!(["{a}"]));
+        assert_eq!(data.as_array().unwrap().len(), 1);
+        assert_eq!(data[0]["If"], "{a}");
         assert_eq!(sys.reg_get(&format!(r"{base}\{{A}}"), "TCPNoDelay"), Some(RegData::Dword(1)));
         assert_eq!(sys.reg_get(&format!(r"{base}\{{B}}"), "TCPNoDelay"), None);
     }
 
     #[test]
+    fn nagle_undo_restores_a_pre_existing_value_instead_of_deleting_it() {
+        let sys = FakeSystem::default();
+        let base = r"HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces";
+        let a = format!(r"{base}\{{A}}");
+        sys.put(&a, "DhcpIPAddress", RegData::Str("192.168.1.5".into()));
+        sys.put(&a, "TcpAckFrequency", RegData::Dword(2));
+        let dir = PathBuf::new();
+        let c = ctx(&sys, &dir);
+        let snap = Special::Nagle.snapshot(&c).unwrap().unwrap();
+        Special::Nagle.apply_snapshot(&c, &snap, &mut |_| {}).unwrap();
+        assert_eq!(sys.reg_get(&a, "TcpAckFrequency"), Some(RegData::Dword(1)));
+        // through JSON, like a record read back from state.json
+        let saved: Value = serde_json::from_str(&snap.to_string()).unwrap();
+        Special::Nagle.undo(&c, &saved, &mut |_| {}).unwrap();
+        assert_eq!(sys.reg_get(&a, "TcpAckFrequency"), Some(RegData::Dword(2)));
+        assert_eq!(sys.reg_get(&a, "TCPNoDelay"), None);
+    }
+
+    #[test]
+    fn boot_timer_undo_puts_back_the_exact_entries() {
+        let sys = FakeSystem::default();
+        sys.answer("bcdedit /enum", "identifier  {current}\nuseplatformclock        Yes\nuseplatformtick         No");
+        let dir = PathBuf::new();
+        let c = ctx(&sys, &dir);
+        let snap = Special::BcdDynamicTick.snapshot(&c).unwrap().unwrap();
+        assert_eq!(snap["useplatformclock"], "Yes");
+        assert!(snap["disabledynamictick"].is_null());
+        Special::BcdDynamicTick.apply_snapshot(&c, &snap, &mut |_| {}).unwrap();
+        assert!(sys.ran("bcdedit /set disabledynamictick yes") && sys.ran("bcdedit /deletevalue useplatformclock"));
+        sys.answer("bcdedit /enum", "identifier  {current}\ndisabledynamictick      Yes\nuseplatformtick         No");
+        sys.commands.borrow_mut().clear();
+        Special::BcdDynamicTick.undo(&c, &snap, &mut |_| {}).unwrap();
+        assert!(sys.ran("bcdedit /deletevalue disabledynamictick"));
+        assert!(sys.ran("bcdedit /set useplatformclock Yes"));
+        assert!(!sys.ran("useplatformtick"), "an unchanged entry was touched");
+    }
+
+    #[test]
+    fn event_log_undo_restores_each_state_and_reports_failure() {
+        let sys = FakeSystem::default();
+        sys.answer("wevtutil.exe gl Microsoft-Windows-SleepStudy", "name: x\nenabled: false\n");
+        sys.answer("wevtutil.exe gl Microsoft-Windows-Kernel-Processor-Power", "name: y\nenabled: true\n");
+        let dir = PathBuf::new();
+        let c = ctx(&sys, &dir);
+        let s = special_for("perf-sleepstudy").unwrap();
+        let snap = s.snapshot(&c).unwrap().unwrap();
+        s.undo(&c, &snap, &mut |_| {}).unwrap();
+        assert!(sys.ran("wevtutil.exe set-log Microsoft-Windows-SleepStudy/Diagnostic /e:false"));
+        assert!(sys.ran("wevtutil.exe set-log Microsoft-Windows-Kernel-Processor-Power/Diagnostic /e:true"));
+        sys.fail.borrow_mut().insert("wevtutil.exe set-log".into());
+        assert!(s.undo(&c, &snap, &mut |_| {}).is_err());
+    }
+
+    #[test]
     fn every_special_has_a_description() {
-        for id in ["perf-ultimate", "perf-timer", "ui-classicmenu", "perf-fth", "debloat-widgets"] {
+        assert!(special_for("perf-fth").is_none(), "the FTH list reset cannot be undone and is gone");
+        for id in ["perf-ultimate", "perf-timer", "ui-classicmenu", "net-nagle", "debloat-widgets"] {
             assert!(!special_for(id).unwrap().describe().is_empty());
         }
     }

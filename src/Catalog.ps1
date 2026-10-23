@@ -1,6 +1,10 @@
 # Optimaxer tweak catalog. Each tweak is declarative (registry / services / tasks) plus optional Apply/Undo/Test scripts.
 # Apply may return a data object that is stored and passed back to Undo. Original values are snapshotted automatically.
 # Tags: safe = Recommended preset, gaming, privacy, max = Maximum preset. Tweaks tagged 'optin' are never in presets.
+# Automatic plans (Smart optimize, -Preset auto) take only Risk 'Safe' tweaks tagged safe or smart; see Test-AutoPick.
+# -Snapshot reads the original values a script tweak needs for undo. It runs before anything changes, its result is
+# saved first, and it is passed to both -Apply and -Undo. -Conflict names a group of tweaks that write the same setting
+# (only one of them can be ticked).
 
 $global:OptiCatalog = New-Object System.Collections.ArrayList
 
@@ -11,12 +15,12 @@ function T {
     param(
         [string]$Id, [string]$Name, [string]$Desc, [string]$Cat, [string]$Risk = 'Safe', [string[]]$Tags = @(),
         [object[]]$Reg = @(), [object[]]$Svc = @(), [string[]]$Task = @(),
-        [scriptblock]$Apply, [scriptblock]$Undo, [scriptblock]$Test,
+        [scriptblock]$Apply, [scriptblock]$Undo, [scriptblock]$Test, [scriptblock]$Snapshot, [string]$Conflict = '',
         [switch]$Restart, [switch]$Explorer, [switch]$DesktopOnly, [switch]$SSDOnly, [string]$Vendor = '', [double]$SvcTol = 1.0, [double]$MinRamGB = 0, [string[]]$Need = @()
     )
     [void]$global:OptiCatalog.Add([pscustomobject]@{
         Id = $Id; Name = $Name; Desc = $Desc; Cat = $Cat; Risk = $Risk; Tags = $Tags
-        Reg = $Reg; Svc = $Svc; Task = $Task; Apply = $Apply; Undo = $Undo; Test = $Test
+        Reg = $Reg; Svc = $Svc; Task = $Task; Apply = $Apply; Undo = $Undo; Test = $Test; Snapshot = $Snapshot; Conflict = $Conflict
         Restart = [bool]$Restart; Explorer = [bool]$Explorer; DesktopOnly = [bool]$DesktopOnly; SSDOnly = [bool]$SSDOnly; Vendor = $Vendor; SvcTol = $SvcTol; MinRamGB = $MinRamGB; Need = $Need
     })
 }
@@ -32,8 +36,8 @@ $MMP  = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemPro
 
 # ======================================================================= PERFORMANCE
 $P = 'Performance'
-T -Id 'perf-ultimate' -Cat $P -Name 'Ultimate Performance power plan' -Tags safe, gaming, max -DesktopOnly `
-  -Desc 'Activates the hidden Ultimate Performance plan: no CPU throttling, minimal latency. Desktops only; raises power draw.' `
+T -Id 'perf-ultimate' -Cat $P -Name 'Ultimate Performance power plan' -Tags max -DesktopOnly `
+  -Desc 'Activates the hidden Ultimate Performance plan: no CPU throttling, minimal latency. Desktops only. It raises idle power and heat, so it is never ticked automatically; in a warm room Balanced is the better default.' `
   -Apply {
       $prev = Get-ActiveSchemeGuid
       $guid = Get-SchemeGuidByName 'Ultimate'
@@ -52,7 +56,7 @@ T -Id 'perf-ultimate' -Cat $P -Name 'Ultimate Performance power plan' -Tags safe
   } `
   -Test { (Get-SchemeName (Get-ActiveSchemeGuid)) -match 'Ultimate' }
 
-T -Id 'perf-animations' -Cat $P -Name 'Faster UI: minimize animations and menu delay' -Tags safe, gaming, max -Explorer `
+T -Id 'perf-animations' -Cat $P -Name 'Faster UI: minimize animations and menu delay' -Tags max -Explorer `
   -Desc 'Removes window minimize/maximize animation, taskbar animation and the menu hover delay. Snappier feel, zero risk.' `
   -Reg @(
       Rg $DESK 'MenuShowDelay' '0' 'String'
@@ -74,7 +78,7 @@ T -Id 'perf-transparency' -Cat $P -Name 'Disable transparency effects' -Tags max
   -Desc 'Turns off acrylic/mica transparency. Saves GPU work, especially on integrated graphics.' `
   -Reg @( Rg $PERS 'EnableTransparency' 0 )
 
-T -Id 'perf-shutdown' -Cat $P -Name 'Faster shutdown and hung-app handling' -Tags safe, max `
+T -Id 'perf-shutdown' -Cat $P -Name 'Faster shutdown and hung-app handling' -Tags max `
   -Desc 'Shortens the time Windows waits for stuck services and apps before ending them (5s / 3s instead of 20s / 5s).' `
   -Reg @(
       Rg 'HKLM:\SYSTEM\CurrentControlSet\Control' 'WaitToKillServiceTimeout' '5000' 'String'
@@ -86,11 +90,11 @@ T -Id 'perf-startupdelay' -Cat $P -Name 'Remove startup app delay' -Tags safe, m
   -Desc 'Windows delays startup apps by ~10s after sign-in. This starts them immediately.' `
   -Reg @( Rg "$CV\Explorer\Serialize" 'StartupDelayInMSec' 0 )
 
-T -Id 'perf-priosep' -Cat $P -Name 'Prioritize foreground apps' -Tags gaming, max -Risk Moderate `
-  -Desc 'Win32PrioritySeparation = 0x26: short, fixed quanta with strong foreground boost. Better responsiveness for the app in front.' `
+T -Id 'perf-priosep' -Cat $P -Name 'Prioritize foreground apps' -Tags optin -Risk Advanced `
+  -Desc 'Win32PrioritySeparation = 0x26: short, fixed quanta with a strong foreground boost. Not recommended on Windows 11: it changes scheduling for every process on the PC, not only games, and the Windows default already favours the foreground app.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl' 'Win32PrioritySeparation' 38 )
 
-T -Id 'perf-powerthrottle' -Cat $P -Name 'Disable CPU power throttling' -Tags gaming, max -Risk Moderate -DesktopOnly `
+T -Id 'perf-powerthrottle' -Cat $P -Name 'Disable CPU power throttling' -Tags max -Risk Moderate -DesktopOnly `
   -Desc 'Stops Windows from throttling background-process CPU speed. Useful on desktops; costs battery on laptops.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling' 'PowerThrottlingOff' 1 )
 
@@ -110,14 +114,14 @@ T -Id 'perf-ntfs' -Cat $P -Name 'NTFS: stop last-access timestamp writes' -Tags 
   -Undo  { param($d) $v = if ($d -and $null -ne $d.Prev) { $d.Prev } else { 2 }; fsutil behavior set disablelastaccess $v | Out-Null } `
   -Test  { (Invoke-Native fsutil @('behavior', 'query', 'disablelastaccess')) -match '=\s*[13]' }
 
-T -Id 'perf-memcompress' -Cat $P -Name 'Disable memory compression (16 GB+ RAM)' -Tags max, smart -Risk Moderate -Restart -MinRamGB 15.5 -Need '!lowend' `
-  -Desc 'Saves CPU cycles spent compressing RAM. Only helps if you have plenty of memory.' `
+T -Id 'perf-memcompress' -Cat $P -Name 'Disable memory compression (16 GB+ RAM)' -Tags optin -Risk Advanced -Restart -MinRamGB 15.5 -Need '!lowend' `
+  -Desc 'Windows compresses memory only when RAM runs short. On 32 GB or more it rarely runs, so turning it off gains nothing; on smaller PCs it means more paging to disk. Not recommended on Windows 11.' `
   -Apply { Disable-MMAgent -MemoryCompression -ErrorAction Stop | Out-Null; $null } `
   -Undo  { Enable-MMAgent -MemoryCompression -ErrorAction Stop | Out-Null } `
   -Test  { -not (Get-MMAgent -ErrorAction Stop).MemoryCompression }
 
-T -Id 'perf-prefetch' -Cat $P -Name 'Disable Prefetch and SysMain (SSD only)' -Tags max -Risk Moderate -SSDOnly `
-  -Desc 'Superfetch preloads apps into RAM, pointless on fast SSDs and a source of background disk activity.' `
+T -Id 'perf-prefetch' -Cat $P -Name 'Disable Prefetch and SysMain (SSD only)' -Tags optin -Risk Advanced -SSDOnly `
+  -Desc 'Stops Prefetch and the SysMain service. Not recommended on Windows 11: SysMain still speeds up app launches on SSDs, and Windows already tunes it for solid-state drives.' `
   -Reg @(
       Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters' 'EnablePrefetcher' 0
       Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters' 'EnableSuperfetch' 0
@@ -127,8 +131,8 @@ T -Id 'perf-searchindex' -Cat $P -Name 'Disable Windows Search indexing' -Tags o
   -Desc 'Stops the indexer. Start-menu and Explorer searches become slower but background disk/CPU use drops.' `
   -Svc @( Sx 'WSearch' 4 )
 
-T -Id 'perf-cpupower' -Cat $P -Name 'CPU: no core parking, always full speed (plugged in)' -Tags gaming, max -Risk Moderate -DesktopOnly `
-  -Desc 'Min processor state 100% and all cores unparked on AC power. Lowest latency; higher idle power and heat.' `
+T -Id 'perf-cpupower' -Cat $P -Name 'CPU: no core parking, always full speed (plugged in)' -Tags optin -Risk Advanced -DesktopOnly `
+  -Desc 'Minimum processor state 100% and all cores unparked on AC power. Not recommended on Windows 11: it keeps a hot desktop CPU at full clocks while idle, and hybrid Intel CPUs rely on parking to steer work between P-cores and E-cores.' `
   -Apply { Set-PowerAC @(
         @{ Sub = '54533251-82be-4824-96c1-47b60b740d00'; Set = '0cc5b647-c1df-4637-891a-dec35c318583'; Val = 100 }
         @{ Sub = '54533251-82be-4824-96c1-47b60b740d00'; Set = 'bc5038f7-23e0-4960-96da-33abaf5935ec'; Val = 100 }) } `
@@ -137,7 +141,7 @@ T -Id 'perf-cpupower' -Cat $P -Name 'CPU: no core parking, always full speed (pl
         @{ Sub = '54533251-82be-4824-96c1-47b60b740d00'; Set = '0cc5b647-c1df-4637-891a-dec35c318583'; Val = 100 }
         @{ Sub = '54533251-82be-4824-96c1-47b60b740d00'; Set = 'bc5038f7-23e0-4960-96da-33abaf5935ec'; Val = 100 }) }
 
-T -Id 'perf-usbpcie' -Cat $P -Name 'No USB selective suspend / PCIe link power saving' -Tags gaming, max -DesktopOnly `
+T -Id 'perf-usbpcie' -Cat $P -Name 'No USB selective suspend / PCIe link power saving' -Tags max -DesktopOnly `
   -Desc 'Prevents devices and GPU links from sleeping mid-use: fixes USB stutter/disconnects and PCIe latency spikes.' `
   -Apply { Set-PowerAC @(
         @{ Sub = '2a737441-1930-4402-8d77-b2bebba308a3'; Set = '48e6b7a6-50f5-4782-a5d4-53bb8f07e226'; Val = 0 }
@@ -147,13 +151,14 @@ T -Id 'perf-usbpcie' -Cat $P -Name 'No USB selective suspend / PCIe link power s
         @{ Sub = '2a737441-1930-4402-8d77-b2bebba308a3'; Set = '48e6b7a6-50f5-4782-a5d4-53bb8f07e226'; Val = 0 }
         @{ Sub = '501a4d13-42af-4429-9fd1-a8218c268e20'; Set = 'ee12f906-d277-404b-b6da-e5fa1a576df5'; Val = 0 }) }
 
-T -Id 'perf-timer' -Cat $P -Name 'Low-latency timer (disable dynamic tick)' -Tags gaming, max -Risk Advanced -DesktopOnly -Restart `
-  -Desc 'bcdedit disabledynamictick=yes and removes forced platform clock. Lower input latency; slightly higher idle power.' `
-  -Apply { $a = bcdedit /enum '{current}' | Out-String; bcdedit /set disabledynamictick yes | Out-Null; bcdedit /deletevalue useplatformclock 2>&1 | Out-Null; @{ HadPlatformClock = [bool]($a -match 'useplatformclock\s+Yes') } } `
-  -Undo  { param($d) bcdedit /deletevalue disabledynamictick 2>&1 | Out-Null; if ($d -and $d.HadPlatformClock) { bcdedit /set useplatformclock yes | Out-Null } } `
-  -Test  { (bcdedit /enum '{current}' | Out-String) -match 'disabledynamictick\s+Yes' }
+T -Id 'perf-timer' -Cat $P -Name 'Low-latency timer (disable dynamic tick)' -Tags optin -Risk Advanced -DesktopOnly -Restart `
+  -Desc 'bcdedit disabledynamictick=yes and removes a forced platform clock. Not recommended on Windows 11: this is a boot configuration change, not a measured FPS gain, and it raises idle power. Undo puts back the exact boot entries that were there before.' `
+  -Snapshot { Get-BcdTimerValues } `
+  -Apply { param($d) Invoke-Bcd @('/set', 'disabledynamictick', 'yes'); if ($d.useplatformclock) { Invoke-Bcd @('/deletevalue', 'useplatformclock') } } `
+  -Undo  { param($d) Restore-BcdTimerValues $d } `
+  -Test  { (Get-BcdTimerValues).disabledynamictick -eq 'Yes' }
 
-T -Id 'perf-hags' -Cat $P -Name 'Hardware-accelerated GPU scheduling' -Tags gaming, max -Risk Moderate -Restart -Need dgpu `
+T -Id 'perf-hags' -Cat $P -Name 'Hardware-accelerated GPU scheduling' -Tags max -Risk Moderate -Restart -Need dgpu `
   -Desc 'Lets the GPU manage its own VRAM scheduling. Lower latency on modern NVIDIA/AMD GPUs (needs recent drivers).' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers' 'HwSchMode' 2 )
 
@@ -161,7 +166,7 @@ T -Id 'perf-vbs' -Cat $P -Name 'Disable Memory Integrity (VBS/HVCI)' -Tags optin
   -Desc 'WARNING: lowers kernel security. Can give 5-10% FPS in some games. Only for dedicated gaming rigs.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' 'Enabled' 0 )
 
-T -Id 'perf-globaltimer' -Cat $P -Name 'Honor per-app timer resolution requests' -Tags gaming, max -Risk Moderate -Restart `
+T -Id 'perf-globaltimer' -Cat $P -Name 'Honor per-app timer resolution requests' -Tags max -Risk Moderate -Restart `
   -Desc 'GlobalTimerResolutionRequests = 1 (Windows 11 / Server 2022 behaviour restored): games and tools that request a 0.5 ms timer apply it system-wide again. Slightly higher idle power.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' 'GlobalTimerResolutionRequests' 1 )
 
@@ -181,26 +186,31 @@ T -Id 'perf-mmagent' -Cat $P -Name 'Disable app pre-launch and page combining' -
 
 # ======================================================================= GAMING
 $G = 'Gaming'
-T -Id 'game-mode' -Cat $G -Name 'Enable Game Mode' -Tags safe, gaming, max `
+T -Id 'game-mode' -Cat $G -Name 'Enable Game Mode' -Tags gaming, max `
   -Desc 'Prioritizes the running game and suppresses driver/Windows-Update interruptions.' `
   -Reg @( Rg 'HKCU:\Software\Microsoft\GameBar' 'AutoGameModeEnabled' 1; Rg 'HKCU:\Software\Microsoft\GameBar' 'AllowAutoGameMode' 1 )
 
-T -Id 'game-dvr' -Cat $G -Name 'Disable Game DVR and background capture' -Risk Moderate -Tags safe, gaming, max `
-  -Desc 'Stops Xbox Game Bar background recording, including the saved-clip, microphone and cursor captures. Game Bar overlay shortcuts stop working. It also sets the machine policy AllowGameDVR=0, which turns Game DVR off for every user and can disable other Windows game-capture features; undo restores the previous values.' `
+T -Id 'game-dvr' -Cat $G -Name 'Disable Game DVR background capture (this account)' -Tags gaming, max `
+  -Desc 'Stops Xbox Game Bar background recording for your account: saved clips, microphone and cursor capture. Game Bar itself still opens. Nothing machine-wide is changed; that is the separate opt-in "Game DVR machine policy".' `
   -Reg @(
       Rg $GCS 'GameDVR_Enabled' 0
       Rg "$CV\GameDVR" 'AppCaptureEnabled' 0
       Rg "$CV\GameDVR" 'HistoricalCaptureEnabled' 0
       Rg "$CV\GameDVR" 'AudioCaptureEnabled' 0
       Rg "$CV\GameDVR" 'CursorCaptureEnabled' 0
-      Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR' 'AppCaptureEnabled' 0
-      Rg "$POL\GameDVR" 'AllowGameDVR' 0
       Rg 'HKCU:\Software\Microsoft\GameBar' 'UseNexusForGameBarEnabled' 0
       Rg 'HKCU:\Software\Microsoft\GameBar' 'ShowStartupPanel' 0
   )
 
-T -Id 'game-fso' -Cat $G -Name 'Disable fullscreen optimizations globally' -Tags gaming -Risk Moderate `
-  -Desc 'Forces true exclusive fullscreen behaviour. Helps some older titles; a few modern games prefer it on.' `
+T -Id 'game-dvr-policy' -Cat $G -Name 'Game DVR machine policy (every user)' -Tags optin -Risk Moderate `
+  -Desc 'Sets the AllowGameDVR=0 policy and the machine-wide AppCaptureEnabled=0. This turns Game DVR off for every account and can disable other Windows game-capture features, so it is never part of a preset.' `
+  -Reg @(
+      Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR' 'AppCaptureEnabled' 0
+      Rg "$POL\GameDVR" 'AllowGameDVR' 0
+  )
+
+T -Id 'game-fso' -Cat $G -Name 'Disable fullscreen optimizations globally' -Tags optin -Risk Advanced `
+  -Desc 'Forces exclusive fullscreen behaviour for every game. Not recommended on Windows 11: it is a global workaround, and modern games rely on fullscreen optimizations for flip-model presentation and VRR. Use Tools > Per-game profile to turn it off only for the games that need it.' `
   -Reg @(
       Rg $GCS 'GameDVR_FSEBehaviorMode' 2
       Rg $GCS 'GameDVR_HonorUserFSEBehaviorMode' 1
@@ -208,15 +218,15 @@ T -Id 'game-fso' -Cat $G -Name 'Disable fullscreen optimizations globally' -Tags
       Rg $GCS 'GameDVR_DXGIHonorFSEWindowsCompatible' 1
   )
 
-T -Id 'game-mpo' -Cat $G -Name 'Disable Multiplane Overlay (MPO)' -Tags gaming, max -Risk Moderate -Restart `
-  -Desc 'Fixes stutter, flicker and black screens on some NVIDIA/AMD setups (multi-monitor, high refresh). Set OverlayTestMode = 5 in the DWM key; undo removes it.' `
+T -Id 'game-mpo' -Cat $G -Name 'Disable Multiplane Overlay (MPO)' -Tags optin -Risk Advanced -Restart `
+  -Desc 'Sets OverlayTestMode = 5 in the DWM key. Not recommended on Windows 11: it is a global workaround for flicker on some older driver and monitor combinations, current drivers fixed most of them, and it makes the desktop compositor do more work. Use it only if you see MPO flicker; undo restores the old value.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\Windows\Dwm' 'OverlayTestMode' 5 )
 
-T -Id 'game-windowed' -Cat $G -Name 'Optimizations for windowed games' -Risk Moderate -Tags gaming, max `
+T -Id 'game-windowed' -Cat $G -Name 'Optimizations for windowed games' -Risk Moderate -Tags max `
   -Desc 'Enables flip-model presentation for borderless/windowed DirectX 10/11 games: lower latency, VRR support. It replaces the whole DirectX user setting, so an existing Auto HDR choice (AutoHDREnable=1) is removed until you undo it.' `
   -Reg @( Rg 'HKCU:\Software\Microsoft\DirectX\UserGpuPreferences' 'DirectXUserGlobalSettings' 'SwapEffectUpgradeEnable=1;' 'String' )
 
-T -Id 'game-mmcss' -Cat $G -Name 'Multimedia scheduler: favor games and remove network throttle' -Tags safe, gaming, max `
+T -Id 'game-mmcss' -Cat $G -Name 'Multimedia scheduler: favor games and remove network throttle' -Tags max `
   -Desc 'MMCSS Games task gets high GPU/CPU priority and network throttling is lifted. Standard low-latency setup.' `
   -Reg @(
       Rg $MMP 'NetworkThrottlingIndex' 4294967295
@@ -231,7 +241,7 @@ T -Id 'game-mouse' -Cat $G -Name 'Disable mouse acceleration (enhance pointer pr
   -Desc '1:1 mouse movement for consistent aim. Takes effect after sign-out.' `
   -Reg @( Rg 'HKCU:\Control Panel\Mouse' 'MouseSpeed' '0' 'String'; Rg 'HKCU:\Control Panel\Mouse' 'MouseThreshold1' '0' 'String'; Rg 'HKCU:\Control Panel\Mouse' 'MouseThreshold2' '0' 'String' )
 
-T -Id 'game-sticky' -Cat $G -Name 'Disable Sticky/Filter/Toggle Keys popups' -Tags safe, gaming, max `
+T -Id 'game-sticky' -Cat $G -Name 'Disable Sticky/Filter/Toggle Keys popups' -Tags gaming, max `
   -Desc 'No more accessibility popup when you tap Shift five times in a game.' `
   -Reg @(
       Rg 'HKCU:\Control Panel\Accessibility\StickyKeys' 'Flags' '58' 'String'
@@ -241,28 +251,12 @@ T -Id 'game-sticky' -Cat $G -Name 'Disable Sticky/Filter/Toggle Keys popups' -Ta
 
 # ======================================================================= NETWORK
 $N = 'Network'
-T -Id 'net-nagle' -Cat $N -Name 'Disable Nagle algorithm (lower online-game latency)' -Tags gaming, max -Risk Moderate `
-  -Desc 'Sets TcpAckFrequency=1 and TCPNoDelay=1 on active interfaces so small packets are sent immediately.' `
-  -Apply {
-      $done = @()
-      $base = 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces'
-      foreach ($k in Get-ChildItem $base -ErrorAction SilentlyContinue) {
-          $p = Get-ItemProperty -LiteralPath $k.PSPath
-          if ($p.DhcpIPAddress -or $p.IPAddress) {
-              Set-ItemProperty -LiteralPath $k.PSPath -Name TcpAckFrequency -Value 1 -Type DWord
-              Set-ItemProperty -LiteralPath $k.PSPath -Name TCPNoDelay -Value 1 -Type DWord
-              $done += $k.PSChildName
-          }
-      }
-      , $done
-  } `
-  -Undo {
-      param($d)
-      foreach ($i in @($d)) {
-          $k = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\$i"
-          Remove-ItemProperty -LiteralPath $k -Name TcpAckFrequency, TCPNoDelay -ErrorAction SilentlyContinue
-      }
-  }
+T -Id 'net-nagle' -Cat $N -Name 'Disable Nagle algorithm (lower online-game latency)' -Tags optin -Risk Advanced `
+  -Desc 'Sets TcpAckFrequency=1 and TCPNoDelay=1 on active interfaces so small packets are sent immediately. Not recommended on Windows 11: it is not a universal latency win (most games already set TCP_NODELAY or use UDP) and it adds ACK traffic. Undo puts back the exact values each interface had, including none.' `
+  -Snapshot { , @(Get-NagleSnapshot) } `
+  -Apply { param($d) foreach ($i in @($d)) { $p = Join-Path $global:OptiTcpIfBase $i.If; Set-RegEntry $p 'TcpAckFrequency' 1; Set-RegEntry $p 'TCPNoDelay' 1 } } `
+  -Undo  { param($d) Restore-NagleSnapshot $d } `
+  -Test  { Test-NagleApplied }
 
 T -Id 'net-teredo' -Cat $N -Name 'Disable Teredo tunneling' -Tags max `
   -Desc 'Removes an IPv6-over-IPv4 tunnel that adds latency and is rarely needed.' `
@@ -277,14 +271,14 @@ T -Id 'net-llmnr' -Cat $N -Name 'Disable LLMNR name resolution' -Tags privacy, m
   -Desc 'Closes a spoofing-prone legacy name-resolution protocol. Regular DNS is unaffected.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' 'EnableMulticast' 0 )
 
-T -Id 'net-do' -Cat $N -Name 'Delivery Optimization: no peer-to-peer uploads' -Tags safe, privacy, max `
+T -Id 'net-do' -Cat $N -Name 'Delivery Optimization: no peer-to-peer uploads' -Tags privacy, max `
   -Desc 'Windows Update downloads only from Microsoft; your PC stops uploading updates to strangers.' `
   -Reg @(
       Rg "$POL\DeliveryOptimization" 'DODownloadMode' 0
       Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\DeliveryOptimization\Config' 'DODownloadMode' 0
   )
 
-T -Id 'net-smb1' -Cat $N -Name 'Disable SMBv1 server' -Tags safe `
+T -Id 'net-smb1' -Cat $N -Name 'Disable SMBv1 server' -Tags max `
   -Desc 'Security hardening: SMBv1 is the protocol exploited by WannaCry.' `
   -Apply { Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force -Confirm:$false | Out-Null; $null } `
   -Undo  { Set-SmbServerConfiguration -EnableSMB1Protocol $true -Force -Confirm:$false | Out-Null } `
@@ -292,7 +286,7 @@ T -Id 'net-smb1' -Cat $N -Name 'Disable SMBv1 server' -Tags safe `
 
 # ======================================================================= PRIVACY
 $V = 'Privacy & Telemetry'
-T -Id 'priv-telemetry' -Cat $V -Name 'Disable telemetry and diagnostic data' -Tags safe, privacy, max `
+T -Id 'priv-telemetry' -Cat $V -Name 'Disable telemetry and diagnostic data' -Tags privacy, max `
   -Desc 'Sets telemetry to the minimum Windows allows, blocks device-name and dump uploads, stops DiagTrack and disables Microsoft data-collection tasks. Home and Pro still keep required diagnostics; this is the lowest setting those editions accept.' `
   -Reg @(
       Rg "$POL\DataCollection" 'AllowTelemetry' 0
@@ -315,7 +309,7 @@ T -Id 'priv-telemetry' -Cat $V -Name 'Disable telemetry and diagnostic data' -Ta
       'Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload'
   )
 
-T -Id 'priv-activity' -Cat $V -Name 'Disable activity history and timeline' -Tags safe, privacy, max `
+T -Id 'priv-activity' -Cat $V -Name 'Disable activity history and timeline' -Tags privacy, max `
   -Desc 'Stops Windows from recording and uploading your app/file activity. Clipboard history is unaffected.' `
   -Reg @(
       Rg "$POL\System" 'EnableActivityFeed' 0
@@ -323,7 +317,7 @@ T -Id 'priv-activity' -Cat $V -Name 'Disable activity history and timeline' -Tag
       Rg "$POL\System" 'UploadUserActivities' 0
   )
 
-T -Id 'priv-adid' -Cat $V -Name 'Disable advertising ID and tailored ads' -Tags safe, privacy, max `
+T -Id 'priv-adid' -Cat $V -Name 'Disable advertising ID and tailored ads' -Tags privacy, max `
   -Desc 'Turns off the per-user advertising ID (also by policy) and tailored experiences based on diagnostic data.' `
   -Reg @(
       Rg "$CV\AdvertisingInfo" 'Enabled' 0
@@ -358,7 +352,7 @@ T -Id 'priv-consumer' -Cat $V -Name 'Disable Start/lock-screen ads and suggested
       Rg "$CV\UserProfileEngagement" 'ScoobeSystemSettingEnabled' 0
   )
 
-T -Id 'priv-websearch' -Cat $V -Name 'Disable Bing web results in Start search' -Tags safe, privacy, max, deai `
+T -Id 'priv-websearch' -Cat $V -Name 'Disable Bing web results in Start search' -Tags privacy, max, deai `
   -Desc 'Start search only searches your PC. Bing, Cortana and location-based web suggestions stay off, and nothing you type is sent out.' `
   -Reg @(
       Rg "$CV\Search" 'BingSearchEnabled' 0
@@ -391,7 +385,7 @@ T -Id 'priv-location' -Cat $V -Name 'Disable location tracking' -Tags privacy -R
       Rg 'HKLM:\SYSTEM\Maps' 'AutoUpdateEnabled' 0
   ) -Svc @( Sx 'lfsvc' 4 )
 
-T -Id 'priv-input' -Cat $V -Name 'Disable typing, inking and speech data collection' -Tags safe, privacy, max `
+T -Id 'priv-input' -Cat $V -Name 'Disable typing, inking and speech data collection' -Tags privacy, max `
   -Desc 'Stops Windows from harvesting what you type, ink and say to personalize services.' `
   -Reg @(
       Rg 'HKCU:\Software\Microsoft\InputPersonalization' 'RestrictImplicitTextCollection' 1
@@ -401,7 +395,7 @@ T -Id 'priv-input' -Cat $V -Name 'Disable typing, inking and speech data collect
       Rg 'HKCU:\Software\Microsoft\Input\TIPC' 'Enabled' 0
   )
 
-T -Id 'priv-feedback' -Cat $V -Name 'Disable feedback prompts and app-launch tracking' -Tags safe, privacy, max `
+T -Id 'priv-feedback' -Cat $V -Name 'Disable feedback prompts and app-launch tracking' -Tags privacy, max `
   -Desc 'No "How likely are you to recommend Windows" popups; Start stops tracking launched apps. The feedback timer is removed the same way Win11Debloat does, and undo puts it back.' `
   -Reg @( Rg 'HKCU:\Software\Microsoft\Siuf\Rules' 'NumberOfSIUFInPeriod' 0; Rg $EXA 'Start_TrackProgs' 0 ) `
   -Apply {
@@ -423,13 +417,13 @@ T -Id 'priv-clipboard' -Cat $V -Name 'Disable clipboard cloud sync' -Tags privac
   -Desc 'Clipboard history stays local; nothing is synced to your Microsoft account.' `
   -Reg @( Rg "$POL\System" 'AllowCrossDeviceClipboard' 0 )
 
-T -Id 'priv-remoteassist' -Cat $V -Name 'Disable Remote Assistance' -Tags safe, privacy, max `
+T -Id 'priv-remoteassist' -Cat $V -Name 'Disable Remote Assistance' -Tags privacy, max `
   -Desc 'Blocks inbound Remote Assistance invitations. Reduces attack surface.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' 'fAllowToGetHelp' 0; Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' 'fAllowFullControl' 0 )
 
 # ======================================================================= DEBLOAT
 $D = 'Debloat'
-T -Id 'debloat-edge' -Cat $D -Name 'Edge: disable nags, telemetry and background mode' -Tags safe, privacy, max, deai `
+T -Id 'debloat-edge' -Cat $D -Name 'Edge: disable nags, telemetry and background mode' -Tags privacy, max, deai `
   -Desc 'Edge policies: no startup boost, no background running, no shopping/rewards/recommendation clutter, no diagnostic data.' `
   -Reg @(
       Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' 'StartupBoostEnabled' 0
@@ -491,7 +485,7 @@ T -Id 'debloat-onedrive' -Cat $D -Name 'Uninstall OneDrive' -Tags optin -Risk Ad
       -not (Test-OneDriveInstalled) -and ((Get-RegSnapshot @{ P = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\OneDrive'; N = 'DisableFileSyncNGSC' }).Value -eq 1)
   }
 
-T -Id 'svc-manual' -Cat $D -Name 'Services: set unneeded services to Manual' -Tags safe, max -SvcTol 0.9 `
+T -Id 'svc-manual' -Cat $D -Name 'Services: set unneeded services to Manual' -Tags max -SvcTol 0.9 `
   -Desc 'Moves rarely-needed services (diagnostic collectors, peer networking, touch keyboard, and similar) to Manual. They still start if something asks.' `
   -Svc @( $global:OptiServiceRecs | Where-Object { $_.Start -eq 3 } | ForEach-Object { Sx $_.Name 3 } )
 
@@ -510,9 +504,9 @@ T -Id 'ui-ext' -Cat $I -Name 'Show file extensions' -Tags safe -Explorer -Desc '
   -Reg @( Rg $EXA 'HideFileExt' 0 )
 T -Id 'ui-hidden' -Cat $I -Name 'Show hidden files' -Explorer -Desc 'Show hidden files and folders in Explorer.' `
   -Reg @( Rg $EXA 'Hidden' 1 )
-T -Id 'ui-thispc' -Cat $I -Name 'Open Explorer to This PC' -Explorer -Desc 'Instead of Home/Quick access.' `
+T -Id 'ui-thispc' -Conflict 'Explorer opens to' -Cat $I -Name 'Open Explorer to This PC' -Explorer -Desc 'Instead of Home/Quick access.' `
   -Reg @( Rg $EXA 'LaunchTo' 1 )
-T -Id 'ui-nohome' -Cat $I -Name 'Hide Home and Gallery in Explorer' -Explorer -Desc 'Removes the Home and Gallery entries from the navigation pane.' `
+T -Id 'ui-nohome' -Conflict 'Explorer opens to' -Cat $I -Name 'Hide Home and Gallery in Explorer' -Explorer -Desc 'Removes the Home and Gallery entries from the navigation pane.' `
   -Reg @(
       Rg 'HKLM:\SOFTWARE\Classes\CLSID\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}' 'System.IsPinnedToNameSpaceTree' 0
       Rg 'HKLM:\SOFTWARE\Classes\CLSID\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}' 'System.IsPinnedToNameSpaceTree' 0
@@ -527,17 +521,17 @@ T -Id 'ui-dark' -Cat $I -Name 'Dark mode for apps and system' -Desc 'Dark theme 
   -Reg @( Rg $PERS 'AppsUseLightTheme' 0; Rg $PERS 'SystemUsesLightTheme' 0 )
 T -Id 'ui-taskbarleft' -Cat $I -Name 'Left-aligned taskbar' -Explorer -Desc 'Classic left taskbar alignment (Windows 11).' `
   -Reg @( Rg $EXA 'TaskbarAl' 0 )
-T -Id 'ui-searchicon' -Cat $I -Name 'Hide taskbar search box' -Explorer -Desc 'Removes the search box from the taskbar (Win+S still works).' `
+T -Id 'ui-searchicon' -Conflict 'search style' -Cat $I -Name 'Hide taskbar search box' -Explorer -Desc 'Removes the search box from the taskbar (Win+S still works).' `
   -Reg @( Rg "$CV\Search" 'SearchboxTaskbarMode' 0 )
 T -Id 'ui-taskview' -Cat $I -Name 'Hide Task View button' -Explorer -Desc 'Removes the Task View button from the taskbar.' `
   -Reg @( Rg $EXA 'ShowTaskViewButton' 0 )
-T -Id 'ui-endtask' -Cat $I -Name 'End Task from taskbar right-click' -Tags safe -Explorer -Desc 'Adds "End task" to the taskbar app context menu.' `
+T -Id 'ui-endtask' -Cat $I -Name 'End Task from taskbar right-click' -Tags max -Explorer -Desc 'Adds "End task" to the taskbar app context menu.' `
   -Reg @( Rg "$EXA\TaskbarDeveloperSettings" 'TaskbarEndTask' 1 )
 T -Id 'ui-startrecs' -Cat $I -Name 'Start menu: hide recommendations' -Explorer -Desc 'Hides the Recommended tips/shortcuts and account notifications in Start.' `
   -Reg @( Rg $EXA 'Start_IrisRecommendations' 0; Rg $EXA 'Start_AccountNotifications' 0 )
 T -Id 'ui-numlock' -Cat $I -Name 'Num Lock on at startup' -Desc 'Turn Num Lock on at sign-in.' `
   -Reg @( Rg 'HKCU:\Control Panel\Keyboard' 'InitialKeyboardIndicators' '2' 'String'; Rg 'HKU:\.DEFAULT\Control Panel\Keyboard' 'InitialKeyboardIndicators' '2' 'String' )
-T -Id 'ui-longpaths' -Cat $I -Name 'Enable long file paths' -Tags safe -Desc 'Lifts the 260-character path limit for apps that support it.' `
+T -Id 'ui-longpaths' -Cat $I -Name 'Enable long file paths' -Tags max -Desc 'Lifts the 260-character path limit for apps that support it.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' 'LongPathsEnabled' 1 )
 T -Id 'ui-nolock' -Cat $I -Name 'Disable lock screen' -Desc 'Skips the lock screen picture and goes straight to sign-in.' `
   -Reg @( Rg "$POL\Personalization" 'NoLockScreen' 1 )

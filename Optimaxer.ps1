@@ -50,17 +50,14 @@ if ($Silent) {
     $ids = @($ids | Where-Object { $_ } | Select-Object -Unique)
     if (-not $ids.Count -and -not $apps.Count) { Write-Log 'Nothing to do: pass -Preset and/or -Config.' 'ERROR'; exit 2 }
     Write-Log "Unattended run: $($ids.Count) tweak(s), $($apps.Count) app(s)"
-    if ($ids.Count -and -not $NoRestorePoint) { [void](New-OptiRestorePoint 'Optimaxer - unattended run') }
-    $ok = 0; $bad = 0
-    foreach ($id in $ids) {
-        $t = Get-TweakById $id
-        if (-not $t) { Write-Log "Unknown tweak id: $id" 'WARN'; $bad++; continue }
-        if (Invoke-TweakApply $t) { $ok++ } else { $bad++; Write-Log "  not verified: $($t.Name)" 'WARN' }
+    $code = 0
+    if ($ids.Count) {
+        $code = Invoke-UnattendedTweaks -Ids $ids -NoRestorePoint:$NoRestorePoint
+        if ($code -eq 3) { if ($PSCommandPath -and -not $NoElevate) { Start-Sleep -Seconds 4 }; exit 3 }   # restore point failed: apply nothing, apps included
     }
     if ($apps.Count) { Invoke-WingetPackages -Action Install -Programs $apps }
-    Write-Log "Done: $ok tweak(s) verified, $bad not verified." $(if ($bad) { 'WARN' } else { 'OK' })
     if ($PSCommandPath -and -not $NoElevate) { Start-Sleep -Seconds 4 }
-    exit $(if ($bad) { 1 } else { 0 })
+    exit $code
 }
 . "$PSScriptRoot\src\App.ps1"
 
