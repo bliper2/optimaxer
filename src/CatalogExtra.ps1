@@ -164,8 +164,8 @@ T -Id 'priv-msrt' -Cat $V -Name 'Stop Malicious Software Removal Tool reporting'
 
 # ======================================================================= WINDOWS UPDATE BEHAVIOR (updates stay on)
 T -Id 'wu-noreboot' -Cat $D -Name 'Windows Update: no forced restarts while signed in' -Tags safe, max `
-  -Desc 'Updates still install, but Windows will not reboot under you while you are logged on.' `
-  -Reg @( Rg $WU 'AUPowerManagement' 0; Rg "$WU\AU" 'NoAutoRebootWithLoggedOnUsers' 1 )
+  -Desc 'Sets the NoAutoRebootWithLoggedOnUsers policy so scheduled update restarts wait until you sign out. Updates still install. It is not a guarantee: Windows can still show restart reminders and restart after its deadlines.' `
+  -Reg @( Rg "$WU\AU" 'NoAutoRebootWithLoggedOnUsers' 1 )
 
 T -Id 'wu-insider' -Cat $D -Name 'Block Windows Insider enrollment' -Tags safe, max `
   -Desc 'Prevents accidental enrollment in preview builds that can undo tweaks and cause instability.' `
@@ -526,7 +526,6 @@ T -Id 'br-brave-debloat' -Cat $B -Name 'Brave: remove Rewards, Wallet, VPN, News
       Rg $BRV 'MetricsReportingEnabled' 0
       Rg $BRV 'BackgroundModeEnabled' 0
       Rg $BRV 'SafeBrowsingExtendedReportingEnabled' 0
-      Rg $BRV 'TorDisabled' 1
       Rg $BRV 'BraveP3AEnabled' 0
       Rg $BRV 'UrlKeyedAnonymizedDataCollectionEnabled' 0
   )

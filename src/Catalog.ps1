@@ -185,8 +185,8 @@ T -Id 'game-mode' -Cat $G -Name 'Enable Game Mode' -Tags safe, gaming, max `
   -Desc 'Prioritizes the running game and suppresses driver/Windows-Update interruptions.' `
   -Reg @( Rg 'HKCU:\Software\Microsoft\GameBar' 'AutoGameModeEnabled' 1; Rg 'HKCU:\Software\Microsoft\GameBar' 'AllowAutoGameMode' 1 )
 
-T -Id 'game-dvr' -Cat $G -Name 'Disable Game DVR and background capture' -Tags safe, gaming, max `
-  -Desc 'Stops Xbox Game Bar background recording, including the saved-clip, microphone and cursor captures, for this account and the machine. Game Bar overlay shortcuts stop working.' `
+T -Id 'game-dvr' -Cat $G -Name 'Disable Game DVR and background capture' -Risk Moderate -Tags safe, gaming, max `
+  -Desc 'Stops Xbox Game Bar background recording, including the saved-clip, microphone and cursor captures. Game Bar overlay shortcuts stop working. It also sets the machine policy AllowGameDVR=0, which turns Game DVR off for every user and can disable other Windows game-capture features; undo restores the previous values.' `
   -Reg @(
       Rg $GCS 'GameDVR_Enabled' 0
       Rg "$CV\GameDVR" 'AppCaptureEnabled' 0
@@ -212,8 +212,8 @@ T -Id 'game-mpo' -Cat $G -Name 'Disable Multiplane Overlay (MPO)' -Tags gaming, 
   -Desc 'Fixes stutter, flicker and black screens on some NVIDIA/AMD setups (multi-monitor, high refresh). Set OverlayTestMode = 5 in the DWM key; undo removes it.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\Windows\Dwm' 'OverlayTestMode' 5 )
 
-T -Id 'game-windowed' -Cat $G -Name 'Optimizations for windowed games' -Tags safe, gaming, max `
-  -Desc 'Enables flip-model presentation for borderless/windowed DirectX 10/11 games: lower latency, VRR support.' `
+T -Id 'game-windowed' -Cat $G -Name 'Optimizations for windowed games' -Risk Moderate -Tags gaming, max `
+  -Desc 'Enables flip-model presentation for borderless/windowed DirectX 10/11 games: lower latency, VRR support. It replaces the whole DirectX user setting, so an existing Auto HDR choice (AutoHDREnable=1) is removed until you undo it.' `
   -Reg @( Rg 'HKCU:\Software\Microsoft\DirectX\UserGpuPreferences' 'DirectXUserGlobalSettings' 'SwapEffectUpgradeEnable=1;' 'String' )
 
 T -Id 'game-mmcss' -Cat $G -Name 'Multimedia scheduler: favor games and remove network throttle' -Tags safe, gaming, max `
@@ -324,12 +324,11 @@ T -Id 'priv-activity' -Cat $V -Name 'Disable activity history and timeline' -Tag
   )
 
 T -Id 'priv-adid' -Cat $V -Name 'Disable advertising ID and tailored ads' -Tags safe, privacy, max `
-  -Desc 'Removes the per-user advertising identifier and diagnostic-data-based personalization.' `
+  -Desc 'Turns off the per-user advertising ID (also by policy) and tailored experiences based on diagnostic data.' `
   -Reg @(
       Rg "$CV\AdvertisingInfo" 'Enabled' 0
       Rg "$POL\AdvertisingInfo" 'DisabledByGroupPolicy' 1
       Rg "$CV\Privacy" 'TailoredExperiencesWithDiagnosticDataEnabled' 0
-      Rg 'HKCU:\Control Panel\International\User Profile' 'HttpAcceptLanguageOptOut' 1
   )
 
 T -Id 'priv-consumer' -Cat $V -Name 'Disable Start/lock-screen ads and suggested apps' -Tags safe, privacy, max, deai `

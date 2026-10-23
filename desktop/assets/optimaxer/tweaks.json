@@ -931,9 +931,9 @@
     {
         "id":  "game-dvr",
         "name":  "Disable Game DVR and background capture",
-        "desc":  "Stops Xbox Game Bar background recording, including the saved-clip, microphone and cursor captures, for this account and the machine. Game Bar overlay shortcuts stop working.",
+        "desc":  "Stops Xbox Game Bar background recording, including the saved-clip, microphone and cursor captures. Game Bar overlay shortcuts stop working. It also sets the machine policy AllowGameDVR=0, which turns Game DVR off for every user and can disable other Windows game-capture features; undo restores the previous values.",
         "cat":  "Gaming",
-        "risk":  "Safe",
+        "risk":  "Moderate",
         "tags":  [
                      "safe",
                      "gaming",
@@ -1120,11 +1120,10 @@
     {
         "id":  "game-windowed",
         "name":  "Optimizations for windowed games",
-        "desc":  "Enables flip-model presentation for borderless/windowed DirectX 10/11 games: lower latency, VRR support.",
+        "desc":  "Enables flip-model presentation for borderless/windowed DirectX 10/11 games: lower latency, VRR support. It replaces the whole DirectX user setting, so an existing Auto HDR choice (AutoHDREnable=1) is removed until you undo it.",
         "cat":  "Gaming",
-        "risk":  "Safe",
+        "risk":  "Moderate",
         "tags":  [
-                     "safe",
                      "gaming",
                      "max"
                  ],
@@ -1722,7 +1721,7 @@
     {
         "id":  "priv-adid",
         "name":  "Disable advertising ID and tailored ads",
-        "desc":  "Removes the per-user advertising identifier and diagnostic-data-based personalization.",
+        "desc":  "Turns off the per-user advertising ID (also by policy) and tailored experiences based on diagnostic data.",
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
@@ -1747,12 +1746,6 @@
                         "p":  "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Privacy",
                         "n":  "TailoredExperiencesWithDiagnosticDataEnabled",
                         "v":  0,
-                        "t":  "DWord"
-                    },
-                    {
-                        "p":  "HKCU:\\Control Panel\\International\\User Profile",
-                        "n":  "HttpAcceptLanguageOptOut",
-                        "v":  1,
                         "t":  "DWord"
                     }
                 ],
@@ -4886,7 +4879,7 @@
     {
         "id":  "wu-noreboot",
         "name":  "Windows Update: no forced restarts while signed in",
-        "desc":  "Updates still install, but Windows will not reboot under you while you are logged on.",
+        "desc":  "Sets the NoAutoRebootWithLoggedOnUsers policy so scheduled update restarts wait until you sign out. Updates still install. It is not a guarantee: Windows can still show restart reminders and restart after its deadlines.",
         "cat":  "Debloat",
         "risk":  "Safe",
         "tags":  [
@@ -4894,12 +4887,6 @@
                      "max"
                  ],
         "reg":  [
-                    {
-                        "p":  "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate",
-                        "n":  "AUPowerManagement",
-                        "v":  0,
-                        "t":  "DWord"
-                    },
                     {
                         "p":  "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU",
                         "n":  "NoAutoRebootWithLoggedOnUsers",
@@ -6799,12 +6786,6 @@
                         "p":  "HKLM:\\SOFTWARE\\Policies\\BraveSoftware\\Brave",
                         "n":  "SafeBrowsingExtendedReportingEnabled",
                         "v":  0,
-                        "t":  "DWord"
-                    },
-                    {
-                        "p":  "HKLM:\\SOFTWARE\\Policies\\BraveSoftware\\Brave",
-                        "n":  "TorDisabled",
-                        "v":  1,
                         "t":  "DWord"
                     },
                     {
