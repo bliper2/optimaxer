@@ -11,9 +11,13 @@ cargo build --release
 .\target\release\orion-store-desktop.exe
 ```
 
-`cargo test` runs 75 tests. Three more read the live system and are ignored by default: `cargo test -- --ignored`.
+`cargo test` runs 82 tests. Three more read the live system and are ignored by default: `cargo test -- --ignored`.
 
 The exe starts without administrator rights. The Store works as normal. The Optimaxer section can read everything, and shows a banner with a "Restart as administrator" button, because changing HKLM, services or tasks needs elevation.
+
+## Design
+
+A calm tool surface on a tonal ladder instead of lines, with indigo for selection and focus and lime for the one main action of each view. Light and dark themes, animated hover, selection and page transitions, and a reduce-motion switch that follows the Windows setting. Text contrast is checked by tests. The tokens, components and motion are written up in [DESIGN.md](DESIGN.md).
 
 ## The Store
 
@@ -73,6 +77,4 @@ This folder is GPL-3.0 (see `LICENSE` here) because the Store client is derived 
 
 ## Credits
 
-The Store half is built on [Orion Store](https://github.com/RookieEnough/Orion-Store) by RookieEnough (GPL-3.0): the client code, the embedded offline catalog and the catalog format. Live catalog data comes from [Orion-Data](https://github.com/RookieEnough/Orion-Data). Thank you to everyone who works on it.
-
-Optimaxer is MIT licensed, with tweak ideas from WinUtil and Win11Debloat (both MIT, see Optimaxer's `THIRD-PARTY-NOTICES.md`).
+Optimaxer is MIT licensed, with tweak ideas from WinUtil and Win11Debloat (both MIT, see Optimaxer's `THIRD-PARTY-NOTICES.md`). The app catalog is the Orion Data project.

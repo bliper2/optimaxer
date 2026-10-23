@@ -512,6 +512,30 @@ class GuiTest(Base):
         for name in ox.THEMES:
             self.g.set_theme(name)
 
+    def test_material_themes_exist_and_are_readable(self):
+        def lum(hex_color):
+            ch = [int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            ch = [v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4 for v in ch]
+            return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+
+        def ratio(a, b):
+            hi, lo = sorted((lum(a), lum(b)), reverse=True)
+            return (hi + 0.05) / (lo + 0.05)
+
+        for name in ("Material", "Material Light"):
+            self.assertIn(name, ox.THEMES)
+            c = ox.THEMES[name]
+            self.assertTrue(c["flat"])
+            self.assertGreaterEqual(ratio(c["fg"], c["bg"]), 7, name)
+            self.assertGreaterEqual(ratio(c["fg"], c["panel"]), 7, name)
+            self.assertGreaterEqual(ratio(c["dim"], c["bg"]), 4.5, name)
+            self.assertGreaterEqual(ratio(c["dim"], c["panel"]), 4.5, name)
+            self.assertGreaterEqual(ratio(c["on_accent"], c["accent"]), 4.5, name)
+            for key in ("ok", "warn", "err", "accent"):
+                self.assertGreaterEqual(ratio(c[key], c["bg"]), 4.5, f"{name} {key}")
+            self.g.set_theme(name)
+            self.assertEqual(self.g.theme_name, name)
+
     def test_checkbox_toggle_and_filter(self):
         self.load_all()
         self.g._toggle("apps", "htop")
