@@ -40,7 +40,7 @@ optimaxer --dry-run     # text menu, nothing is changed
 optimaxer               # text menu, real run (asks for sudo)
 ```
 
-The window (tkinter, no extra Python packages) has the same tabs as the Windows app: Home, Install, Tweaks with presets, Cleaner, Services, Startup, Debloat, Network, Tools, Config (export/import a selection, add an application-menu launcher) and Appearance (7 themes), plus a Dry run switch and a live log. `install.sh` adds Optimaxer to your application menu.
+The window (tkinter, no extra Python packages) has the same tabs as the Windows app: Home, Install, Tweaks with presets, Cleaner, Services, Startup, Debloat, Network, Tools, Config (export/import a selection, add an application-menu launcher) and Appearance (9 themes, including Material dark and light), plus a Dry run switch and a live log. `install.sh` adds Optimaxer to your application menu.
 
 Sections: **Install apps** (97 apps from the official repos, the AUR through yay/paru, and Flatpak, each verified after install), **Tweaks** with presets and undo (zram, memory/swappiness, TRIM, I/O scheduler, journal limit, fast shutdown, earlyoom, BBR, pacman parallel downloads, paccache, hardening sysctls, optional ufw firewall, **browser debloat** for Firefox, Chromium, Chrome, Brave and Edge...), **Cleaner** (pacman cache, orphans, journal, caches of browsers/pip/npm/Go/Cargo, Trash, unused Flatpak runtimes), **Services**, **Startup** (autostart entries), **Debloat packages**, **Network/DNS** (NetworkManager) and **Tools** (system info, update, Manjaro mirror ranking, failed units, .pacnew files, SMART health).
 

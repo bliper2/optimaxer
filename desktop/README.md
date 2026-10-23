@@ -11,9 +11,13 @@ cargo build --release
 .\target\release\orion-store-desktop.exe
 ```
 
-`cargo test` runs 75 tests. Three more read the live system and are ignored by default: `cargo test -- --ignored`.
+`cargo test` runs 82 tests. Three more read the live system and are ignored by default: `cargo test -- --ignored`.
 
 The exe starts without administrator rights. The Store works as normal. The Optimaxer section can read everything, and shows a banner with a "Restart as administrator" button, because changing HKLM, services or tasks needs elevation.
+
+## Design
+
+A calm tool surface on a tonal ladder instead of lines, with indigo for selection and focus and lime for the one main action of each view. Light and dark themes, animated hover, selection and page transitions, and a reduce-motion switch that follows the Windows setting. Text contrast is checked by tests. The tokens, components and motion are written up in [DESIGN.md](DESIGN.md).
 
 ## The Store
 

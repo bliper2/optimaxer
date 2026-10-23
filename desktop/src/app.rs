@@ -1,15 +1,15 @@
+use crate::kit;
 use crate::model::{self, AppItem, Catalog, Sort, ANDROID, PC, TV};
 use crate::net::{self, DlStatus, Download, Settings};
 use crate::opti_ui::{OptiEvent, OptiUi};
-use egui::{Align, Color32, CornerRadius, FontId, Layout, RichText, Sense, Stroke, StrokeKind, Ui, vec2};
+use crate::theme::{self, ease_out, mix, motion, semibold, tokens, Tone, LIME, R_LG, R_MD, S1, S2, S3, S4, S5, T_BODY, T_CAPTION, T_DISPLAY, T_HEADING, T_SMALL};
+use egui::{Align, Color32, CornerRadius, FontId, Layout, Margin, RichText, Sense, Stroke, StrokeKind, Ui, WidgetInfo, Role, vec2};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-pub(crate) const BRAND: Color32 = Color32::from_rgb(0x74, 0x78, 0xF8);
-pub(crate) const LIME: Color32 = Color32::from_rgb(0xA3, 0xE6, 0x35);
-const CARD_H: f32 = 104.0;
+const CARD_H: f32 = 108.0;
 const GAP: f32 = 12.0;
 const PLATFORMS: [&str; 4] = [PC, ANDROID, TV, "All"];
 
@@ -54,39 +54,8 @@ pub struct OrionApp {
     show_settings: bool,
     toast: Option<(String, Instant)>,
     search_id: egui::Id,
-}
-
-fn install_fonts(ctx: &egui::Context) {
-    let mut fonts = egui::FontDefinitions::default();
-    for (name, path) in [("segoe", r"C:\Windows\Fonts\segoeui.ttf"), ("segoe-bold", r"C:\Windows\Fonts\segoeuib.ttf")] {
-        if let Ok(bytes) = std::fs::read(path) {
-            fonts.font_data.insert(name.into(), Arc::new(egui::FontData::from_owned(bytes)));
-        }
-    }
-    if fonts.font_data.contains_key("segoe") {
-        fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "segoe".into());
-    }
-    ctx.set_fonts(fonts);
-}
-
-fn apply_theme(ctx: &egui::Context, dark: bool) {
-    let mut v = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
-    v.selection.bg_fill = BRAND;
-    v.hyperlink_color = BRAND;
-    if dark {
-        v.panel_fill = Color32::from_rgb(0x13, 0x14, 0x1A);
-        v.window_fill = Color32::from_rgb(0x1B, 0x1C, 0x24);
-        v.extreme_bg_color = Color32::from_rgb(0x0E, 0x0F, 0x14);
-        v.faint_bg_color = Color32::from_rgb(0x1C, 0x1D, 0x26);
-    } else {
-        v.panel_fill = Color32::from_rgb(0xF6, 0xF5, 0xFC);
-        v.faint_bg_color = Color32::from_rgb(0xFF, 0xFF, 0xFF);
-    }
-    ctx.set_visuals(v);
-    ctx.global_style_mut(|s| {
-        s.spacing.item_spacing = vec2(8.0, 8.0);
-        s.spacing.button_padding = vec2(12.0, 6.0);
-    });
+    /// `ctx.input(|i| i.time)` of the last view switch, for the page-enter transition.
+    view_started: f64,
 }
 
 fn spawn_refresh(ctx: &egui::Context) -> Receiver<Catalog> {
@@ -122,9 +91,16 @@ fn shuffled(apps: &[AppItem], seed: u32) -> Vec<AppItem> {
 impl OrionApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         egui_extras::install_image_loaders(&cc.egui_ctx);
-        install_fonts(&cc.egui_ctx);
-        let settings = Settings::load();
-        apply_theme(&cc.egui_ctx, settings.dark);
+        theme::install_fonts(&cc.egui_ctx);
+        let mut settings = Settings::load();
+        if std::env::var_os("ORION_SHOTS").is_some() {
+            // developer screenshots: nothing below may be written to the user's settings file
+            net::READ_ONLY.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(t) = std::env::var("ORION_SHOTS_THEME") {
+                settings.dark = t != "light";
+            }
+        }
+        theme::apply(&cc.egui_ctx, settings.dark, settings.reduce_motion);
         let catalog = net::load_cache().unwrap_or_else(net::embedded);
         let rx = spawn_refresh(&cc.egui_ctx);
         Self {
@@ -150,6 +126,7 @@ impl OrionApp {
             show_settings: false,
             toast: None,
             search_id: egui::Id::unique("orion-search"),
+            view_started: 0.0,
         }
     }
 
@@ -180,12 +157,17 @@ impl OrionApp {
         self.toast = Some((msg.into(), Instant::now()));
     }
 
+    /// Marks a view switch so the content eases in.
+    fn bump(&mut self, ctx: &egui::Context) {
+        self.view_started = ctx.input(|i| i.time);
+    }
+
     fn poll_catalog(&mut self) {
         let Ok(fresh) = self.rx.try_recv() else { return };
         self.loading = false;
         let offline = fresh.source.starts_with("Offline");
         if offline && !self.catalog.source.starts_with("Offline") && !self.catalog.apps.is_empty() {
-            self.note = format!("Offline, showing cached catalog ({})", self.catalog.source);
+            self.note = format!("Offline, showing the cached catalog ({})", self.catalog.source);
         } else {
             if !offline {
                 net::save_cache(&fresh);
@@ -200,10 +182,11 @@ impl OrionApp {
         }
     }
 
-    fn open_detail(&mut self, app: AppItem) {
+    fn open_detail(&mut self, ctx: &egui::Context, app: AppItem) {
         self.sel_stream = app.versions.iter().position(|v| v.stream == "Stable").unwrap_or(0);
         self.sel_variant = 0;
         self.detail = Some(app);
+        self.bump(ctx);
     }
 
     fn start(&mut self, ctx: &egui::Context, url: &str, hint: &str) {
@@ -216,6 +199,16 @@ impl OrionApp {
         let dl = net::start_download(url.into(), file, PathBuf::from(&self.settings.download_dir), move || ctx.request_repaint());
         self.downloads.push(dl);
         self.show_downloads = true;
+    }
+
+    fn tick_toast(&mut self, ctx: &egui::Context) {
+        if let Some((_, t)) = &self.toast {
+            if t.elapsed() > Duration::from_millis(3600) {
+                self.toast = None;
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(16));
+            }
+        }
     }
 
     /// Developer screenshot walk (ORION_SHOTS): each page is rendered to a PNG of this window only.
@@ -233,17 +226,17 @@ impl OrionApp {
             if sh.should_navigate(now) {
                 match name {
                     "store" => {
-                        self.set_section(Section::Store);
+                        self.set_section(ctx, Section::Store);
                         self.detail = None;
                     }
                     "store-detail" => {
                         if let Some(a) = self.view.first().cloned() {
-                            self.open_detail(a);
+                            self.open_detail(ctx, a);
                         }
                     }
                     other => {
-                        self.set_section(Section::Optimaxer);
-                        self.opti.show_page(other.trim_start_matches("optimaxer-"));
+                        self.set_section(ctx, Section::Optimaxer);
+                        self.opti.show_page(ctx, other.trim_start_matches("optimaxer-"));
                     }
                 }
             }
@@ -260,7 +253,10 @@ impl OrionApp {
         self.shots = Some(sh);
     }
 
-    fn set_section(&mut self, s: Section) {
+    fn set_section(&mut self, ctx: &egui::Context, s: Section) {
+        if self.section != s {
+            self.bump(ctx);
+        }
         self.section = s;
         self.settings.section = if s == Section::Optimaxer { "Optimaxer" } else { "Store" }.into();
         self.settings.save();
@@ -272,7 +268,7 @@ impl OrionApp {
                 OptiEvent::Toast(m) => self.say(m),
                 OptiEvent::Close => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
                 OptiEvent::OpenStoreCategory(c) => {
-                    self.set_section(Section::Store);
+                    self.set_section(ctx, Section::Store);
                     self.settings.platform = PC.into();
                     self.category = c;
                     self.query.clear();
@@ -282,20 +278,10 @@ impl OrionApp {
                 }
                 OptiEvent::OpenApp(id) => {
                     if let Some(a) = self.catalog.apps.iter().find(|a| a.id == id).cloned() {
-                        self.set_section(Section::Store);
-                        self.open_detail(a);
+                        self.set_section(ctx, Section::Store);
+                        self.open_detail(ctx, a);
                     }
                 }
-            }
-        }
-    }
-
-    fn tick_toast(&mut self, ctx: &egui::Context) {
-        if let Some((_, t)) = &self.toast {
-            if t.elapsed() > Duration::from_secs(3) {
-                self.toast = None;
-            } else {
-                ctx.request_repaint_after(Duration::from_millis(500));
             }
         }
     }
@@ -311,43 +297,51 @@ fn icon(ui: &mut Ui, app: &AppItem, size: f32) {
 }
 
 fn paint_icon(ui: &mut Ui, app: &AppItem, rect: egui::Rect) {
+    let t = tokens(ui.ctx());
     let r = CornerRadius::from(rect.width() * 0.22);
     if app.icon.is_empty() {
-        ui.painter().rect_filled(rect, r, BRAND.gamma_multiply(0.35));
+        ui.painter().rect_filled(rect, r, mix(t.surface2, t.brand, 0.35));
         let letter = app.name.chars().next().unwrap_or('?').to_uppercase().to_string();
-        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, letter, FontId::proportional(rect.width() * 0.45), Color32::WHITE);
+        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, letter, FontId::new(rect.width() * 0.45, semibold()), t.text);
     } else {
         egui::Image::new(app.icon.as_str()).fit_to_exact_size(rect.size()).corner_radius(r).paint_at(ui, rect);
     }
 }
 
-pub(crate) fn chip(ui: &mut Ui, text: &str, fill: Color32, fg: Color32) {
-    egui::Frame::new().fill(fill).corner_radius(8).inner_margin(egui::Margin::symmetric(8, 2)).show(ui, |ui| {
-        ui.label(RichText::new(text).size(12.0).color(fg));
-    });
+fn app_card(ui: &mut Ui, app: &AppItem, w: f32) -> bool {
+    let ctx = ui.ctx().clone();
+    let (t, m) = (tokens(&ctx), motion(&ctx));
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, CARD_H), Sense::click());
+    resp.widget_info(|| WidgetInfo::labeled(Role::Button, true, &app.name));
+    let h = ctx.animate_bool_with_time_and_easing(resp.id.with("h"), resp.hovered() || resp.has_focus(), m.fast(), ease_out);
+    if ui.is_rect_visible(rect) {
+        let r = CornerRadius::same(R_LG);
+        let pressed = resp.is_pointer_button_down_on();
+        let fill = if pressed { t.surface3 } else { mix(t.surface1, t.surface2, h) };
+        ui.painter().rect_filled(rect, r, fill);
+        let ring = if resp.has_focus() { 2.0 } else { 1.0 };
+        let edge = if resp.has_focus() { if t.dark { t.brand } else { t.brand_text } } else { mix(t.hairline, t.brand, h * 0.85) };
+        ui.painter().rect_stroke(rect, r, Stroke::new(ring, edge), StrokeKind::Inside);
+        paint_icon(ui, app, egui::Rect::from_min_size(rect.min + vec2(S4, S4 + 2.0), vec2(64.0, 64.0)));
+        let text_rect = egui::Rect::from_min_max(rect.min + vec2(88.0, S3), rect.max - vec2(S3, S2));
+        let p = ui.painter().with_clip_rect(text_rect);
+        let at = |y: f32| text_rect.min + vec2(0.0, y);
+        p.text(at(2.0), egui::Align2::LEFT_TOP, &app.name, FontId::new(T_HEADING - 1.0, semibold()), t.text);
+        p.text(at(26.0), egui::Align2::LEFT_TOP, &app.author, FontId::proportional(T_SMALL), t.muted);
+        let meta = format!("{}   {}", app.version, if app.size.is_empty() { "Varies" } else { &app.size });
+        p.text(at(46.0), egui::Align2::LEFT_TOP, meta, FontId::proportional(T_CAPTION), t.subtle);
+        p.text(at(68.0), egui::Align2::LEFT_TOP, &app.category, FontId::new(T_CAPTION, semibold()), t.brand_text);
+    }
+    if resp.hovered() {
+        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp.clicked()
 }
 
-fn app_card(ui: &mut Ui, app: &AppItem, w: f32) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(vec2(w, CARD_H), Sense::click());
-    if ui.is_rect_visible(rect) {
-        let v = ui.visuals();
-        let fill = if resp.hovered() { v.widgets.hovered.weak_bg_fill } else { v.faint_bg_color };
-        let stroke = if resp.hovered() { Stroke::new(1.5, BRAND) } else { Stroke::new(1.0, v.widgets.noninteractive.bg_stroke.color) };
-        ui.painter().rect_filled(rect, 14, fill);
-        ui.painter().rect_stroke(rect, 14, stroke, StrokeKind::Inside);
-        let icon_rect = egui::Rect::from_min_size(rect.min + vec2(14.0, 14.0), vec2(64.0, 64.0));
-        paint_icon(ui, app, icon_rect);
-        let text_rect = egui::Rect::from_min_max(rect.min + vec2(90.0, 10.0), rect.max - vec2(10.0, 8.0));
-        let p = ui.painter().with_clip_rect(text_rect);
-        let strong = ui.visuals().strong_text_color();
-        let weak = ui.visuals().weak_text_color();
-        p.text(text_rect.min + vec2(0.0, 4.0), egui::Align2::LEFT_TOP, &app.name, FontId::proportional(16.0), strong);
-        p.text(text_rect.min + vec2(0.0, 26.0), egui::Align2::LEFT_TOP, &app.author, FontId::proportional(12.5), weak);
-        let meta = format!("{}  ·  {}", app.version, if app.size.is_empty() { "Varies" } else { &app.size });
-        p.text(text_rect.min + vec2(0.0, 46.0), egui::Align2::LEFT_TOP, meta, FontId::proportional(12.5), weak);
-        p.text(text_rect.min + vec2(0.0, 66.0), egui::Align2::LEFT_TOP, &app.category, FontId::proportional(12.0), BRAND);
-    }
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+fn side_title(ui: &mut Ui, text: &str) {
+    ui.add_space(S3);
+    ui.label(RichText::new(text).font(FontId::new(T_SMALL, semibold())).color(tokens(ui.ctx()).subtle));
+    ui.add_space(S1);
 }
 
 impl eframe::App for OrionApp {
@@ -365,11 +359,13 @@ impl eframe::App for OrionApp {
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             if self.show_settings {
                 self.show_settings = false;
-            } else {
+            } else if self.detail.is_some() {
                 self.detail = None;
+                self.bump(ctx);
             }
         }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
+            self.set_section(ctx, Section::Store);
             self.detail = None;
             ctx.memory_mut(|m| m.request_focus(self.search_id));
         }
@@ -383,118 +379,133 @@ impl eframe::App for OrionApp {
             self.opti.log_panel(root);
         }
         self.side_panel(root);
-        egui::CentralPanel::default().show(root, |ui| {
-            if self.section == Section::Optimaxer {
-                self.opti.central(ui, ctx, &self.suggestions);
-            } else if self.detail.is_some() {
-                self.detail_view(ctx, ui);
-            } else {
-                self.store_view(ui);
-            }
+        let t = tokens(ctx);
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(t.canvas).inner_margin(Margin { left: S5 as i8, right: S5 as i8, top: S3 as i8, bottom: 0 })).show(root, |ui| {
+            let started = self.view_started;
+            kit::enter(ui, started, |ui| {
+                if self.section == Section::Optimaxer {
+                    self.opti.central(ui, ctx, &self.suggestions);
+                } else if self.detail.is_some() {
+                    self.detail_view(ctx, ui);
+                } else {
+                    self.store_view(ctx, ui);
+                }
+            });
         });
         if self.show_settings {
-            self.settings_window(ctx);
+            self.settings_modal(ctx);
         }
-        if let Some((msg, _)) = &self.toast {
-            egui::Area::new(egui::Id::unique("orion-toast")).anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -48.0)).order(egui::Order::Tooltip).show(ctx, |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.label(msg.as_str());
-                });
-            });
-        }
+        self.toast_view(ctx);
     }
 }
 
 impl OrionApp {
+    fn toast_view(&self, ctx: &egui::Context) {
+        let Some((msg, born)) = &self.toast else { return };
+        let (t, m) = (tokens(ctx), motion(ctx));
+        let age = born.elapsed().as_secs_f32();
+        let fade_in = if m.reduce { 1.0 } else { ease_out(age / 0.18) };
+        let fade_out = if m.reduce { 1.0 } else { ((3.6 - age) / 0.3).clamp(0.0, 1.0) };
+        let a = fade_in.min(fade_out);
+        egui::Area::new(egui::Id::unique("orion-toast")).anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -48.0 + (1.0 - fade_in) * 10.0)).order(egui::Order::Tooltip).interactable(false).show(ctx, |ui| {
+            ui.set_opacity(a);
+            egui::Frame::new().fill(t.surface3).stroke(Stroke::new(1.0, t.hairline)).corner_radius(R_MD + 2).inner_margin(Margin::symmetric(S4 as i8, S3 as i8)).shadow(ctx.global_style().visuals.popup_shadow).show(ui, |ui| {
+                ui.set_max_width(520.0);
+                ui.label(RichText::new(msg).color(t.text));
+            });
+        });
+    }
+
     fn top_bar(&mut self, root: &mut Ui) {
         let ctx = root.ctx().clone();
         let ctx = &ctx;
-        egui::Panel::top("top").show(root, |ui| {
-            ui.add_space(6.0);
+        let t = tokens(ctx);
+        egui::Panel::top("top").show_separator_line(false).frame(egui::Frame::new().fill(t.rail).inner_margin(Margin::symmetric(S5 as i8, S3 as i8))).show(root, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Orion").size(22.0).strong().color(BRAND));
-                ui.label(RichText::new("Store").size(22.0).strong());
-                ui.add_space(12.0);
-                for (s, label) in [(Section::Store, "Store"), (Section::Optimaxer, "Optimaxer")] {
-                    if ui.selectable_label(self.section == s, RichText::new(label).size(15.0).strong()).clicked() && self.section != s {
-                        self.set_section(s);
-                    }
+                ui.label(RichText::new("Orion").font(FontId::new(T_DISPLAY - 6.0, semibold())).color(t.brand_text));
+                ui.add_space(S4);
+                let mut idx = usize::from(self.section == Section::Optimaxer);
+                if kit::segmented(ui, &mut idx, &["Store", "Optimaxer"]) {
+                    self.set_section(ctx, if idx == 1 { Section::Optimaxer } else { Section::Store });
                 }
-                ui.add_space(12.0);
+                ui.add_space(S4);
                 if self.section == Section::Store {
-                    let resp = ui.add_sized(
-                        [(ui.available_width() - 260.0).clamp(160.0, 520.0), 30.0],
-                        egui::TextEdit::singleline(&mut self.query).id(self.search_id).hint_text("Search apps, authors, tags   (Ctrl+F)"),
-                    );
+                    let w = (ui.available_width() - 330.0).clamp(180.0, 480.0);
+                    let resp = ui.add_sized([w, 34.0], egui::TextEdit::singleline(&mut self.query).id(self.search_id).hint_text("Search apps, authors, tags  (Ctrl+F)").margin(Margin::symmetric(S3 as i8, 8)));
                     if resp.changed() {
                         self.dirty = true;
                         self.detail = None;
+                        self.bump(ctx);
                     }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("Settings").clicked() {
+                    if kit::ghost(ui, "Settings", true).clicked() {
                         self.show_settings = !self.show_settings;
                     }
                     let n = self.downloads.iter().filter(|d| matches!(d.status(), DlStatus::Running)).count();
                     let label = if n > 0 { format!("Downloads ({n})") } else { "Downloads".into() };
-                    if ui.selectable_label(self.show_downloads, label).clicked() {
+                    let dl = if self.show_downloads { kit::secondary(ui, &label, true) } else { kit::ghost(ui, &label, true) };
+                    if dl.clicked() {
                         self.show_downloads = !self.show_downloads;
                     }
-                    if self.section == Section::Store && ui.add_enabled(!self.loading, egui::Button::new(if self.loading { "Refreshing..." } else { "Refresh" })).clicked() {
-                        self.loading = true;
-                        self.rx = spawn_refresh(ctx);
+                    if self.section == Section::Store {
+                        let label = if self.loading { "Refreshing" } else { "Refresh" };
+                        if kit::ghost(ui, label, !self.loading).clicked() {
+                            self.loading = true;
+                            self.rx = spawn_refresh(ctx);
+                        }
                     }
                 });
             });
-            ui.add_space(6.0);
         });
     }
 
     fn status_bar(&mut self, root: &mut Ui) {
-        egui::Panel::bottom("status").show(root, |ui| {
+        let t = tokens(root.ctx());
+        egui::Panel::bottom("status").show_separator_line(false).frame(egui::Frame::new().fill(t.rail).inner_margin(Margin::symmetric(S5 as i8, S2 as i8))).show(root, |ui| {
             ui.horizontal(|ui| {
-                let weak = ui.visuals().weak_text_color();
                 if self.section == Section::Optimaxer {
-                    ui.label(RichText::new(self.opti.status_text()).size(12.0).color(weak));
+                    ui.label(RichText::new(self.opti.status_text()).size(T_CAPTION).color(t.subtle));
                     return;
                 }
-                ui.label(RichText::new(format!("{} apps  ·  {} shown  ·  source: {}", self.catalog.apps.len(), self.view.len(), self.catalog.source)).size(12.0).color(weak));
+                ui.label(RichText::new(format!("{} apps  ·  {} shown  ·  source: {}", self.catalog.apps.len(), self.view.len(), self.catalog.source)).size(T_CAPTION).color(t.subtle));
                 if self.loading {
-                    ui.add(egui::Spinner::new().size(12.0));
+                    ui.add(egui::Spinner::new().size(12.0).color(t.brand_text));
                 }
                 if !self.note.is_empty() {
-                    ui.label(RichText::new(&self.note).size(12.0).color(Color32::from_rgb(0xF5, 0xA6, 0x23)));
+                    ui.label(RichText::new(&self.note).size(T_CAPTION).color(t.warn));
                 }
             });
         });
     }
 
     fn side_panel(&mut self, root: &mut Ui) {
-        egui::Panel::left("side").resizable(false).exact_size(190.0).show(root, |ui| {
+        let ctx = root.ctx().clone();
+        let ctx = &ctx;
+        let t = tokens(ctx);
+        egui::Panel::left("side").resizable(false).show_separator_line(false).exact_size(212.0).frame(egui::Frame::new().fill(t.rail).inner_margin(Margin::symmetric(S3 as i8, S2 as i8))).show(root, |ui| {
             if self.section == Section::Optimaxer {
-                self.opti.side_panel(ui);
+                self.opti.side_panel(ui, ctx);
                 return;
             }
-            ui.add_space(8.0);
-            ui.label(RichText::new("PLATFORM").size(11.0).color(ui.visuals().weak_text_color()));
+            side_title(ui, "Platform");
             let mut changed = false;
             for p in PLATFORMS {
                 let n = self.catalog.apps.iter().filter(|a| p == "All" || a.platform == p).count();
                 let selected = self.settings.platform == p;
-                if ui.add_sized([ui.available_width(), 30.0], egui::Button::selectable(selected, format!("{p}   ({n})"))).clicked() && !selected {
+                if kit::nav_item(ui, selected, p, Some(&n.to_string())).clicked() && !selected {
                     self.settings.platform = p.into();
                     self.category = "All".into();
                     changed = true;
                 }
             }
-            ui.add_space(10.0);
-            ui.label(RichText::new("CATEGORY").size(11.0).color(ui.visuals().weak_text_color()));
+            side_title(ui, "Category");
             let cats = self.categories();
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 let all = cats.iter().map(|c| c.1).sum::<usize>();
                 for (name, n) in std::iter::once(("All".to_string(), all)).chain(cats) {
                     let selected = self.category == name;
-                    if ui.add_sized([ui.available_width(), 26.0], egui::Button::selectable(selected, format!("{name}   ({n})"))).clicked() && !selected {
+                    if kit::nav_item(ui, selected, &name, Some(&n.to_string())).clicked() && !selected {
                         self.category = name;
                         changed = true;
                     }
@@ -503,15 +514,18 @@ impl OrionApp {
             if changed {
                 self.dirty = true;
                 self.detail = None;
+                self.bump(ctx);
                 self.settings.save();
             }
         });
     }
 
-    fn store_view(&mut self, ui: &mut Ui) {
+    fn store_view(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+        let t = tokens(ctx);
         ui.horizontal(|ui| {
             let title = if self.query.trim().is_empty() { format!("{} apps", self.settings.platform) } else { format!("Results for \"{}\"", self.query.trim()) };
-            ui.heading(title);
+            ui.label(RichText::new(title).font(FontId::new(theme::T_TITLE, semibold())).color(t.text));
+            ui.label(RichText::new(format!("{}", self.view.len())).size(T_SMALL).color(t.subtle));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let before = self.settings.sort;
                 egui::ComboBox::from_id_salt("sort").selected_text(self.settings.sort.label()).show_ui(ui, |ui| {
@@ -523,25 +537,25 @@ impl OrionApp {
                     self.dirty = true;
                     self.settings.save();
                 }
-                ui.label("Sort");
+                ui.label(RichText::new("Sort").size(T_SMALL).color(t.muted));
             });
         });
-        ui.add_space(4.0);
+        ui.add_space(S2);
         if self.view.is_empty() {
-            ui.add_space(40.0);
-            ui.vertical_centered(|ui| {
-                ui.label(RichText::new("Nothing here").size(20.0).strong());
-                ui.label("No apps match this platform, category or search.");
-            });
+            if self.loading && self.catalog.apps.is_empty() {
+                kit::skeleton(ui, 6);
+            } else {
+                kit::empty_state(ui, "No apps match", "Try another platform or category, or clear the search.");
+            }
             return;
         }
         let avail = ui.available_width();
         let cols = (((avail + GAP) / (300.0 + GAP)).floor() as usize).max(1);
-        let w = (avail - GAP * (cols as f32 - 1.0) - 12.0) / cols as f32;
+        let w = (avail - GAP * (cols as f32 - 1.0) - 14.0) / cols as f32;
         let rows = self.view.len().div_ceil(cols);
         let mut picked: Option<AppItem> = None;
         if !self.featured.is_empty() {
-            ui.label(RichText::new("Featured today").strong().color(LIME));
+            kit::group_title(ui, "Featured today");
             ui.spacing_mut().item_spacing = vec2(GAP, GAP);
             ui.horizontal(|ui| {
                 for app in self.featured.iter().take(cols) {
@@ -550,8 +564,9 @@ impl OrionApp {
                     }
                 }
             });
-            ui.add_space(4.0);
-            ui.label(RichText::new("All apps").strong());
+            ui.add_space(S1);
+            ui.label(RichText::new("All apps").font(FontId::new(T_BODY, semibold())).color(t.muted));
+            ui.add_space(S1);
         }
         egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, CARD_H + GAP, rows, |ui, range| {
             ui.spacing_mut().item_spacing = vec2(GAP, GAP);
@@ -566,71 +581,80 @@ impl OrionApp {
             }
         });
         if let Some(a) = picked {
-            self.open_detail(a);
+            self.open_detail(ctx, a);
         }
     }
 
     fn detail_view(&mut self, ctx: &egui::Context, ui: &mut Ui) {
         let Some(app) = self.detail.clone() else { return };
+        let t = tokens(ctx);
         let mut download: Option<(String, String)> = None;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            if ui.button("< Back").clicked() {
+            ui.set_max_width(ui.available_width().min(980.0));
+            if kit::ghost(ui, "Back to apps", true).clicked() {
                 self.detail = None;
+                self.bump(ctx);
             }
-            ui.add_space(6.0);
+            ui.add_space(S3);
             ui.horizontal(|ui| {
                 icon(ui, &app, 96.0);
+                ui.add_space(S2);
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(&app.name).size(26.0).strong());
-                    ui.label(RichText::new(format!("by {}", app.author)).color(ui.visuals().weak_text_color()));
+                    ui.label(RichText::new(&app.name).font(FontId::new(T_DISPLAY, semibold())).color(t.text));
+                    ui.label(RichText::new(format!("by {}", app.author)).size(T_BODY).color(t.muted));
+                    ui.add_space(S1);
                     ui.horizontal(|ui| {
-                        chip(ui, &app.platform, BRAND.gamma_multiply(0.3), BRAND);
-                        chip(ui, &app.category, LIME.gamma_multiply(0.25), ui.visuals().text_color());
-                        chip(ui, &if app.version.trim_start_matches('v').starts_with(|c: char| c.is_ascii_digit()) { format!("v{}", app.version.trim_start_matches('v')) } else { app.version.clone() }, Color32::from_gray(70).gamma_multiply(0.4), ui.visuals().text_color());
+                        kit::chip(ui, &app.platform, Tone::Brand);
+                        kit::chip(ui, &app.category, Tone::Good);
+                        let v = if app.version.trim_start_matches('v').starts_with(|c: char| c.is_ascii_digit()) { format!("v{}", app.version.trim_start_matches('v')) } else { app.version.clone() };
+                        kit::chip(ui, &v, Tone::Neutral);
                         if !app.size.is_empty() {
-                            chip(ui, &app.size, Color32::from_gray(70).gamma_multiply(0.4), ui.visuals().text_color());
+                            kit::chip(ui, &app.size, Tone::Neutral);
                         }
                     });
                 });
             });
-            ui.add_space(10.0);
+            ui.add_space(S4);
             self.install_box(ui, &app, &mut download);
             if app.platform != PC {
-                ui.label(RichText::new(format!("{} package. It will not install on Windows; downloading saves the file for transfer to a {} device.", app.platform, app.platform)).size(12.0).color(ui.visuals().weak_text_color()));
+                ui.add_space(S1);
+                ui.add(egui::Label::new(RichText::new(format!("This is a {} package and will not install on Windows. Download it to transfer to a {} device.", app.platform, app.platform)).size(T_SMALL).color(t.muted)).wrap());
             }
-            ui.add_space(8.0);
+            ui.add_space(S4);
             if !app.description.is_empty() {
-                ui.label(&app.description);
-                ui.add_space(8.0);
+                ui.add(egui::Label::new(RichText::new(&app.description).size(T_BODY + 1.0).color(t.text)).wrap());
+                ui.add_space(S4);
             }
             if !app.patches.is_empty() {
-                ui.label(RichText::new("Patches").strong());
+                ui.label(RichText::new("Patches").font(FontId::new(T_BODY, semibold())).color(t.text));
                 ui.horizontal_wrapped(|ui| {
                     for p in &app.patches {
-                        chip(ui, p, BRAND.gamma_multiply(0.2), ui.visuals().text_color());
+                        kit::chip(ui, p, Tone::Brand);
                     }
                 });
+                ui.add_space(S3);
             }
             if !app.tags.is_empty() {
-                ui.label(RichText::new("Tags").strong());
+                ui.label(RichText::new("Tags").font(FontId::new(T_BODY, semibold())).color(t.text));
                 ui.horizontal_wrapped(|ui| {
-                    for t in &app.tags {
-                        chip(ui, t, Color32::from_gray(70).gamma_multiply(0.4), ui.visuals().text_color());
+                    for tag in &app.tags {
+                        kit::chip(ui, tag, Tone::Neutral);
                     }
                 });
+                ui.add_space(S3);
             }
             if !app.screenshots.is_empty() {
-                ui.add_space(6.0);
-                ui.label(RichText::new("Screenshots").strong());
+                ui.label(RichText::new("Screenshots").font(FontId::new(T_BODY, semibold())).color(t.text));
+                ui.add_space(S1);
                 egui::ScrollArea::horizontal().id_salt("shots").show(ui, |ui| {
                     ui.horizontal(|ui| {
                         for s in &app.screenshots {
-                            ui.add(egui::Image::new(s.as_str()).fit_to_exact_size(vec2(320.0, 190.0)).corner_radius(10));
+                            ui.add(egui::Image::new(s.as_str()).fit_to_exact_size(vec2(320.0, 190.0)).corner_radius(R_LG));
                         }
                     });
                 });
+                ui.add_space(S3);
             }
-            ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if let Some(u) = &app.repo_url {
                     ui.hyperlink_to("Source repository", u);
@@ -639,9 +663,10 @@ impl OrionApp {
                     ui.hyperlink_to("Official site", u);
                 }
                 if let Some(p) = &app.package_name {
-                    ui.label(RichText::new(p).monospace().size(12.0).color(ui.visuals().weak_text_color()));
+                    ui.label(RichText::new(p).monospace().size(T_CAPTION).color(t.subtle));
                 }
             });
+            ui.add_space(S5);
         });
         if let Some((url, hint)) = download {
             self.start(ctx, &url, &hint);
@@ -649,12 +674,13 @@ impl OrionApp {
     }
 
     fn install_box(&mut self, ui: &mut Ui, app: &AppItem, download: &mut Option<(String, String)>) {
-        egui::Frame::group(ui.style()).corner_radius(12).inner_margin(12).show(ui, |ui| {
+        let t = tokens(ui.ctx());
+        kit::card(ui, |ui| {
             ui.set_width(ui.available_width());
             let variants = if app.versions.is_empty() { &app.variants } else { &app.versions[self.sel_stream.min(app.versions.len() - 1)].variants };
             if app.versions.len() > 1 {
                 ui.horizontal(|ui| {
-                    ui.label("Release channel");
+                    ui.label(RichText::new("Release channel").color(t.muted));
                     let cur = &app.versions[self.sel_stream.min(app.versions.len() - 1)];
                     egui::ComboBox::from_id_salt("stream").selected_text(format!("{} {}", cur.stream, cur.version)).show_ui(ui, |ui| {
                         for (i, v) in app.versions.iter().enumerate() {
@@ -667,13 +693,14 @@ impl OrionApp {
             }
             if variants.is_empty() {
                 if app.download_url.is_empty() {
-                    ui.label("No direct download published yet.");
+                    ui.label(RichText::new("No direct download is published yet.").color(t.text));
                     if let Some(r) = &app.repo_url {
-                        if ui.button("Open releases page").clicked() {
+                        ui.add_space(S1);
+                        if kit::secondary(ui, "Open releases page", true).clicked() {
                             let _ = open::that(format!("{}/releases", r.trim_end_matches('/')));
                         }
                     }
-                } else if ui.add(egui::Button::new(RichText::new("Download").strong().color(Color32::BLACK)).fill(LIME).min_size(vec2(160.0, 34.0))).clicked() {
+                } else if kit::primary(ui, "Download", true).clicked() {
                     *download = Some((app.download_url.clone(), String::new()));
                 }
                 return;
@@ -682,16 +709,17 @@ impl OrionApp {
             let label = |v: &model::AppVariant| format!("{}   {}   {}", v.arch, v.name, model::format_size(v.size));
             if variants.len() > 1 {
                 ui.horizontal(|ui| {
-                    ui.label("Build");
+                    ui.label(RichText::new("Build").color(t.muted));
                     egui::ComboBox::from_id_salt("variant").width(420.0).selected_text(label(&variants[idx])).show_ui(ui, |ui| {
                         for (i, v) in variants.iter().enumerate() {
                             ui.selectable_value(&mut self.sel_variant, i, label(v));
                         }
                     });
                 });
+                ui.add_space(S1);
             }
             let v = &variants[idx];
-            if ui.add(egui::Button::new(RichText::new(format!("Download  ({})", model::format_size(v.size))).strong().color(Color32::BLACK)).fill(LIME).min_size(vec2(200.0, 34.0))).clicked() {
+            if kit::primary(ui, &format!("Download  ({})", model::format_size(v.size)), true).clicked() {
                 *download = Some((v.url.clone(), v.name.clone()));
             }
         });
@@ -700,68 +728,75 @@ impl OrionApp {
     fn downloads_panel(&mut self, root: &mut Ui) {
         let ctx = root.ctx().clone();
         let ctx = &ctx;
+        let t = tokens(ctx);
         let mut remove: Option<usize> = None;
         let mut note: Option<String> = None;
         let mut run_installer: Option<PathBuf> = None;
-        egui::Panel::bottom("downloads").resizable(true).default_size(160.0).show(root, |ui| {
+        egui::Panel::bottom("downloads").resizable(true).default_size(168.0).show_separator_line(false).frame(egui::Frame::new().fill(t.surface1).inner_margin(Margin::symmetric(S5 as i8, S3 as i8))).show(root, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Downloads").strong());
-                if ui.small_button("Open folder").clicked() {
-                    let _ = std::fs::create_dir_all(&self.settings.download_dir);
-                    let _ = open::that(&self.settings.download_dir);
-                }
-                if ui.small_button("Clear finished").clicked() {
-                    self.downloads.retain(|d| matches!(d.status(), DlStatus::Running));
-                }
+                ui.label(RichText::new("Downloads").font(FontId::new(T_HEADING, semibold())).color(t.text));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if kit::ghost(ui, "Clear finished", true).clicked() {
+                        self.downloads.retain(|d| matches!(d.status(), DlStatus::Running));
+                    }
+                    if kit::ghost(ui, "Open folder", true).clicked() {
+                        let _ = std::fs::create_dir_all(&self.settings.download_dir);
+                        let _ = open::that(&self.settings.download_dir);
+                    }
+                });
             });
             if self.downloads.is_empty() {
-                ui.label(RichText::new("Nothing downloaded yet.").color(ui.visuals().weak_text_color()));
+                kit::empty_state(ui, "Nothing downloaded yet", "Pick an app and press Download. Files save to the folder in Settings.");
             }
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 for (i, d) in self.downloads.iter().enumerate().rev() {
-                    ui.horizontal(|ui| {
-                        ui.add_sized([220.0, 18.0], egui::Label::new(RichText::new(&d.file).strong()).truncate());
-                        match d.status() {
-                            DlStatus::Running => {
-                                let bar = match d.fraction() {
-                                    Some(f) => egui::ProgressBar::new(f).text(format!("{:.0}%  {} / {}", f * 100.0, model::format_size(Some(d.done.load(std::sync::atomic::Ordering::Relaxed))), model::format_size(Some(d.total.load(std::sync::atomic::Ordering::Relaxed))))),
-                                    None => egui::ProgressBar::new(0.0).animate(true).text(model::format_size(Some(d.done.load(std::sync::atomic::Ordering::Relaxed)))),
-                                };
-                                ui.add(bar.desired_width(260.0));
-                                if ui.small_button("Cancel").clicked() {
-                                    d.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-                                }
-                            }
-                            DlStatus::Done(path) => {
-                                ui.label(RichText::new("Done").color(LIME));
-                                if ui.small_button("Run / Open").clicked() {
-                                    if open::that(&path).is_err() {
-                                        note = Some("Could not open the file".into());
+                    kit::row(ui, ("dl", i), false, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.add_sized([210.0, 20.0], egui::Label::new(RichText::new(&d.file).font(FontId::new(T_BODY, semibold())).color(t.text)).truncate());
+                            match d.status() {
+                                DlStatus::Running => {
+                                    let done = d.done.load(std::sync::atomic::Ordering::Relaxed);
+                                    let total = d.total.load(std::sync::atomic::Ordering::Relaxed);
+                                    let (f, text) = match d.fraction() {
+                                        Some(f) => (f, format!("{:.0}%   {} of {}", f * 100.0, model::format_size(Some(done)), model::format_size(Some(total)))),
+                                        None => (0.0, model::format_size(Some(done))),
+                                    };
+                                    ui.add(egui::ProgressBar::new(f).fill(LIME).desired_height(8.0).corner_radius(4).animate(d.fraction().is_none()).desired_width(240.0));
+                                    ui.label(RichText::new(text).size(T_SMALL).color(t.muted));
+                                    if kit::ghost(ui, "Cancel", true).clicked() {
+                                        d.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
                                     }
                                 }
-                                if ui.small_button("Show in folder").clicked() {
-                                    reveal(&path);
+                                DlStatus::Done(path) => {
+                                    kit::chip(ui, "Done", Tone::Good);
+                                    if kit::secondary(ui, "Open", true).clicked() && open::that(&path).is_err() {
+                                        note = Some("Could not open the file.".into());
+                                    }
+                                    if kit::ghost(ui, "Show in folder", true).clicked() {
+                                        reveal(&path);
+                                    }
+                                    if is_installer(&path) && kit::ghost(ui, "Restore point, then open", true).on_hover_text("Optimaxer creates a System Restore point, then opens the installer").clicked() {
+                                        run_installer = Some(path.clone());
+                                    }
+                                    if kit::ghost(ui, "Remove", true).clicked() {
+                                        remove = Some(i);
+                                    }
                                 }
-                                if is_installer(&path) && ui.small_button("Restore point + run").on_hover_text("Optimaxer creates a System Restore point, then opens the installer").clicked() {
-                                    run_installer = Some(path.clone());
+                                DlStatus::Failed(e) => {
+                                    kit::chip(ui, "Failed", Tone::Bad);
+                                    ui.label(RichText::new(e).size(T_SMALL).color(t.bad));
+                                    if kit::ghost(ui, "Remove", true).clicked() {
+                                        remove = Some(i);
+                                    }
                                 }
-                                if ui.small_button("Remove").clicked() {
-                                    remove = Some(i);
+                                DlStatus::Cancelled => {
+                                    kit::chip(ui, "Cancelled", Tone::Neutral);
+                                    if kit::ghost(ui, "Remove", true).clicked() {
+                                        remove = Some(i);
+                                    }
                                 }
                             }
-                            DlStatus::Failed(e) => {
-                                ui.label(RichText::new(format!("Failed: {e}")).color(Color32::from_rgb(0xFF, 0x6B, 0x6B)));
-                                if ui.small_button("Remove").clicked() {
-                                    remove = Some(i);
-                                }
-                            }
-                            DlStatus::Cancelled => {
-                                ui.label("Cancelled");
-                                if ui.small_button("Remove").clicked() {
-                                    remove = Some(i);
-                                }
-                            }
-                        }
+                        });
                     });
                 }
             });
@@ -776,45 +811,72 @@ impl OrionApp {
             self.say(n);
         }
         if self.downloads.iter().any(|d| matches!(d.status(), DlStatus::Running)) {
-            ctx.request_repaint_after(Duration::from_millis(200));
+            ctx.request_repaint_after(Duration::from_millis(100));
         }
     }
 
-    fn settings_window(&mut self, ctx: &egui::Context) {
-        let mut open = true;
-        egui::Window::new("Settings").open(&mut open).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0)).show(ctx, |ui| {
-            let mut dark = self.settings.dark;
-            if ui.checkbox(&mut dark, "Dark theme").changed() {
-                self.settings.dark = dark;
-                apply_theme(ctx, dark);
-                self.settings.save();
-            }
-            ui.add_space(6.0);
-            ui.label("Download folder");
-            let resp = ui.add(egui::TextEdit::singleline(&mut self.settings.download_dir).desired_width(380.0));
-            if resp.lost_focus() {
-                self.settings.save();
-            }
+    fn settings_modal(&mut self, ctx: &egui::Context) {
+        let t = tokens(ctx);
+        let resp = egui::Modal::new(egui::Id::unique("settings-modal")).backdrop_color(Color32::from_black_alpha(if t.dark { 150 } else { 70 })).show(ctx, |ui| {
+            ui.set_width(460.0);
             ui.horizontal(|ui| {
-                if ui.button("Open folder").clicked() {
-                    let _ = std::fs::create_dir_all(&self.settings.download_dir);
-                    let _ = open::that(&self.settings.download_dir);
+                ui.label(RichText::new("Settings").font(FontId::new(theme::T_TITLE, semibold())).color(t.text));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if kit::ghost(ui, "Close", true).clicked() {
+                        self.show_settings = false;
+                    }
+                });
+            });
+            ui.add_space(S3);
+            kit::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new("Appearance").font(FontId::new(T_BODY, semibold())).color(t.text));
+                let mut dark = self.settings.dark;
+                if ui.checkbox(&mut dark, "Dark theme").changed() {
+                    self.settings.dark = dark;
+                    theme::apply(ctx, dark, self.settings.reduce_motion);
+                    self.settings.save();
                 }
-                if ui.button("Reset").clicked() {
-                    self.settings.download_dir = Settings::default().download_dir;
+                let mut reduce = self.settings.reduce_motion;
+                if ui.checkbox(&mut reduce, "Reduce motion").on_hover_text("Turns off transitions and the loading pulse. Follows the Windows setting by default.").changed() {
+                    self.settings.reduce_motion = reduce;
+                    theme::apply(ctx, self.settings.dark, reduce);
                     self.settings.save();
                 }
             });
-            ui.add_space(6.0);
-            let mut rp = self.settings.opti_restore_point;
-            if ui.checkbox(&mut rp, "Optimaxer: offer a System Restore point before applying tweaks").changed() {
-                self.settings.opti_restore_point = rp;
-                self.settings.save();
-            }
-            ui.add_space(6.0);
-            ui.label(RichText::new(format!("Cache: {}", net::data_dir().display())).size(12.0).color(ui.visuals().weak_text_color()));
+            ui.add_space(S2);
+            kit::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new("Downloads").font(FontId::new(T_BODY, semibold())).color(t.text));
+                let resp = ui.add(egui::TextEdit::singleline(&mut self.settings.download_dir).desired_width(f32::INFINITY).margin(Margin::symmetric(S3 as i8, 8)));
+                if resp.lost_focus() {
+                    self.settings.save();
+                }
+                ui.horizontal(|ui| {
+                    if kit::secondary(ui, "Open folder", true).clicked() {
+                        let _ = std::fs::create_dir_all(&self.settings.download_dir);
+                        let _ = open::that(&self.settings.download_dir);
+                    }
+                    if kit::ghost(ui, "Reset", true).clicked() {
+                        self.settings.download_dir = Settings::default().download_dir;
+                        self.settings.save();
+                    }
+                });
+            });
+            ui.add_space(S2);
+            kit::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new("Optimaxer").font(FontId::new(T_BODY, semibold())).color(t.text));
+                let mut rp = self.settings.opti_restore_point;
+                if ui.checkbox(&mut rp, "Offer a System Restore point before applying tweaks").changed() {
+                    self.settings.opti_restore_point = rp;
+                    self.settings.save();
+                }
+            });
+            ui.add_space(S3);
+            ui.label(RichText::new(format!("Data folder: {}", net::data_dir().display())).size(T_CAPTION).color(t.subtle));
         });
-        if !open {
+        if resp.should_close() {
             self.show_settings = false;
         }
     }

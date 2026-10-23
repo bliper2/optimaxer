@@ -92,6 +92,9 @@ pub fn save_cache(c: &Catalog) {
     }
 }
 
+/// Set by the developer screenshot run so it never rewrites the user's saved settings.
+pub static READ_ONLY: AtomicBool = AtomicBool::new(false);
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -103,12 +106,14 @@ pub struct Settings {
     pub section: String,
     /// Optimaxer: offer a System Restore point before applying tweaks.
     pub opti_restore_point: bool,
+    /// No transitions or pulses. Defaults to the Windows "animation effects" setting.
+    pub reduce_motion: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         let dir = dirs::download_dir().unwrap_or_else(|| PathBuf::from(".")).join("Orion");
-        Self { dark: true, download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), opti_restore_point: true }
+        Self { dark: true, download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), opti_restore_point: true, reduce_motion: crate::theme::system_reduces_motion() }
     }
 }
 
@@ -117,6 +122,9 @@ impl Settings {
         fs::read(data_dir().join("settings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
     }
     pub fn save(&self) {
+        if READ_ONLY.load(Ordering::Relaxed) {
+            return;
+        }
         if let Ok(b) = serde_json::to_vec_pretty(self) {
             write_atomic(&data_dir().join("settings.json"), &b);
         }

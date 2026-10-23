@@ -19,7 +19,7 @@ import tempfile
 import time
 import urllib.request
 
-__version__ = "2.8.0"
+__version__ = "2.12.0"
 REPO = "bliper2/optimaxer"
 STATE_FILE = "/var/lib/optimaxer/state.json"
 BACKUP_DIR = "/var/lib/optimaxer/backups"
@@ -1425,6 +1425,10 @@ THEMES = {
     "Dracula":   dict(bg="#282a36", panel="#343746", fg="#f8f8f2", dim="#8a8fa8", accent="#bd93f9", sel="#44475a", ok="#50fa7b", warn="#f1fa8c", err="#ff5555"),
     "Gruvbox":   dict(bg="#282828", panel="#3c3836", fg="#ebdbb2", dim="#a89984", accent="#d79921", sel="#504945", ok="#b8bb26", warn="#fabd2f", err="#fb4934"),
     "Solarized": dict(bg="#002b36", panel="#073642", fg="#93a1a1", dim="#657b83", accent="#268bd2", sel="#0b4a5a", ok="#859900", warn="#b58900", err="#dc322f"),
+    # Material Design 3 baseline palettes. flat=True gives them the roomier, borderless controls Material uses;
+    # on_accent is the text colour on a filled accent button.
+    "Material":       dict(bg="#141218", panel="#211f26", fg="#e6e0e9", dim="#cac4d0", accent="#d0bcff", sel="#4f378b", ok="#a8dab5", warn="#f9de8d", err="#f2b8b5", on_accent="#381e72", flat=True),
+    "Material Light": dict(bg="#fef7ff", panel="#f3edf7", fg="#1d1b20", dim="#49454f", accent="#6750a4", sel="#e8def8", ok="#146c2e", warn="#7d5700", err="#b3261e", on_accent="#ffffff", flat=True),
 }
 
 
@@ -1612,14 +1616,15 @@ class Gui:
         s.configure("TLabel", background=c["bg"], foreground=c["fg"])
         s.configure("Title.TLabel", font=("sans-serif", 15, "bold"), foreground=c["accent"])
         s.configure("Dim.TLabel", foreground=c["dim"])
-        s.configure("TButton", background=c["panel"], foreground=c["fg"], padding=(10, 5), borderwidth=1)
+        flat = c.get("flat", False)
+        s.configure("TButton", background=c["panel"], foreground=c["fg"], padding=(16, 8) if flat else (10, 5), borderwidth=0 if flat else 1)
         s.map("TButton", background=[("active", c["sel"]), ("disabled", c["bg"])], foreground=[("disabled", c["dim"])])
-        s.configure("Accent.TButton", background=c["accent"], foreground="#ffffff" if name != "Light" else "#ffffff")
+        s.configure("Accent.TButton", background=c["accent"], foreground=c.get("on_accent", "#ffffff"))
         s.map("Accent.TButton", background=[("active", c["sel"]), ("disabled", c["bg"])])
         s.configure("TCheckbutton", background=c["bg"], foreground=c["fg"])
         s.map("TCheckbutton", background=[("active", c["bg"])])
         s.configure("TNotebook", background=c["bg"], borderwidth=0)
-        s.configure("TNotebook.Tab", background=c["panel"], foreground=c["dim"], padding=(6, 4))
+        s.configure("TNotebook.Tab", background=c["panel"], foreground=c["dim"], padding=(14, 8) if flat else (6, 4), borderwidth=0 if flat else 1)
         s.map("TNotebook.Tab", background=[("selected", c["bg"])], foreground=[("selected", c["accent"])])
         s.configure("Treeview", background=c["panel"], foreground=c["fg"], fieldbackground=c["panel"], rowheight=24, borderwidth=0)
         s.map("Treeview", background=[("selected", c["sel"])], foreground=[("selected", c["fg"])])
