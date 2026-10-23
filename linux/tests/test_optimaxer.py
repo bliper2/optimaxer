@@ -531,6 +531,42 @@ class GuiTest(Base):
         for name in ox.THEMES:
             self.g.set_theme(name)
 
+    def test_install_command_copies_the_script_and_writes_a_wrapper(self):
+        old = sys.argv
+        sys.argv = [ox.__file__]
+        try:
+            made = ox.install_command()
+        finally:
+            sys.argv = old
+        script, wrapper = made
+        self.assertTrue(os.path.isfile(script) and script.endswith("optimaxer.py"))
+        with open(wrapper, encoding="utf-8") as fh:
+            self.assertIn("optimaxer.py", fh.read())
+        self.assertTrue(os.access(wrapper, os.X_OK))
+        self.assertIn("optimaxer.py gui", ox.desktop_entry())
+
+    def _offer(self, answer):
+        from unittest import mock
+        old = sys.argv
+        sys.argv = [ox.__file__]
+        try:
+            with mock.patch("sys.stdin.isatty", return_value=True), mock.patch("sys.stdout.isatty", return_value=True),                     mock.patch("builtins.input", return_value=answer) as asked:
+                ox.first_run_offer()
+                ox.first_run_offer()
+                return asked.call_count
+        finally:
+            sys.argv = old
+
+    def test_first_run_offer_installs_on_yes_and_asks_only_once(self):
+        self.assertEqual(self._offer(""), 1)
+        self.assertTrue(os.path.exists(ox.installed_script()))
+        self.assertTrue(ox.load_settings().get("setup_offered"))
+
+    def test_first_run_offer_respects_no(self):
+        self.assertEqual(self._offer("n"), 1)
+        self.assertFalse(os.path.exists(ox.installed_script()))
+        self.assertTrue(ox.load_settings().get("setup_offered"))
+
     def test_material_themes_exist_and_are_readable(self):
         def lum(hex_color):
             ch = [int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
