@@ -756,6 +756,18 @@ impl OptiUi {
                 if kit::ghost(ui, "Cancel", true).clicked() {
                     decision = Some(false);
                 }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let copied_id = egui::Id::NULL.with("opti-confirm-copied");
+                    let now = ui.input(|i| i.time);
+                    let copied = ui.data(|d| d.get_temp::<f64>(copied_id)).is_some_and(|at| now - at < 1.6);
+                    if copied {
+                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(1700));
+                    }
+                    if kit::ghost(ui, if copied { "Copied" } else { "Copy details" }, true).clicked() {
+                        ui.ctx().copy_text(confirm_text(p));
+                        ui.data_mut(|d| d.insert_temp(copied_id, now));
+                    }
+                });
             });
         });
         if resp.should_close() && decision.is_none() {
@@ -1417,4 +1429,22 @@ mod tests {
         assert_eq!(risk_tone(""), risk_tone("Safe"));
         assert_eq!(risk_tone("Moderate"), Tone::Warn);
     }
+}
+
+/// Everything the confirmation window shows, as plain text for the clipboard.
+fn confirm_text(p: &Pending) -> String {
+    let mut out = format!("{}
+{}
+", p.title, p.intro);
+    for l in &p.lines {
+        if l.head {
+            out.push_str(&format!("
+{}
+", l.text));
+        } else {
+            out.push_str(&format!("  {}
+", l.text));
+        }
+    }
+    out
 }
