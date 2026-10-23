@@ -25,6 +25,14 @@ The brand colours stay: indigo `#7478F8` for selection, focus and navigation, li
 
 Every text colour is tested against every surface it can sit on (`cargo test`, module `theme`): body text at 7:1 or better, muted and subtle at 4.5:1, status tones at 4.5:1 on their tinted chips, the focus ring at 3:1.
 
+## Windows style (default)
+
+Follows Windows 11: the Windows light or dark mode and your accent colour (read from personalization, re-read every couple of seconds, with a fallback to the stock blue when the registry holds none), the content area one tonal step above the rail around it, 4 px controls and 8 px cards, and Segoe Fluent Icons in the sidebar. The accent is adjusted until text in it reads at 4.5:1 on every surface, and button text switches between white and near-black (or the fill darkens) for the same reason. The contrast tests run against eight sample Windows accents in both themes.
+
+## Material option
+
+Settings has a Material design switch. It swaps in the Material Design 3 baseline palettes (dark `#141218` canvas with the `#D0BCFF` primary, light `#FEF7FF` canvas with the `#6750A4` primary), makes buttons and navigation items fully rounded, and uses the primary colour for the main action instead of lime. The hover state lifts by a light 8% state layer. The same contrast tests run on all four palettes.
+
 ## Type
 
 Segoe UI, with Segoe UI Semibold for titles, buttons and emphasis. Scale in px: caption 12, small 13, body 14, heading 16, title 22, display 28. Labels are sentence case; nothing is set in tracked capitals.

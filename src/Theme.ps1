@@ -9,6 +9,9 @@ $global:OptiModes = [ordered]@{
     graphite  = @{ Label = 'Graphite';  Light = $false; Bg = '1C1E21'; Sidebar = '141618'; Card = '26282C'; CardHi = '30343A'; Line = '3C4148'; Text = 'E7E9EC'; Muted = '9AA1A9'; Good = '6FCF97'; Warn = 'E6B450'; Bad = 'E36B63' }
     dusk      = @{ Label = 'Dusk';      Light = $false; Bg = '1A1422'; Sidebar = '120E18'; Card = '261C31'; CardHi = '32243F'; Line = '463256'; Text = 'F6F0FA'; Muted = 'B5A6C4'; Good = '7DCEA0'; Warn = 'E6C07B'; Bad = 'E07A8D' }
     porcelain = @{ Label = 'Porcelain'; Light = $true;  Bg = 'F6F1EA'; Sidebar = 'EEE7DE'; Card = 'FFFCF8'; CardHi = 'F3EBE3'; Line = 'E4D9CC'; Text = '2C241C'; Muted = '74685C'; Good = '2C7A4B'; Warn = '8D5E00'; Bad = 'B23B32' }
+    # Material Design 3 baseline surfaces. Picking one of these also switches the accent to the Material primary.
+    material      = @{ Label = 'Material';       Light = $false; Bg = '141218'; Sidebar = '0F0D13'; Card = '211F26'; CardHi = '2B2930'; Line = '49454F'; Text = 'E6E0E9'; Muted = 'CAC4D0'; Good = 'A8DAB5'; Warn = 'F9DE8D'; Bad = 'F2B8B5'; Accent = 'material' }
+    materiallight = @{ Label = 'Material light'; Light = $true;  Bg = 'FEF7FF'; Sidebar = 'F3EDF7'; Card = 'F7F2FA'; CardHi = 'ECE6F0'; Line = 'CAC4D0'; Text = '1D1B20'; Muted = '49454F'; Good = '146C2E'; Warn = '7D5700'; Bad = 'B3261E'; Accent = 'material' }
 }
 
 # Each accent has a tone tuned for dark surfaces and one for light surfaces.
@@ -21,9 +24,10 @@ $global:OptiAccents = [ordered]@{
     green  = @{ Label = 'Green';  Dark = '5FB878'; Light = '2E8B4F' }
     cyan   = @{ Label = 'Cyan';   Dark = '3EC6D6'; Light = '0E7C8A' }
     copper = @{ Label = 'Copper'; Dark = 'E08A4F'; Light = 'B85E24' }
+    material = @{ Label = 'Material'; Dark = 'D0BCFF'; Light = '6750A4' }
 }
 
-$global:Cfg = @{ Mode = 'system'; Accent = 'teal'; Anim = $true; AutoUpdate = $true; UiVersion = 5 }
+$global:Cfg = @{ Mode = 'system'; Accent = 'system'; Anim = $true; AutoUpdate = $true; UiVersion = 6 }
 $global:CfgPath = Join-Path $global:OptiData 'settings.json'
 
 function Import-Cfg {
@@ -40,6 +44,21 @@ function Import-Cfg {
 function Save-Cfg { try { $global:Cfg | ConvertTo-Json | Set-Content -LiteralPath $global:CfgPath -Encoding UTF8 } catch {} }
 
 # ---------------------------------------------------------------- helpers
+# The accent colour from Windows personalization (0xAABBGGRR). A zero or black value means it was never set, so fall back
+# to the personalization palette and then to the stock Windows blue.
+function Get-SystemAccentHex {
+    try {
+        $v = [uint32](Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\DWM' -Name AccentColor -ErrorAction Stop).AccentColor
+        $a = ($v -shr 24) -band 0xFF; $r = $v -band 0xFF; $g = ($v -shr 8) -band 0xFF; $b = ($v -shr 16) -band 0xFF
+        if ($a -ne 0 -and ($r + $g + $b) -gt 24 -and ($r + $g + $b) -lt 735) { return ('{0:X2}{1:X2}{2:X2}' -f $r, $g, $b) }
+    } catch {}
+    try {
+        $p = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Accent' -Name AccentPalette -ErrorAction Stop).AccentPalette
+        if ($p.Length -ge 16 -and $p[15] -ne 0 -and ($p[12] + $p[13] + $p[14]) -gt 24) { return ('{0:X2}{1:X2}{2:X2}' -f $p[12], $p[13], $p[14]) }
+    } catch {}
+    return '0078D4'
+}
+
 function Get-Dur { param([double]$Ms) return [TimeSpan]::FromMilliseconds($Ms) }
 
 function Set-Res {
@@ -205,7 +224,13 @@ function Initialize-Settings {
     foreach ($m in @('system') + @($global:OptiModes.Keys)) {
         $b = New-Chip $(if ($m -eq 'system') { 'Match Windows' } else { $global:OptiModes[$m].Label })
         $b.Tag = $m
-        $b.Add_Click({ param($s, $e) $global:Cfg.Mode = $s.Tag; Save-Cfg; Set-Appearance })
+        $b.Add_Click({
+            param($s, $e)
+            $global:Cfg.Mode = $s.Tag
+            $want = $global:OptiModes[[string]$s.Tag].Accent
+            if ($want) { $global:Cfg.Accent = $want }
+            Save-Cfg; Set-Appearance
+        })
         $global:ChipSets.mode[$m] = $b
         [void]$UI.ThemePanel.Children.Add($b)
     }
@@ -232,7 +257,20 @@ function Initialize-Settings {
     }
 }
 
+function Register-SystemAccent {
+    # "Windows" accent: the user's own colour, lightened a little on dark surfaces and darkened on light ones so it reads.
+    $hex = Get-SystemAccentHex
+    $c = ConvertTo-Color $hex
+    $dark = Mix-Color $c ([Windows.Media.Colors]::White) 0.18
+    $light = Mix-Color $c ([Windows.Media.Colors]::Black) 0.12
+    $entry = @{ Label = 'Windows'; Dark = ('{0:X2}{1:X2}{2:X2}' -f $dark.R, $dark.G, $dark.B); Light = ('{0:X2}{1:X2}{2:X2}' -f $light.R, $light.G, $light.B) }
+    $new = [ordered]@{ system = $entry }
+    foreach ($k in @($global:OptiAccents.Keys)) { if ($k -ne 'system') { $new[$k] = $global:OptiAccents[$k] } }
+    $global:OptiAccents = $new
+}
+
 function Initialize-Look {
+    Register-SystemAccent
     Import-Cfg
     $win.SetResourceReference([Windows.Window]::BackgroundProperty, 'Bg')
     Initialize-Settings

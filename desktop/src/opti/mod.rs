@@ -10,6 +10,7 @@ pub mod services;
 pub mod special;
 pub mod startup;
 pub mod state;
+pub mod sysmon;
 pub mod tools;
 
 use std::time::{SystemTime, UNIX_EPOCH};

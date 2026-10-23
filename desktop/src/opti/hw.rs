@@ -116,7 +116,7 @@ fn system_disk() -> (bool, bool) {
 }
 // endregion
 
-fn gpu_names(sys: &dyn System) -> Vec<String> {
+pub fn gpu_names(sys: &dyn System) -> Vec<String> {
     let class = r"HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
     let mut out: Vec<String> = Vec::new();
     for k in sys.reg_subkeys(class) {

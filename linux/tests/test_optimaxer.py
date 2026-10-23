@@ -13,8 +13,10 @@ class FakeSys:
         self.pkgs, self.enabled, self.active = set(), set(), set()
         self.units = {"fstrim.timer", "earlyoom.service", "paccache.timer", "avahi-daemon.service", "avahi-daemon.socket",
                       "NetworkManager-wait-online.service", "cups.service", "ufw.service"}
-        self.commands, self.have = [], {"pacman", "systemctl", "yay", "flatpak", "nmcli", "paccache", "sudo"}
+        self.commands, self.have = [], {"pacman", "systemctl", "yay", "flatpak", "nmcli", "paccache", "sudo", "dnf", "rpm"}
         self.fail_pkgs, self.nm = set(), {}
+        self.remotes = "flathub\n"          # `flatpak remotes` output
+        self.unneeded = ""                  # `dnf repoquery --unneeded` output
 
     def __call__(self, cmd, user, write, input):
         self.commands.append((list(cmd), user, write))
@@ -32,6 +34,23 @@ class FakeSys:
         if c[:2] == ["pacman", "-Rns"]:
             self.pkgs -= set(a for a in c[2:] if not a.startswith("-"))
             return 0, ""
+        if c[:2] == ["rpm", "-q"]:
+            if c[2] == "--qf":
+                return (0, "2048") if c[4] in self.pkgs else (1, "")
+            return (0, "") if c[2] in self.pkgs else (1, "")
+        if c[:3] == ["dnf", "install", "-y"]:
+            names = [a for a in c[3:] if not a.startswith("-")]
+            if set(names) & self.fail_pkgs:
+                return 1, "Error: Unable to find a match"
+            self.pkgs |= set(names)
+            return 0, ""
+        if c[:3] == ["dnf", "remove", "-y"]:
+            self.pkgs -= set(a for a in c[3:] if not a.startswith("-"))
+            return 0, ""
+        if c[:2] == ["dnf", "repoquery"]:
+            return 0, self.unneeded
+        if c[:2] == ["flatpak", "remotes"]:
+            return 0, self.remotes
         if c[:2] == ["systemctl", "is-enabled"]:
             return (0, "enabled\n") if c[2] in self.enabled else (1, "disabled\n")
         if c[:2] == ["systemctl", "is-active"]:
@@ -544,6 +563,147 @@ class GuiTest(Base):
         self.assertEqual(len(self.g.lists["apps"]["iids"]), 1)
         self.g.check_all("apps", True)
         self.assertIn("firefox", self.g.ticked("apps"))
+
+
+FEDORA_OS = 'NAME="Fedora Linux"\nID=fedora\nVERSION_ID=41\nPRETTY_NAME="Fedora Linux 41 (Workstation Edition)"\n'
+
+
+class Fedora(Base):
+    def setUp(self):
+        super().setUp()
+        self.put("/etc/os-release", FEDORA_OS)
+        ox.select_pm("dnf")
+
+    def tearDown(self):
+        ox.select_pm("pacman")
+        super().tearDown()
+
+    def test_distribution_detection(self):
+        self.assertEqual(ox.detect_pm(), "dnf")
+        self.assertTrue(ox.is_fedora_family() and not ox.is_arch_family())
+        self.put("/etc/os-release", 'ID=rocky\nID_LIKE="rhel centos fedora"\n')
+        self.assertEqual(ox.detect_pm(), "dnf")
+        self.put("/etc/os-release", 'ID=nobara\nID_LIKE="rhel centos fedora"\n')
+        self.assertEqual(ox.detect_pm(), "dnf")
+        self.put("/etc/os-release", 'ID=endeavouros\nID_LIKE=arch\n')
+        self.assertEqual(ox.detect_pm(), "pacman")
+        self.put("/etc/os-release", 'ID=debian\n')
+        self.assertIsNone(ox.detect_pm())
+
+    def test_catalog_uses_fedora_routes_and_no_aur(self):
+        self.assertTrue(ox.APPS)
+        self.assertNotIn("A", {a["src"] for a in ox.APPS})
+        by = {a["name"]: a for a in ox.APPS}
+        self.assertEqual((by["Firefox"]["src"], by["Firefox"]["pkg"]), ("P", "firefox"))
+        self.assertEqual((by["Discord"]["src"], by["Discord"]["pkg"]), ("F", "com.discordapp.Discord"))
+        self.assertNotIn("yay (AUR helper)", by)
+        self.assertNotIn("Tailscale", by, "software that needs a third-party repo is not offered")
+
+    def test_switching_back_restores_the_arch_catalog(self):
+        ox.select_pm("pacman")
+        self.assertIn("A", {a["src"] for a in ox.APPS})
+        self.assertIn("yay (AUR helper)", {a["name"] for a in ox.APPS})
+        ox.select_pm("dnf")
+        self.assertNotIn("A", {a["src"] for a in ox.APPS})
+
+    def test_install_and_remove_a_repo_app(self):
+        app = next(a for a in ox.APPS if a["name"] == "htop")
+        self.assertTrue(ox.install_app(app))
+        self.assertTrue(self.sys.ran("dnf", "install", "-y", "htop"))
+        self.assertFalse(self.sys.ran("pacman"))
+        self.assertTrue(ox.app_installed(app))
+        self.assertTrue(ox.remove_app(app))
+        self.assertTrue(self.sys.ran("dnf", "remove", "-y", "htop"))
+
+    def test_flatpak_app_adds_flathub_when_missing(self):
+        self.sys.remotes = ""
+        app = next(a for a in ox.APPS if a["name"] == "Discord")
+        self.assertTrue(ox.install_app(app))
+        self.assertTrue(self.sys.ran("flatpak", "remote-add", "--if-not-exists", "flathub", "https://dl.flathub.org/repo/flathub.flatpakrepo"))
+        self.assertTrue(self.sys.ran("flatpak", "install", "-y", "--noninteractive", "flathub", "com.discordapp.Discord"))
+
+    def test_flathub_is_not_added_twice(self):
+        app = next(a for a in ox.APPS if a["name"] == "Discord")
+        ox.install_app(app)
+        self.assertFalse(self.sys.ran("flatpak", "remote-add"))
+
+    def test_failed_install_is_reported(self):
+        self.sys.fail_pkgs = {"htop"}
+        app = next(a for a in ox.APPS if a["name"] == "htop")
+        self.assertFalse(ox.install_app(app))
+
+    def test_tweak_packages_install_through_dnf(self):
+        t = ox.tweak_by_id("perf-earlyoom")
+        self.assertTrue(t.apply())
+        self.assertTrue(self.sys.ran("dnf", "install", "-y", "earlyoom"))
+        self.assertTrue(t.undo())
+        self.assertFalse(self.sys.ran("pacman", "-S"))
+
+    def test_dnf_conf_tweak_edits_and_restores(self):
+        conf = "[main]\ngpgcheck=1\ninstallonly_limit=3\nclean_requirements_on_remove=True\n"
+        self.put("/etc/dnf/dnf.conf", conf)
+        t = ox.tweak_by_id("pm-dnf")
+        self.assertTrue(t.apply())
+        text = self.get("/etc/dnf/dnf.conf")
+        self.assertIn("max_parallel_downloads=10", text)
+        self.assertIn("fastestmirror=True", text)
+        self.assertTrue(t.is_applied())
+        self.assertTrue(t.undo())
+        self.assertEqual(self.get("/etc/dnf/dnf.conf"), conf)
+
+    def test_pacman_tweaks_are_unavailable_on_fedora_and_dnf_tweaks_on_arch(self):
+        self.put("/etc/pacman.conf", "[options]\n")
+        self.put("/etc/dnf/dnf.conf", "[main]\n")
+        self.assertFalse(ox.tweak_by_id("pm-pacman").available())
+        self.assertFalse(ox.tweak_by_id("pm-paccache").available())
+        self.assertFalse(ox.tweak_by_id("sec-ufw").available(), "Fedora already runs firewalld")
+        self.assertTrue(ox.tweak_by_id("pm-dnf").available())
+        ox.select_pm("pacman")
+        self.assertFalse(ox.tweak_by_id("pm-dnf").available())
+        self.assertTrue(ox.tweak_by_id("pm-pacman").available())
+
+    def test_grub_regeneration_knows_fedora(self):
+        self.assertIn("grub2-mkconfig", ox.GRUB_REGEN)
+        self.assertIn("update-grub", ox.GRUB_REGEN)
+
+    def test_orphans_and_cache_targets(self):
+        ids = {t["id"] for t in ox.CLEAN_TARGETS}
+        self.assertIn("dnf-cache", ids)
+        self.assertNotIn("pacman-cache", ids)
+        self.assertNotIn("yay", ids)
+        self.sys.unneeded = "Last metadata expiration check: 0:01:00 ago.\nlibfoo\nlibbar\nlibfoo\n"
+        self.assertEqual(ox.orphans(), ["libfoo", "libbar"])
+        ox.clean_target(next(t for t in ox.CLEAN_TARGETS if t["id"] == "dnf-cache"))
+        self.assertTrue(self.sys.ran("dnf", "clean", "all"))
+        self.sys.commands.clear()
+        ox.clean_target(next(t for t in ox.CLEAN_TARGETS if t["id"] == "orphans"))
+        self.assertTrue(self.sys.ran("dnf", "remove", "-y", "libfoo", "libbar"))
+
+    def test_update_and_metadata_refresh_use_dnf(self):
+        self.assertTrue(ox.tool_update_system())
+        self.assertTrue(self.sys.ran("dnf", "upgrade", "-y", "--refresh"))
+        self.assertTrue(ox.tool_rank_mirrors())
+        self.assertTrue(self.sys.ran("dnf", "makecache", "--refresh"))
+
+    def test_leftover_config_search_uses_rpm_patterns(self):
+        ox.tool_pacnew()
+        cmd = next(c for c, _u, _w in self.sys.commands if c[0] == "find")
+        self.assertEqual(cmd, ["find", "/etc", "-name", "*.rpmnew", "-o", "-name", "*.rpmsave"])
+
+    def test_debloat_list_is_fedoras(self):
+        names = {p for p, _l in ox.DEBLOAT}
+        self.assertIn("gnome-tour", names)
+        self.assertNotIn("manjaro-hello", names)
+        self.sys.pkgs.add("gnome-tour")
+        rows = ox.installed_debloat()
+        self.assertEqual([r["pkg"] for r in rows], ["gnome-tour"])
+        self.assertEqual(rows[0]["size"], 2048)
+
+    def test_hints_name_the_right_package_manager(self):
+        self.assertEqual(ox.PM.install_cmd(ox.PM.tk_pkg), "sudo dnf install python3-tkinter")
+        self.assertEqual(ox.PM.remove_hint, "dnf remove")
+        ox.select_pm("pacman")
+        self.assertEqual(ox.PM.install_cmd(ox.PM.tk_pkg), "sudo pacman -S tk")
 
 
 if __name__ == "__main__":

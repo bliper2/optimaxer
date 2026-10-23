@@ -79,11 +79,16 @@ if ($Screenshot) {
         $enc.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bmp))
         $fs = [IO.File]::Create((Join-Path $Screenshot "$name.png")); $enc.Save($fs); $fs.Close()
     }
+    function Wait-Idle([int]$MaxSec) { $n = 0; while ($global:Busy -and $n -lt $MaxSec) { Wait-UI 1; $n++ } }
     $win.Show()
-    Wait-UI 9
+    Wait-UI 6
+    Wait-Idle 60
+    Wait-UI 6
     foreach ($n in 'Dash', 'Install', 'Tweaks', 'Config', 'Services', 'Startup', 'Cleanup', 'Debloat', 'Network', 'Features', 'Tools', 'Settings') {
         $UI["Nav$n"].IsChecked = $true
-        Wait-UI 4
+        Wait-UI 2
+        Wait-Idle 40
+        Wait-UI 2
         Save-Shot $n.ToLower()
     }
     Write-Host 'screenshots done'

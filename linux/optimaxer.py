@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Optimaxer for Manjaro / Arch Linux: tweaks with undo, app installer, cleaner, services, startup, debloat, DNS and tools.
+"""Optimaxer for Manjaro / Arch Linux and Fedora: tweaks with undo, app installer, cleaner, services, startup, debloat, DNS and tools.
 
 Standard library only. Run `optimaxer` for the interactive menu or `optimaxer --help` for the non-interactive commands.
 Everything that changes the system records what it changed in /var/lib/optimaxer/state.json so it can be undone.
@@ -19,7 +19,7 @@ import tempfile
 import time
 import urllib.request
 
-__version__ = "2.12.0"
+__version__ = "2.13.0"
 REPO = "bliper2/optimaxer"
 STATE_FILE = "/var/lib/optimaxer/state.json"
 BACKUP_DIR = "/var/lib/optimaxer/backups"
@@ -167,6 +167,21 @@ def is_arch_family() -> bool:
     return bool(ids & {"manjaro", "arch", "endeavouros", "garuda", "cachyos", "artix"})
 
 
+def is_fedora_family() -> bool:
+    d = distro()
+    ids = {d.get("ID", "")} | set(d.get("ID_LIKE", "").split())
+    return bool(ids & {"fedora", "rhel", "centos", "rocky", "almalinux", "nobara"})
+
+
+def detect_pm() -> str | None:
+    """Which package manager this machine uses, or None when Optimaxer does not support the distribution."""
+    if is_arch_family():
+        return "pacman"
+    if is_fedora_family():
+        return "dnf"
+    return None
+
+
 def fmt_size(n: float) -> str:
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if n < 1024 or unit == "TB":
@@ -193,6 +208,11 @@ def dir_size(path: str) -> int:
 
 
 # ======================================================================================================== line edits
+
+# Regenerates the GRUB menu on Debian-style, Arch-style and Fedora-style systems.
+GRUB_REGEN = ("command -v update-grub >/dev/null && update-grub || "
+              "{ command -v grub2-mkconfig >/dev/null && grub2-mkconfig -o /etc/grub2.cfg || grub-mkconfig -o /boot/grub/grub.cfg; }")
+
 
 class LineEdit:
     """Set `key = value` (or a bare flag when value is None) in a config file, remembering the original line."""
@@ -272,8 +292,112 @@ def unit_active(unit: str) -> bool:
     return run(["systemctl", "is-active", unit])[0] == 0
 
 
+class PacmanPM:
+    """Manjaro, Arch and friends."""
+    name = "pacman"
+    tk_pkg = "tk"
+    remove_hint = "pacman -Rns"
+    update_label = "pacman -Syu"
+    mirror_label = "Rank mirrors (Manjaro fasttrack)"
+    conf_label = "Find .pacnew / .pacsave files"
+    conf_patterns = ["*.pacnew", "*.pacsave"]
+
+    def install_cmd(self, pkg: str) -> str:
+        return f"sudo pacman -S {pkg}"
+
+    def installed(self, pkg: str) -> bool:
+        return run(["pacman", "-Q", pkg])[0] == 0
+
+    def install(self, pkgs) -> tuple:
+        return run(["pacman", "-S", "--needed", "--noconfirm"] + list(pkgs), write=True)
+
+    def remove(self, pkgs) -> tuple:
+        return run(["pacman", "-Rns", "--noconfirm"] + list(pkgs), write=True)
+
+    def orphans(self) -> list:
+        rc, out = run(["pacman", "-Qtdq"])
+        return [l.strip() for l in out.splitlines() if l.strip()] if rc == 0 else []
+
+    def size(self, pkg: str) -> int:
+        return parse_installed_size(run(["pacman", "-Qi", pkg])[1])
+
+    def update(self) -> tuple:
+        return run(["pacman", "-Syu", "--noconfirm"], write=True)
+
+    def clean_cache(self) -> None:
+        if have("paccache"):
+            run(["paccache", "-rk2"], write=True)
+            run(["paccache", "-ruk0"], write=True)
+        else:
+            run(["pacman", "-Sc", "--noconfirm"], write=True)
+
+    def rank_mirrors(self) -> bool:
+        if not have("pacman-mirrors"):
+            log("pacman-mirrors is Manjaro-specific and was not found; on Arch use reflector", "WARN")
+            return False
+        rc, out = run(["pacman-mirrors", "--fasttrack", "10"], write=True)
+        if rc == 0:
+            run(["pacman", "-Syy"], write=True)
+        log("Mirrors ranked and databases refreshed" if rc == 0 else f"Mirror ranking failed: {out.strip()[-120:]}", "OK" if rc == 0 else "WARN")
+        return rc == 0
+
+
+class DnfPM:
+    """Fedora, RHEL and relatives (dnf, including dnf5)."""
+    name = "dnf"
+    tk_pkg = "python3-tkinter"
+    remove_hint = "dnf remove"
+    update_label = "dnf upgrade --refresh"
+    mirror_label = "Refresh package metadata (dnf makecache)"
+    conf_label = "Find .rpmnew / .rpmsave files"
+    conf_patterns = ["*.rpmnew", "*.rpmsave"]
+
+    def install_cmd(self, pkg: str) -> str:
+        return f"sudo dnf install {pkg}"
+
+    def installed(self, pkg: str) -> bool:
+        return run(["rpm", "-q", pkg])[0] == 0
+
+    def install(self, pkgs) -> tuple:
+        return run(["dnf", "install", "-y"] + list(pkgs), write=True)
+
+    def remove(self, pkgs) -> tuple:
+        return run(["dnf", "remove", "-y"] + list(pkgs), write=True)
+
+    def orphans(self) -> list:
+        """Packages installed as dependencies that nothing needs any more."""
+        rc, out = run(["dnf", "repoquery", "--unneeded", "--qf", "%{name}"])
+        if rc != 0:
+            return []
+        seen = []
+        for l in out.splitlines():
+            l = l.strip()
+            if l and not l.startswith(("Last metadata", "Updating", "Repositories")) and l not in seen:
+                seen.append(l)
+        return seen
+
+    def size(self, pkg: str) -> int:
+        rc, out = run(["rpm", "-q", "--qf", "%{SIZE}", pkg])
+        return int(out.strip()) if rc == 0 and out.strip().isdigit() else 0
+
+    def update(self) -> tuple:
+        return run(["dnf", "upgrade", "-y", "--refresh"], write=True)
+
+    def clean_cache(self) -> None:
+        run(["dnf", "clean", "all"], write=True)
+
+    def rank_mirrors(self) -> bool:
+        """dnf picks mirrors itself; refreshing the metadata is the closest useful action."""
+        rc, out = run(["dnf", "makecache", "--refresh"], write=True)
+        log("Package metadata refreshed" if rc == 0 else f"Refresh failed: {out.strip()[-120:]}", "OK" if rc == 0 else "WARN")
+        return rc == 0
+
+
+PM = PacmanPM()
+
+
 def pkg_installed(pkg: str) -> bool:
-    return run(["pacman", "-Q", pkg])[0] == 0
+    return PM.installed(pkg)
 
 
 def flatpak_installed(app: str) -> bool:
@@ -284,7 +408,7 @@ def flatpak_installed(app: str) -> bool:
 
 class Tweak:
     def __init__(self, id, name, desc, cat, risk="safe", tags=(), files=None, edits=None, pkgs=None, enable=None, disable=None,
-                 post=None, undo_post=None, cmds=None, undo_cmds=None, test_cmd=None, needs=None):
+                 post=None, undo_post=None, cmds=None, undo_cmds=None, test_cmd=None, needs=None, pm=None):
         self.id, self.name, self.desc, self.cat, self.risk = id, name, desc, cat, risk
         self.tags = set(tags)
         self.files = files or {}          # path -> content
@@ -298,8 +422,11 @@ class Tweak:
         self.undo_cmds = undo_cmds or []
         self.test_cmd = test_cmd          # command that exits 0 when applied (extra check)
         self.needs = needs or []          # files or commands that must exist, else the tweak is unavailable
+        self.pm = pm                      # 'pacman' or 'dnf' when the tweak only makes sense with that package manager
 
     def available(self) -> bool:
+        if self.pm and self.pm != PM.name:
+            return False
         for n in self.needs:
             if n.startswith("/"):
                 if read_text(n) is None:
@@ -338,7 +465,7 @@ class Tweak:
         missing = [p for p in self.pkgs if not pkg_installed(p)]
         if missing:
             log(f"  installing packages: {' '.join(missing)}")
-            rc, out = run(["pacman", "-S", "--needed", "--noconfirm"] + missing, write=True)
+            rc, out = PM.install(missing)
             if rc != 0:
                 log(f"  package install failed: {out.strip().splitlines()[-1] if out.strip() else rc}", "WARN")
                 return False
@@ -410,7 +537,7 @@ class Tweak:
         for c in self.undo_cmds + self.undo_post + self.post_for_undo():
             run(c, write=True)
         if snap.get("pkgs_added"):
-            log(f"  kept packages installed by this tweak: {' '.join(snap['pkgs_added'])} (remove with pacman -Rns if unwanted)")
+            log(f"  kept packages installed by this tweak: {' '.join(snap['pkgs_added'])} (remove with {PM.remove_hint} if unwanted)")
         state.pop(self.id, None)
         save_state(state)
         ok = CTX.dry_run or not self.is_applied()
@@ -526,8 +653,7 @@ TWEAKS = [
           files={"/etc/sysctl.d/99-optimaxer-nmi.conf": "kernel.nmi_watchdog = 0\n"}, post=[SYSCTL]),
     Tweak("perf-grubtimeout", "Shorter GRUB menu timeout (2 s)", "Boots 3 seconds sooner. The menu is still reachable by holding Shift/Esc.", "Performance", risk="moderate", tags={"max"},
           edits=[LineEdit("/etc/default/grub", "GRUB_TIMEOUT", "2", sep="=")], needs=["/etc/default/grub"],
-          post=[["sh", "-c", "command -v update-grub >/dev/null && update-grub || grub-mkconfig -o /boot/grub/grub.cfg"]],
-          undo_post=[["sh", "-c", "command -v update-grub >/dev/null && update-grub || grub-mkconfig -o /boot/grub/grub.cfg"]]),
+          post=[["sh", "-c", GRUB_REGEN]], undo_post=[["sh", "-c", GRUB_REGEN]]),
     Tweak("perf-inotify", "Raise inotify watch limit (524288)", "IDEs, file managers and sync tools stop failing with 'no space left on device' (ENOSPC) on big folders.", "Performance",
           tags={"safe", "perf", "max"}, files={"/etc/sysctl.d/99-optimaxer-inotify.conf": "fs.inotify.max_user_watches = 524288\nfs.inotify.max_user_instances = 1024\n"}, post=[SYSCTL]),
     Tweak("perf-mapcount", "Raise vm.max_map_count (1048576)", "Needed by many Proton/Wine games and some engines that crash with the old 65530 limit.", "Gaming",
@@ -543,10 +669,13 @@ TWEAKS = [
           risk="moderate", tags={"max"}, disable=["systemd-networkd-wait-online.service"], needs=["/usr/lib/systemd/system/systemd-networkd-wait-online.service"]),
     # ---- package manager
     Tweak("pm-pacman", "pacman: parallel downloads and colour", "ParallelDownloads = 5 and Color in /etc/pacman.conf: much faster updates, readable output.", "Package manager",
-          tags={"safe", "perf", "max"}, needs=["/etc/pacman.conf"],
+          tags={"safe", "perf", "max"}, needs=["/etc/pacman.conf"], pm="pacman",
           edits=[LineEdit("/etc/pacman.conf", "ParallelDownloads", "5", section="options"), LineEdit("/etc/pacman.conf", "Color", None, section="options")]),
     Tweak("pm-paccache", "Weekly package cache cleaning", "paccache.timer keeps the last 3 versions of each package in /var/cache/pacman/pkg. Installs pacman-contrib.", "Package manager",
-          tags={"safe", "perf", "max"}, pkgs=["pacman-contrib"], enable=["paccache.timer"]),
+          tags={"safe", "perf", "max"}, pkgs=["pacman-contrib"], enable=["paccache.timer"], pm="pacman"),
+    Tweak("pm-dnf", "dnf: parallel downloads and fastest mirror", "max_parallel_downloads=10 and fastestmirror=True in /etc/dnf/dnf.conf: much faster updates and installs.", "Package manager",
+          tags={"safe", "perf", "max"}, needs=["/etc/dnf/dnf.conf"], pm="dnf",
+          edits=[LineEdit("/etc/dnf/dnf.conf", "max_parallel_downloads", "10", section="main", sep="="), LineEdit("/etc/dnf/dnf.conf", "fastestmirror", "True", section="main", sep="=")]),
     # ---- network
     Tweak("net-bbr", "TCP BBR congestion control", "Better throughput and latency on lossy links (Wi-Fi, long distance).", "Network", tags={"safe", "perf", "max"},
           files={"/etc/modules-load.d/optimaxer-bbr.conf": "tcp_bbr\n", "/etc/sysctl.d/99-optimaxer-net.conf": "net.core.default_qdisc = fq\nnet.ipv4.tcp_congestion_control = bbr\n"},
@@ -558,7 +687,8 @@ TWEAKS = [
                  "net.ipv4.icmp_echo_ignore_broadcasts = 1\nnet.ipv4.conf.all.accept_redirects = 0\nnet.ipv4.conf.default.accept_redirects = 0\n"
                  "net.ipv6.conf.all.accept_redirects = 0\nnet.ipv4.conf.all.send_redirects = 0\n"}, post=[SYSCTL]),
     Tweak("sec-ufw", "Firewall (ufw): deny incoming, allow outgoing", "Installs and enables ufw. If SSH is running its port is opened first. Blocks incoming connections such as KDE Connect, Samba or game servers until you allow them.",
-          "Security", risk="moderate", tags={"max"}, pkgs=["ufw"], enable=["ufw.service"],
+          "Security", risk="moderate", tags={"max"}, pkgs=["ufw"], enable=["ufw.service"], pm="pacman",   # Fedora already runs firewalld
+          
           cmds=[["ufw", "default", "deny", "incoming"], ["ufw", "default", "allow", "outgoing"],
                 ["sh", "-c", "systemctl is-active --quiet sshd && ufw allow ssh || true"]],
           post=[["ufw", "--force", "enable"]], undo_post=[["ufw", "--force", "disable"]], test_cmd=["sh", "-c", "ufw status | grep -q 'Status: active'"]),
@@ -694,10 +824,40 @@ Utilities|Flatseal|F|com.github.tchx84.Flatseal
 """
 
 
-def load_apps() -> list:
+# How each catalog entry is installed on Fedora: ("P", dnf package) from the Fedora repos, ("F", Flathub id), or None
+# when there is no good route (AUR-only software, or software that lives in third-party repositories).
+FEDORA_MAP = {
+    "firefox": ("P", "firefox"), "chromium": ("P", "chromium"), "vivaldi": ("F", "com.vivaldi.Vivaldi"), "falkon": ("P", "falkon"),
+    "torbrowser-launcher": ("P", "torbrowser-launcher"), "brave-bin": ("F", "com.brave.Browser"), "google-chrome": ("F", "com.google.Chrome"),
+    "zen-browser-bin": ("F", "app.zen_browser.zen"), "floorp-bin": ("F", "one.ablaze.floorp"), "opera": ("F", "com.opera.Opera"),
+    "discord": ("F", "com.discordapp.Discord"), "telegram-desktop": ("F", "org.telegram.desktop"), "signal-desktop": ("F", "org.signal.Signal"),
+    "obsidian": ("F", "md.obsidian.Obsidian"), "foliate": ("P", "foliate"), "onlyoffice-bin": ("F", "org.onlyoffice.desktopeditors"),
+    "joplin-desktop": ("F", "net.cozic.joplin_desktop"), "zotero-bin": ("F", "org.zotero.Zotero"),
+    "steam": ("F", "com.valvesoftware.Steam"), "lutris": ("P", "lutris"), "wine": ("P", "wine"), "gamemode": ("P", "gamemode"),
+    "mangohud": ("P", "mangohud"), "retroarch": ("F", "org.libretro.RetroArch"), "prismlauncher": ("F", "org.prismlauncher.PrismLauncher"),
+    "heroic-games-launcher-bin": ("F", "com.heroicgameslauncher.hgl"), "protonup-qt": ("F", "net.davidotek.pupgui2"),
+    "com.usebottles.bottles": ("F", "com.usebottles.bottles"),
+    "vlc": ("F", "org.videolan.VLC"), "mpv": ("P", "mpv"), "obs-studio": ("F", "com.obsproject.Studio"), "gimp": ("P", "gimp"),
+    "inkscape": ("P", "inkscape"), "krita": ("P", "krita"), "kdenlive": ("P", "kdenlive"), "blender": ("P", "blender"),
+    "audacity": ("P", "audacity"), "handbrake": ("F", "fr.handbrake.ghb"), "strawberry": ("P", "strawberry"), "flameshot": ("P", "flameshot"),
+    "ffmpeg": ("P", "ffmpeg-free"), "spotify": ("F", "com.spotify.Client"),
+    "htop": ("P", "htop"), "btop": ("P", "btop"), "fastfetch": ("P", "fastfetch"), "timeshift": ("P", "timeshift"), "bleachbit": ("P", "bleachbit"),
+    "bitwarden": ("F", "com.bitwarden.desktop"), "keepassxc": ("P", "keepassxc"), "qbittorrent": ("P", "qbittorrent"), "syncthing": ("P", "syncthing"),
+    "wireguard-tools": ("P", "wireguard-tools"), "wireshark-qt": ("P", "wireshark"), "nmap": ("P", "nmap"), "gparted": ("P", "gparted"),
+    "7zip": ("P", "7zip"), "copyq": ("P", "copyq"), "flatpak": ("P", "flatpak"), "tlp": ("P", "tlp"), "power-profiles-daemon": ("P", "power-profiles-daemon"),
+    "com.github.tchx84.Flatseal": ("F", "com.github.tchx84.Flatseal"),
+}
+
+
+def load_apps(pm: str = "pacman") -> list:
     apps = []
     for line in APPS_RAW.strip().splitlines():
         cat, name, src, pkg = line.split("|")
+        if pm == "dnf":
+            route = FEDORA_MAP.get(pkg)
+            if not route:
+                continue
+            src, pkg = route
         apps.append({"cat": cat, "name": name, "src": src, "pkg": pkg})
     return apps
 
@@ -718,6 +878,15 @@ def app_installed(app: dict) -> bool:
     return pkg_installed(app["pkg"])
 
 
+def ensure_flathub() -> None:
+    """Fedora ships Flatpak without the Flathub remote; add it (system-wide) when it is missing."""
+    rc, out = run(["flatpak", "remotes"])
+    if rc == 0 and "flathub" in out:
+        return
+    log("  adding the Flathub remote")
+    run(["flatpak", "remote-add", "--if-not-exists", "flathub", "https://dl.flathub.org/repo/flathub.flatpakrepo"], write=True)
+
+
 def install_app(app: dict) -> bool:
     name, pkg, src = app["name"], app["pkg"], app["src"]
     log(f"Install {name} ({src}:{pkg})")
@@ -725,7 +894,7 @@ def install_app(app: dict) -> bool:
         log("  already installed")
         return True
     if src == "P":
-        rc, out = run(["pacman", "-S", "--needed", "--noconfirm", pkg], write=True)
+        rc, out = PM.install([pkg])
     elif src == "A":
         helper = aur_helper()
         if not helper:
@@ -736,6 +905,7 @@ def install_app(app: dict) -> bool:
         if not have("flatpak"):
             log("  needs flatpak: install 'Flatpak' from the Utilities group first", "WARN")
             return False
+        ensure_flathub()
         rc, out = run(["flatpak", "install", "-y", "--noninteractive", "flathub", pkg], write=True)
     if CTX.dry_run:
         return True
@@ -757,7 +927,7 @@ def remove_app(app: dict) -> bool:
     if src == "F":
         rc, out = run(["flatpak", "uninstall", "-y", "--noninteractive", pkg], write=True)
     else:
-        rc, out = run(["pacman", "-Rns", "--noconfirm", pkg], write=True)
+        rc, out = PM.remove([pkg])
     if CTX.dry_run:
         return True
     ok = rc == 0 and not app_installed(app)
@@ -767,7 +937,16 @@ def remove_app(app: dict) -> bool:
 
 # ======================================================================================================== debloat
 
-DEBLOAT = [
+DEBLOAT_FEDORA = [
+    ("gnome-tour", "GNOME Tour"), ("gnome-weather", "GNOME Weather"), ("gnome-maps", "GNOME Maps"), ("gnome-clocks", "GNOME Clocks"),
+    ("gnome-contacts", "GNOME Contacts"), ("gnome-connections", "GNOME Connections"), ("cheese", "Cheese webcam app"),
+    ("totem", "GNOME Videos"), ("rhythmbox", "Rhythmbox"), ("epiphany", "GNOME Web"), ("simple-scan", "Simple Scan"),
+    ("hplip", "HP printer drivers (only needed for HP printers)"), ("thunderbird", "Thunderbird mail client"),
+    ("libreoffice-core", "LibreOffice"), ("gimp", "GIMP"), ("inkscape", "Inkscape"), ("kdenlive", "Kdenlive video editor"),
+    ("vlc", "VLC"), ("pidgin", "Pidgin"), ("konversation", "Konversation IRC"), ("kmail", "KMail"), ("mediawriter", "Fedora Media Writer"),
+]
+
+DEBLOAT_ARCH = [
     ("manjaro-hello", "Manjaro Hello (welcome screen)"), ("hplip", "HP printer drivers (only needed for HP printers)"),
     ("simple-scan", "Simple Scan"), ("sane", "Scanner support (SANE)"), ("thunderbird", "Thunderbird mail client"),
     ("libreoffice-fresh", "LibreOffice (fresh)"), ("libreoffice-still", "LibreOffice (still)"), ("gimp", "GIMP"),
@@ -776,13 +955,14 @@ DEBLOAT = [
     ("cheese", "Cheese webcam app"), ("pidgin", "Pidgin"), ("konversation", "Konversation IRC"), ("kmail", "KMail"),
 ]
 
+DEBLOAT = list(DEBLOAT_ARCH)
+
 
 def installed_debloat() -> list:
     out = []
     for pkg, label in DEBLOAT:
         if pkg_installed(pkg):
-            rc, info = run(["pacman", "-Qi", pkg])
-            size = parse_installed_size(info)
+            size = PM.size(pkg)
             out.append({"pkg": pkg, "label": label, "size": size})
     return out
 
@@ -802,11 +982,10 @@ def _home(p: str) -> str:
 
 
 def orphans() -> list:
-    rc, out = run(["pacman", "-Qtdq"])
-    return [l.strip() for l in out.splitlines() if l.strip()] if rc == 0 else []
+    return PM.orphans()
 
 
-CLEAN_TARGETS = [
+_CLEAN_ALL = [
     {"id": "pacman-cache", "name": "pacman package cache (keep 2 newest versions)", "paths": ["/var/cache/pacman/pkg"], "risk": "safe"},
     {"id": "orphans", "name": "Orphaned packages (installed as dependencies, no longer needed)", "special": "orphans", "risk": "moderate"},
     {"id": "journal", "name": "systemd journal (keep 100 MB)", "paths": ["/var/log/journal"], "risk": "safe"},
@@ -821,7 +1000,26 @@ CLEAN_TARGETS = [
     {"id": "go", "name": "Go build cache", "home": [".cache/go-build"], "risk": "safe"},
     {"id": "cargo", "name": "Rust cargo download cache", "home": [".cargo/registry/cache"], "risk": "moderate"},
     {"id": "flatpak-unused", "name": "Unused Flatpak runtimes", "special": "flatpak", "risk": "safe"},
+    {"id": "dnf-cache", "name": "dnf package and metadata cache", "paths": ["/var/cache/libdnf5", "/var/cache/dnf"], "risk": "safe"},
 ]
+
+
+def build_clean_targets(pm: str = "pacman") -> list:
+    """The cleanup targets that make sense for this package manager."""
+    skip = {"pacman": {"dnf-cache"}, "dnf": {"pacman-cache", "yay"}}.get(pm, set())
+    return [dict(t) for t in _CLEAN_ALL if t["id"] not in skip]
+
+
+CLEAN_TARGETS = build_clean_targets()
+
+
+def select_pm(name: str) -> None:
+    """Switch the package manager and rebuild the tables that depend on it, in place so references stay valid."""
+    global PM
+    PM = DnfPM() if name == "dnf" else PacmanPM()
+    APPS[:] = load_apps(PM.name)
+    DEBLOAT[:] = DEBLOAT_FEDORA if PM.name == "dnf" else DEBLOAT_ARCH
+    CLEAN_TARGETS[:] = build_clean_targets(PM.name)
 
 
 def target_paths(t: dict) -> list:
@@ -833,7 +1031,7 @@ def target_size(t: dict) -> int:
     if sp == "orphans":
         total = 0
         for pkg in orphans():
-            total += parse_installed_size(run(["pacman", "-Qi", pkg])[1])
+            total += PM.size(pkg)
         return total
     if sp == "flatpak":
         return -1
@@ -845,16 +1043,12 @@ def clean_target(t: dict) -> int:
     before = max(target_size(t), 0)
     tid = t["id"]
     log(f"Clean: {t['name']}")
-    if tid == "pacman-cache":
-        if have("paccache"):
-            run(["paccache", "-rk2"], write=True)
-            run(["paccache", "-ruk0"], write=True)
-        else:
-            run(["pacman", "-Sc", "--noconfirm"], write=True)
+    if tid in ("pacman-cache", "dnf-cache"):
+        PM.clean_cache()
     elif tid == "orphans":
         pk = orphans()
         if pk:
-            run(["pacman", "-Rns", "--noconfirm"] + pk, write=True)
+            PM.remove(pk)
     elif tid == "journal":
         run(["journalctl", "--vacuum-size=100M"], write=True)
     elif tid == "flatpak-unused":
@@ -1084,21 +1278,14 @@ def sysinfo() -> list:
 
 
 def tool_update_system() -> bool:
-    log("Updating the system (pacman -Syu)...")
-    rc, out = run(["pacman", "-Syu", "--noconfirm"], write=True)
+    log(f"Updating the system ({PM.update_label})...")
+    rc, out = PM.update()
     log("System updated" if rc == 0 else f"Update failed: {out.strip()[-160:]}", "OK" if rc == 0 else "WARN")
     return rc == 0
 
 
 def tool_rank_mirrors() -> bool:
-    if not have("pacman-mirrors"):
-        log("pacman-mirrors is Manjaro-specific and was not found; on Arch use reflector", "WARN")
-        return False
-    rc, out = run(["pacman-mirrors", "--fasttrack", "10"], write=True)
-    if rc == 0:
-        run(["pacman", "-Syy"], write=True)
-    log("Mirrors ranked and databases refreshed" if rc == 0 else f"Mirror ranking failed: {out.strip()[-120:]}", "OK" if rc == 0 else "WARN")
-    return rc == 0
+    return PM.rank_mirrors()
 
 
 def tool_failed_units() -> list:
@@ -1107,13 +1294,16 @@ def tool_failed_units() -> list:
 
 
 def tool_pacnew() -> list:
-    rc, out = run(["find", "/etc", "-name", "*.pacnew", "-o", "-name", "*.pacsave"])
+    pats = []
+    for i, pat in enumerate(PM.conf_patterns):
+        pats += (["-o"] if i else []) + ["-name", pat]
+    rc, out = run(["find", "/etc"] + pats)
     return [l for l in out.splitlines() if l.strip()]
 
 
 def tool_smart() -> list:
     if not have("smartctl"):
-        return ["smartctl not installed (pacman -S smartmontools)"]
+        return [f"smartctl not installed ({PM.install_cmd('smartmontools')})"]
     rows = []
     rc, out = run(["lsblk", "-dno", "NAME,TYPE"])
     for line in out.splitlines():
@@ -1335,9 +1525,9 @@ def menu_debloat() -> None:
         return
     render = lambda r: f"{r['label']} ({r['pkg']})  {fmt_size(r['size'])}"
     cmd, sel = pick("Debloat: optional packages you may not need (nothing is pre-selected)", rows, render, "remove")
-    if cmd == "remove" and sel and confirm(f"Remove {len(sel)} package(s) with pacman -Rns?"):
+    if cmd == "remove" and sel and confirm(f"Remove {len(sel)} package(s) with {PM.remove_hint}?"):
         for i in sorted(sel):
-            ok = run(["pacman", "-Rns", "--noconfirm", rows[i]["pkg"]], write=True)[0] == 0
+            ok = PM.remove([rows[i]["pkg"]])[0] == 0
             log(f"{rows[i]['pkg']}: {'removed' if ok else 'not removed (other packages depend on it?)'}", "OK" if ok else "WARN")
 
 
@@ -1354,8 +1544,8 @@ def menu_network() -> None:
 
 
 def menu_tools() -> None:
-    tools = [("System information", None), ("Update the system (pacman -Syu)", tool_update_system), ("Rank mirrors (Manjaro fasttrack)", tool_rank_mirrors),
-             ("Show failed systemd units", None), ("Find .pacnew / .pacsave files", None), ("Disk health (SMART)", None), ("Undo everything Optimaxer changed", None),
+    tools = [("System information", None), (f"Update the system ({PM.update_label})", tool_update_system), (PM.mirror_label, tool_rank_mirrors),
+             ("Show failed systemd units", None), (PM.conf_label, None), ("Disk health (SMART)", None), ("Undo everything Optimaxer changed", None),
              ("Check for an Optimaxer update", self_update)]
     while True:
         print("\n== Tools ==")
@@ -1483,7 +1673,7 @@ def apply_config(data: dict) -> bool:
 
 def desktop_entry() -> str:
     exe = os.path.realpath(sys.argv[0]) if sys.argv and sys.argv[0] else "optimaxer"
-    return ("[Desktop Entry]\nType=Application\nName=Optimaxer\nComment=Tweaks, apps and cleanup for Manjaro / Arch\n"
+    return ("[Desktop Entry]\nType=Application\nName=Optimaxer\nComment=Tweaks, apps and cleanup for Manjaro, Arch and Fedora\n"
             f"Exec={sys.executable} {exe} gui\nIcon=optimaxer\nTerminal=false\nCategories=System;Settings;\n")
 
 
@@ -1895,10 +2085,10 @@ class Gui:
             for l in lines:
                 log(l, "INFO")
         tools = [("System information", lambda: self.work("System information", sysinfo, lambda r: show(f"{k:<10} {v}" for k, v in r))),
-                 ("Update the system (pacman -Syu)", lambda: self.work("Updating the system", tool_update_system)),
-                 ("Rank mirrors (Manjaro fasttrack)", lambda: self.work("Ranking mirrors", tool_rank_mirrors)),
+                 (f"Update the system ({PM.update_label})", lambda: self.work("Updating the system", tool_update_system)),
+                 (PM.mirror_label, lambda: self.work("Refreshing package sources", tool_rank_mirrors)),
                  ("Show failed systemd units", lambda: self.work("Checking units", tool_failed_units, lambda r: show(r or ["No failed units."]))),
-                 ("Find .pacnew / .pacsave files", lambda: self.work("Searching", tool_pacnew, lambda r: show(r or ["None found."]))),
+                 (PM.conf_label, lambda: self.work("Searching", tool_pacnew, lambda r: show(r or ["None found."]))),
                  ("Disk health (SMART)", lambda: self.work("Reading SMART data", tool_smart, lambda r: show(r))),
                  ("Check for an Optimaxer update", lambda: self.work("Checking for updates", self_update))]
         for text, cmd in tools:
@@ -2066,12 +2256,12 @@ class Gui:
         pkgs = self.ticked("debloat")
         if not pkgs:
             return self.say("Nothing selected.")
-        if not self.ask_yes(f"Remove {len(pkgs)} package(s) with pacman -Rns?"):
+        if not self.ask_yes(f"Remove {len(pkgs)} package(s) with {PM.remove_hint}?"):
             return
 
         def go():
             for p in pkgs:
-                ok = run(["pacman", "-Rns", "--noconfirm", p], write=True)[0] == 0
+                ok = PM.remove([p])[0] == 0
                 log(f"{p}: {'removed' if ok else 'not removed (other packages depend on it?)'}", "OK" if ok else "WARN")
         self.work("Removing packages", go, lambda _r: self.reload("Debloat"))
 
@@ -2128,7 +2318,7 @@ class Gui:
 
 def run_gui() -> int:
     if not tk_available():
-        print("The graphical interface needs Tk. Install it with:  sudo pacman -S tk", file=sys.stderr)
+        print(f"The graphical interface needs Tk. Install it with:  {PM.install_cmd(PM.tk_pkg)}", file=sys.stderr)
         return 2
     import tkinter as tk
     try:
@@ -2169,7 +2359,7 @@ def ensure_root(argv: list) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="optimaxer", description="Optimaxer for Manjaro/Arch Linux")
+    p = argparse.ArgumentParser(prog="optimaxer", description="Optimaxer for Manjaro/Arch Linux and Fedora")
     p.add_argument("--dry-run", action="store_true", help="show what would change without changing anything")
     p.add_argument("-y", "--yes", action="store_true", help="do not ask for confirmation")
     p.add_argument("--version", action="version", version=f"optimaxer {__version__}")
@@ -2194,7 +2384,7 @@ def build_parser() -> argparse.ArgumentParser:
     cf.add_argument("action", choices=["apply"])
     cf.add_argument("file")
     sub.add_parser("launcher", help="add Optimaxer to the application menu (and Desktop)")
-    sub.add_parser("gui", help="open the graphical interface (needs Tk: sudo pacman -S tk)")
+    sub.add_parser("gui", help="open the graphical interface (needs Tk: sudo pacman -S tk, or sudo dnf install python3-tkinter on Fedora)")
     sub.add_parser("update", help="update Optimaxer itself")
     sub.add_parser("info", help="system information")
     return p
@@ -2204,14 +2394,17 @@ def main(argv: list | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     args = build_parser().parse_args(argv)
     CTX.dry_run, CTX.assume_yes = args.dry_run, args.yes
-    if not is_arch_family() and not CTX.runner:
-        print("This edition targets Manjaro and other Arch-based distributions (pacman).", file=sys.stderr)
-        return 2
+    if not CTX.runner:
+        pm = detect_pm()
+        if pm is None:
+            print("This edition supports Manjaro and other Arch-based distributions (pacman) and Fedora and other dnf-based distributions.", file=sys.stderr)
+            return 2
+        select_pm(pm)
     mutating = args.cmd in ("tweaks", "apps", "clean", "dns", "config", None) and not (
         (args.cmd == "tweaks" and args.action == "list") or (args.cmd == "apps" and args.action == "list") or (args.cmd == "clean" and args.action == "scan"))
     if args.cmd == "gui":
         if not tk_available() and not CTX.dry_run and hasattr(os, "geteuid") and os.geteuid() != 0 and have("pkexec"):
-            print("Tk is missing. Install it with:  sudo pacman -S tk", file=sys.stderr)
+            print(f"Tk is missing. Install it with:  {PM.install_cmd(PM.tk_pkg)}", file=sys.stderr)
             return 2
         ensure_root_gui(argv)
     elif mutating:

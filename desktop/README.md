@@ -11,19 +11,25 @@ cargo build --release
 .\target\release\orion-store-desktop.exe
 ```
 
-`cargo test` runs 82 tests. Three more read the live system and are ignored by default: `cargo test -- --ignored`.
+`cargo test` runs 95 tests. Five more read the live system or the network and are ignored by default: `cargo test -- --ignored`. One of them downloads the latest release into a temp folder and checks the whole update path end to end.
 
 The exe starts without administrator rights. The Store works as normal. The Optimaxer section can read everything, and shows a banner with a "Restart as administrator" button, because changing HKLM, services or tasks needs elevation.
 
 ## Design
 
-A calm tool surface on a tonal ladder instead of lines, with indigo for selection and focus and lime for the one main action of each view. Light and dark themes, animated hover, selection and page transitions, and a reduce-motion switch that follows the Windows setting. Text contrast is checked by tests. The tokens, components and motion are written up in [DESIGN.md](DESIGN.md).
+A calm tool surface on a tonal ladder instead of lines, with indigo for selection and focus and lime for the one main action of each view. Three styles in Settings: Windows (the default: Windows 11 Fluent layering, 4 px controls, Segoe Fluent Icons, and your Windows light or dark mode and accent colour, followed live), Classic, and Material with the Material Design 3 palettes and pill-shaped controls, animated hover, selection and page transitions, and a reduce-motion switch that follows the Windows setting. Text contrast is checked by tests. The tokens, components and motion are written up in [DESIGN.md](DESIGN.md).
+
+## Updates
+
+The app checks GitHub for a newer release when it starts and shows a banner. Nothing is downloaded until you press "Update and restart". The zip is checked against the SHA-256 that GitHub publishes for it before anything is replaced, and a release without a checksum is refused. The running exe is renamed to `.old`, the new one takes its place, and the old file is removed on the next start. Settings has a switch for the startup check and a "Check now" button.
 
 ## The Store
 
 Unchanged from the original client. It loads `config.json`, `apps.json` and `mirror.json` from GitHub, GitLab, Codeberg and JSDelivr in that order, falls back to a cached copy, then to the catalog embedded in the exe. Downloads run on worker threads with progress and cancel, and file names are sanitized before anything touches the disk. Downloads only start when you press a button.
 
 ## Optimaxer pages
+
+Overview. Live gauges for processor, memory and the system drive, a 60 second history of CPU and memory, the processor, graphics, Windows edition, uptime and process count, and quick actions (Smart optimize, Free RAM, Scan for junk).
 
 Tweaks. 199 of the 216 Optimaxer tweaks (performance, gaming, network, privacy, AI and Copilot removal, interface). Each tweak saves the original values before its first change, so it can be undone on its own, in any order. Presets are Auto-detect, Recommended, Gaming, Privacy, Remove AI and debloat, and Maximum.
 
@@ -57,7 +63,7 @@ Nothing is downloaded or installed automatically, and Optimaxer never installs d
 
 17 tweaks stay in the PowerShell edition because they need Appx, MMAgent or similar cmdlets, or fetch data from the web: memory compression, app pre-launch and page combining, uninstalling OneDrive, folder type detection, uninstalling the Copilot and AI app packages, the Settings AI page, uninstalling Edge, the Razer and Logitech installer blocks, Opera startup, network adapter power saving, pausing Windows Update, the telemetry hosts block, Loudness Equalization, Game Bar popups, This PC folders and Store search suggestions. "Turn off Recall" applies its registry part and skips the DISM step.
 
-Not in this build at all: Appx debloat, Windows optional features, WinGet app installs (the Orion catalog covers downloads), the hourly auto clean task, scheduled-task startup entries, and Optimaxer's self-updater.
+Not in this build at all: Appx debloat, Windows optional features, WinGet app installs (the Orion catalog covers downloads), the hourly auto clean task, and scheduled-task startup entries.
 
 ## Data tables
 

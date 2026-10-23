@@ -6,6 +6,22 @@
 
 Windows 10/11 performance, privacy, debloat and app-install toolkit. WPF GUI in Windows PowerShell 5.1, inspired by the layout of [Chris Titus Tech's WinUtil](https://github.com/ChrisTitusTech/winutil) (MIT), rebuilt with undo support, verification and a lot more tweaks. Many settings, app lists and scripts are adapted from WinUtil and [Win11Debloat](https://github.com/Raphire/Win11Debloat) (MIT); see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
+## Screenshots
+
+**Orion Store + Optimaxer** (the Rust desktop app, Windows 11 style with your system accent colour, dark and light):
+
+| | |
+|---|---|
+| ![Overview with live gauges](docs/screenshots/desktop-overview.png) | ![Overview, light theme](docs/screenshots/desktop-overview-light.png) |
+| ![The Orion app store](docs/screenshots/desktop-store.png) | ![Tweaks](docs/screenshots/desktop-tweaks.png) |
+
+**Optimaxer for PowerShell** (WPF, Windows 10 and 11):
+
+| | |
+|---|---|
+| ![Dashboard with live gauges](docs/screenshots/powershell-dashboard.png) | ![Tweaks](docs/screenshots/powershell-tweaks.png) |
+| ![Apps](docs/screenshots/powershell-apps.png) | ![Cleaner](docs/screenshots/powershell-cleaner.png) |
+
 ## Get it
 **One line** (installs to `%LOCALAPPDATA%\Optimaxer`, adds desktop and Start menu shortcuts, starts the app; run again to update):
 
@@ -28,14 +44,14 @@ Or download the zip from [Releases](https://github.com/bliper2/optimaxer/release
 - **Features**: Hyper-V, WSL, Sandbox, .NET 3.5 and more.
 - **Auto clean**: one checkbox on the Dashboard schedules an hourly background task (runs as SYSTEM, even with Optimaxer closed) that trims process memory, purges the standby list and deletes temp files older than an hour. Turning it off removes the task.
 - **Tools**: free RAM, TRIM/defrag, disk health, SFC, DISM, Windows Update reset, icon/Store cache, performance counters, registry backup, update check, System Restore.
-- **Settings**: match-Windows, Dark, Light, OLED, Nord, Graphite, Dusk or Porcelain, eight accent colours, reduced-motion option and update-check control.
+- **Settings**: match-Windows, Dark, Light, OLED, Nord, Graphite, Dusk, Porcelain, Material or Material light, a Windows accent that follows your own colour plus nine more, live dashboard gauges, reduced-motion option and update-check control.
 
-## Linux (Manjaro / Arch)
-A separate, dependency-free Python edition lives in [`linux/`](linux/optimaxer.py). It works on Manjaro and other pacman-based distributions (EndeavourOS, Arch, Garuda...).
+## Linux (Manjaro, Arch and Fedora)
+A separate, dependency-free Python edition lives in [`linux/`](linux/optimaxer.py). It works on Manjaro and other pacman-based distributions (EndeavourOS, Arch, Garuda...) and on Fedora and other dnf-based ones (Fedora Workstation and spins, Nobara, RHEL, Rocky, AlmaLinux). It picks the package manager from `/etc/os-release`.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bliper2/optimaxer/main/linux/install.sh | bash
-optimaxer gui           # graphical window (needs Tk: sudo pacman -S tk); asks for your password
+optimaxer gui           # graphical window (needs Tk: sudo pacman -S tk, or sudo dnf install python3-tkinter); asks for your password
 optimaxer --dry-run     # text menu, nothing is changed
 optimaxer               # text menu, real run (asks for sudo)
 ```
@@ -44,12 +60,14 @@ The window (tkinter, no extra Python packages) has the same tabs as the Windows 
 
 Sections: **Install apps** (97 apps from the official repos, the AUR through yay/paru, and Flatpak, each verified after install), **Tweaks** with presets and undo (zram, memory/swappiness, TRIM, I/O scheduler, journal limit, fast shutdown, earlyoom, BBR, pacman parallel downloads, paccache, hardening sysctls, optional ufw firewall, **browser debloat** for Firefox, Chromium, Chrome, Brave and Edge...), **Cleaner** (pacman cache, orphans, journal, caches of browsers/pip/npm/Go/Cargo, Trash, unused Flatpak runtimes), **Services**, **Startup** (autostart entries), **Debloat packages**, **Network/DNS** (NetworkManager) and **Tools** (system info, update, Manjaro mirror ranking, failed units, .pacnew files, SMART health).
 
+On Fedora the same sections work through dnf: apps come from the Fedora repositories or Flathub (the Flathub remote is added when it is missing; AUR-only apps and apps that need a third-party repository are not offered), there is a dnf tweak (parallel downloads and fastest mirror), the cleaner handles the dnf cache and unneeded packages, the update tool runs `dnf upgrade --refresh`, leftover-config search looks for `.rpmnew` and `.rpmsave` files, and the Arch-only tweaks (pacman, ufw; Fedora already runs firewalld) are hidden.
+
 Non-interactive: `optimaxer tweaks list | apply --preset safe | undo --all`, `optimaxer apps install firefox brave-bin`, `optimaxer clean scan | run`, `optimaxer dns cloudflare | restore`, `optimaxer config apply my-setup.json`, `optimaxer launcher`, `optimaxer update`. Add `--dry-run` to see every command and file change first, `-y` to skip confirmations.
 
-Safety: every change records the original state in `/var/lib/optimaxer/state.json` (files, config lines, service states, DNS), so `tweaks undo` restores it; edited config files are also copied to `/var/lib/optimaxer/backups`. Package installs by a tweak are kept on undo. Tested here with a simulated system (45 automated tests, including the window, `python -m unittest discover -s linux/tests`); I could not run it on a real Manjaro install, so start with `--dry-run`.
+Safety: every change records the original state in `/var/lib/optimaxer/state.json` (files, config lines, service states, DNS), so `tweaks undo` restores it; edited config files are also copied to `/var/lib/optimaxer/backups`. Package installs by a tweak are kept on undo. Tested here with a simulated system (62 automated tests covering Arch and Fedora, including the window, `python -m unittest discover -s linux/tests`); I could not run it on a real Manjaro install, so start with `--dry-run`.
 
 ## Desktop app (Rust)
-[`desktop/`](desktop/) holds a single-exe Windows app that puts the [Orion Store](https://github.com/RookieEnough/Orion-Store) catalog and Optimaxer in one window (Rust, eframe/egui). The Optimaxer side is a port of the engine to Rust: 199 of the 216 tweaks with the same undo records, plus services, startup, cleaner, DNS and network tools, and maintenance helpers. Smart optimize reads your hardware and selects only the tweaks that fit. Every change opens a confirmation window that lists what will change. The 17 tweaks that need PowerShell cmdlets stay in this edition. Download `OrionStore-Optimaxer-desktop-v*-win-x64.zip` from [Releases](https://github.com/bliper2/optimaxer/releases/latest), or build it with `cargo build --release` in `desktop/`. The desktop folder is GPL-3.0 (it derives from Orion Store); everything else here stays MIT. See [desktop/README.md](desktop/README.md).
+[`desktop/`](desktop/) holds a single-exe Windows app that puts the [Orion Store](https://github.com/RookieEnough/Orion-Store) catalog and Optimaxer in one window (Rust, eframe/egui). The Optimaxer side is a port of the engine to Rust: 199 of the 216 tweaks with the same undo records, plus services, startup, cleaner, DNS and network tools, and maintenance helpers. Smart optimize reads your hardware and selects only the tweaks that fit. The window follows Windows 11's Fluent look and your accent colour, and the Overview page shows live CPU, memory and disk gauges. It checks for a newer release at startup and updates in one click, with the download checked against its published SHA-256, and Settings has a Material design option. Every change opens a confirmation window that lists what will change. The 17 tweaks that need PowerShell cmdlets stay in this edition. Download `OrionStore-Optimaxer-desktop-v*-win-x64.zip` from [Releases](https://github.com/bliper2/optimaxer/releases/latest), or build it with `cargo build --release` in `desktop/`. The desktop folder is GPL-3.0 (it derives from Orion Store); everything else here stays MIT. See [desktop/README.md](desktop/README.md).
 
 ## Run unattended
 ```powershell
