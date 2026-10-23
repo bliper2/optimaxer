@@ -68,6 +68,8 @@ pub struct OrionApp {
     downloads: Vec<Arc<Download>>,
     show_downloads: bool,
     show_settings: bool,
+    /// Screenshots of the open app and the one shown full size, if any.
+    lightbox: Option<(Vec<String>, usize)>,
     toast: Option<(String, Instant)>,
     search_id: egui::Id,
     /// `ctx.input(|i| i.time)` of the last view switch, for the page-enter transition.
@@ -161,6 +163,7 @@ impl OrionApp {
             downloads: Vec::new(),
             show_downloads: false,
             show_settings: false,
+            lightbox: None,
             toast: None,
             search_id: egui::Id::unique("orion-search"),
             view_started: 0.0,
@@ -556,7 +559,9 @@ impl eframe::App for OrionApp {
         }
         self.tick_toast(ctx);
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            if self.show_settings {
+            if self.lightbox.is_some() {
+                self.lightbox = None;
+            } else if self.show_settings {
                 self.show_settings = false;
             } else if self.detail.is_some() {
                 self.detail = None;
@@ -569,6 +574,9 @@ impl eframe::App for OrionApp {
             ctx.memory_mut(|m| m.request_focus(self.search_id));
         }
 
+        if self.shots.is_none() {
+            resize_edges(ctx);
+        }
         self.top_bar(root);
         self.update_banner(root);
         self.status_bar(root);
@@ -596,6 +604,7 @@ impl eframe::App for OrionApp {
         if self.show_settings {
             self.settings_modal(ctx);
         }
+        self.lightbox_view(ctx);
         self.toast_view(ctx);
     }
 }
@@ -617,12 +626,68 @@ impl OrionApp {
         });
     }
 
+    /// Full-window view of one screenshot: click outside or press Esc to close, arrow keys or the side buttons to step.
+    fn lightbox_view(&mut self, ctx: &egui::Context) {
+        let Some((urls, idx)) = self.lightbox.as_mut() else { return };
+        let n = urls.len();
+        if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
+            *idx = (*idx + 1) % n;
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
+            *idx = (*idx + n - 1) % n;
+        }
+        let screen = ctx.content_rect();
+        let mut close = false;
+        let mut step: i32 = 0;
+        egui::Area::new(egui::Id::NULL.with("lightbox")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
+            let (rect, backdrop) = ui.allocate_exact_size(screen.size(), Sense::click());
+            ui.painter().rect_filled(rect, 0.0, Color32::from_black_alpha(225));
+            let img = ui.put(rect.shrink2(vec2(80.0, 56.0)), egui::Image::new(urls[*idx].as_str()).corner_radius(R_MD).sense(Sense::click()));
+            if backdrop.clicked() && !img.clicked() {
+                close = true;
+            }
+            if n > 1 {
+                let side = |ui: &mut Ui, x: f32, label: &str| {
+                    let r = egui::Rect::from_center_size(egui::pos2(x, rect.center().y), vec2(44.0, 64.0));
+                    ui.put(r, egui::Button::new(RichText::new(label).size(T_HEADING).color(Color32::WHITE)).fill(Color32::from_white_alpha(28)).corner_radius(R_MD)).clicked()
+                };
+                if side(ui, rect.left() + 40.0, "<") {
+                    step = -1;
+                }
+                if side(ui, rect.right() - 40.0, ">") {
+                    step = 1;
+                }
+            }
+            let caption = format!("{} / {}", *idx + 1, n);
+            ui.painter().text(egui::pos2(rect.center().x, rect.bottom() - 24.0), egui::Align2::CENTER_CENTER, caption, FontId::proportional(T_SMALL), Color32::from_white_alpha(200));
+            let x = egui::Rect::from_center_size(egui::pos2(rect.right() - 32.0, rect.top() + 28.0), vec2(40.0, 40.0));
+            if ui.put(x, egui::Button::new(RichText::new("x").size(T_HEADING).color(Color32::WHITE)).fill(Color32::from_white_alpha(28)).corner_radius(R_MD)).on_hover_text("Close").clicked() {
+                close = true;
+            }
+        });
+        if step != 0 {
+            *idx = (*idx as i32 + step).rem_euclid(n as i32) as usize;
+        }
+        if close {
+            self.lightbox = None;
+        }
+    }
+
     fn top_bar(&mut self, root: &mut Ui) {
         let ctx = root.ctx().clone();
         let ctx = &ctx;
         let t = tokens(ctx);
         egui::Panel::top("top").show_separator_line(false).frame(egui::Frame::new().fill(t.rail).inner_margin(Margin::symmetric(S5 as i8, S3 as i8))).show(root, |ui| {
             ui.horizontal(|ui| {
+                // the bar is the window's drag handle now that the system title bar is gone; widgets added after it sit on top
+                let drag = ui.interact(ui.max_rect(), ui.scope_id().with("titlebar"), Sense::click_and_drag());
+                if drag.drag_started_by(egui::PointerButton::Primary) {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
+                if drag.double_clicked() {
+                    let max = ctx.input(|i| i.viewport().maximized).unwrap_or(false);
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+                }
                 ui.label(RichText::new("Orion").font(FontId::new(T_DISPLAY - 6.0, semibold())).color(t.brand_text));
                 ui.add_space(S4);
                 let mut idx = usize::from(self.section == Section::Optimaxer);
@@ -640,6 +705,18 @@ impl OrionApp {
                     }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let maximized = ctx.input(|i| i.viewport().maximized).unwrap_or(false);
+                    if kit::caption_button(ui, '\u{E8BB}', "x", true, "Close").clicked() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    let (glyph, fallback, label) = if maximized { ('\u{E923}', "o", "Restore") } else { ('\u{E922}', "[]", "Maximize") };
+                    if kit::caption_button(ui, glyph, fallback, false, label).clicked() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+                    }
+                    if kit::caption_button(ui, '\u{E921}', "-", false, "Minimize").clicked() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                    }
+                    ui.add_space(S3);
                     if kit::ghost(ui, "Settings", true).clicked() {
                         self.show_settings = !self.show_settings;
                     }
@@ -849,8 +926,12 @@ impl OrionApp {
                 ui.add_space(S1);
                 egui::ScrollArea::horizontal().id_salt("shots").show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        for s in &app.screenshots {
-                            ui.add(egui::Image::new(s.as_str()).fit_to_exact_size(vec2(320.0, 190.0)).corner_radius(R_LG));
+                        for (i, s) in app.screenshots.iter().enumerate() {
+                            let resp = ui.add(egui::Image::new(s.as_str()).fit_to_exact_size(vec2(320.0, 190.0)).corner_radius(R_LG).sense(Sense::click()));
+                            let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Click to enlarge");
+                            if resp.clicked() {
+                                self.lightbox = Some((app.screenshots.clone(), i));
+                            }
                         }
                     });
                 });
@@ -1114,6 +1195,36 @@ impl OrionApp {
         });
         if resp.should_close() {
             self.show_settings = false;
+        }
+    }
+}
+
+/// The window has no system frame, so its edges are resize handles: a 6 px band that shows the resize cursor and
+/// starts a native resize when pressed. Nothing happens while maximized.
+fn resize_edges(ctx: &egui::Context) {
+    use egui::{CursorIcon as C, ResizeDirection as D};
+    if ctx.input(|i| i.viewport().maximized).unwrap_or(false) {
+        return;
+    }
+    let Some(p) = ctx.input(|i| i.pointer.hover_pos()) else { return };
+    let r = ctx.content_rect();
+    let b = 6.0;
+    let (l, rt, tp, bt) = (p.x - r.left() < b, r.right() - p.x < b, p.y - r.top() < b, r.bottom() - p.y < b);
+    let hit = match (l, rt, tp, bt) {
+        (true, _, true, _) => Some((D::NorthWest, C::ResizeNwSe)),
+        (_, true, true, _) => Some((D::NorthEast, C::ResizeNeSw)),
+        (true, _, _, true) => Some((D::SouthWest, C::ResizeNeSw)),
+        (_, true, _, true) => Some((D::SouthEast, C::ResizeNwSe)),
+        (true, ..) => Some((D::West, C::ResizeHorizontal)),
+        (_, true, ..) => Some((D::East, C::ResizeHorizontal)),
+        (_, _, true, _) => Some((D::North, C::ResizeVertical)),
+        (_, _, _, true) => Some((D::South, C::ResizeVertical)),
+        _ => None,
+    };
+    if let Some((dir, cursor)) = hit {
+        ctx.set_cursor_icon(cursor);
+        if ctx.input(|i| i.pointer.primary_pressed()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(dir));
         }
     }
 }

@@ -22,6 +22,9 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Orion Store + Optimaxer")
+            // no system title bar: the app draws its own caption buttons; the screenshot run keeps the frame because wgpu
+            // fails to allocate while capturing an undecorated window
+            .with_decorations(std::env::var_os("ORION_SHOTS").is_some())
             .with_inner_size(window_size())
             .with_min_inner_size([760.0, 520.0]),
         ..Default::default()
