@@ -2,12 +2,10 @@
     {
         "id":  "perf-ultimate",
         "name":  "Ultimate Performance power plan",
-        "desc":  "Activates the hidden Ultimate Performance plan: no CPU throttling, minimal latency. Desktops only; raises power draw.",
+        "desc":  "Activates the hidden Ultimate Performance plan: no CPU throttling, minimal latency. Desktops only. It raises idle power and heat, so it is never ticked automatically; in a warm room Balanced is the better default.",
         "cat":  "Performance",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
-                     "gaming",
                      "max"
                  ],
         "reg":  [
@@ -29,10 +27,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $prev = Get-ActiveSchemeGuid\r\n      $guid = Get-SchemeGuidByName \u0027Ultimate\u0027\r\n      $created = $null\r\n      if (-not $guid) {\r\n          $o = powercfg -duplicatescheme e9a42b02-d5df-448d-aa00-03f14749eb61 | Out-String\r\n          if ($o -match \u0027([0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})\u0027) { $guid = $Matches[1]; $created = $guid }\r\n      }\r\n      if ($guid) { powercfg -setactive $guid | Out-Null }\r\n      @{ Prev = $prev; Created = $created }\r\n  "
     },
@@ -43,8 +43,6 @@
         "cat":  "Performance",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
-                     "gaming",
                      "max"
                  ],
         "reg":  [
@@ -101,10 +99,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -157,10 +157,12 @@
         "need":  [
                      "lowend"
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -198,10 +200,12 @@
         "need":  [
                      "lowend"
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -212,7 +216,6 @@
         "cat":  "Performance",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -251,10 +254,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -292,22 +297,23 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
     {
         "id":  "perf-priosep",
         "name":  "Prioritize foreground apps",
-        "desc":  "Win32PrioritySeparation = 0x26: short, fixed quanta with strong foreground boost. Better responsiveness for the app in front.",
+        "desc":  "Win32PrioritySeparation = 0x26: short, fixed quanta with a strong foreground boost. Not recommended on Windows 11: it changes scheduling for every process on the PC, not only games, and the Windows default already favours the foreground app.",
         "cat":  "Performance",
-        "risk":  "Moderate",
+        "risk":  "Advanced",
         "tags":  [
-                     "gaming",
-                     "max"
+                     "optin"
                  ],
         "reg":  [
                     {
@@ -333,10 +339,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -347,7 +355,6 @@
         "cat":  "Performance",
         "risk":  "Moderate",
         "tags":  [
-                     "gaming",
                      "max"
                  ],
         "reg":  [
@@ -374,10 +381,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -414,10 +423,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -449,10 +460,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  " powercfg /hibernate off | Out-Null; $null "
     },
@@ -485,22 +498,23 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  " $o = Invoke-Native fsutil @(\u0027behavior\u0027, \u0027query\u0027, \u0027disablelastaccess\u0027); $prev = if ($o -match \u0027=\\s*(\\d)\u0027) { [int]$Matches[1] } else { 2 }; fsutil behavior set disablelastaccess 1 | Out-Null; @{ Prev = $prev } "
     },
     {
         "id":  "perf-memcompress",
         "name":  "Disable memory compression (16 GB+ RAM)",
-        "desc":  "Saves CPU cycles spent compressing RAM. Only helps if you have plenty of memory.",
+        "desc":  "Windows compresses memory only when RAM runs short. On 32 GB or more it rarely runs, so turning it off gains nothing; on smaller PCs it means more paging to disk. Not recommended on Windows 11.",
         "cat":  "Performance",
-        "risk":  "Moderate",
+        "risk":  "Advanced",
         "tags":  [
-                     "max",
-                     "smart"
+                     "optin"
                  ],
         "reg":  [
 
@@ -521,21 +535,23 @@
         "need":  [
                      "!lowend"
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  " Disable-MMAgent -MemoryCompression -ErrorAction Stop | Out-Null; $null "
     },
     {
         "id":  "perf-prefetch",
         "name":  "Disable Prefetch and SysMain (SSD only)",
-        "desc":  "Superfetch preloads apps into RAM, pointless on fast SSDs and a source of background disk activity.",
+        "desc":  "Stops Prefetch and the SysMain service. Not recommended on Windows 11: SysMain still speeds up app launches on SSDs, and Windows already tunes it for solid-state drives.",
         "cat":  "Performance",
-        "risk":  "Moderate",
+        "risk":  "Advanced",
         "tags":  [
-                     "max"
+                     "optin"
                  ],
         "reg":  [
                     {
@@ -570,10 +586,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -608,22 +626,23 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
     {
         "id":  "perf-cpupower",
         "name":  "CPU: no core parking, always full speed (plugged in)",
-        "desc":  "Min processor state 100% and all cores unparked on AC power. Lowest latency; higher idle power and heat.",
+        "desc":  "Minimum processor state 100% and all cores unparked on AC power. Not recommended on Windows 11: it keeps a hot desktop CPU at full clocks while idle, and hybrid Intel CPUs rely on parking to steer work between P-cores and E-cores.",
         "cat":  "Performance",
-        "risk":  "Moderate",
+        "risk":  "Advanced",
         "tags":  [
-                     "gaming",
-                     "max"
+                     "optin"
                  ],
         "reg":  [
 
@@ -644,10 +663,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  " Set-PowerAC @(\r\n        @{ Sub = \u002754533251-82be-4824-96c1-47b60b740d00\u0027; Set = \u00270cc5b647-c1df-4637-891a-dec35c318583\u0027; Val = 100 }\r\n        @{ Sub = \u002754533251-82be-4824-96c1-47b60b740d00\u0027; Set = \u0027bc5038f7-23e0-4960-96da-33abaf5935ec\u0027; Val = 100 }) "
     },
@@ -658,7 +679,6 @@
         "cat":  "Performance",
         "risk":  "Safe",
         "tags":  [
-                     "gaming",
                      "max"
                  ],
         "reg":  [
@@ -680,22 +700,23 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  " Set-PowerAC @(\r\n        @{ Sub = \u00272a737441-1930-4402-8d77-b2bebba308a3\u0027; Set = \u002748e6b7a6-50f5-4782-a5d4-53bb8f07e226\u0027; Val = 0 }\r\n        @{ Sub = \u0027501a4d13-42af-4429-9fd1-a8218c268e20\u0027; Set = \u0027ee12f906-d277-404b-b6da-e5fa1a576df5\u0027; Val = 0 }) "
     },
     {
         "id":  "perf-timer",
         "name":  "Low-latency timer (disable dynamic tick)",
-        "desc":  "bcdedit disabledynamictick=yes and removes forced platform clock. Lower input latency; slightly higher idle power.",
+        "desc":  "bcdedit disabledynamictick=yes and removes a forced platform clock. Not recommended on Windows 11: this is a boot configuration change, not a measured FPS gain, and it raises idle power. Undo puts back the exact boot entries that were there before.",
         "cat":  "Performance",
         "risk":  "Advanced",
         "tags":  [
-                     "gaming",
-                     "max"
+                     "optin"
                  ],
         "reg":  [
 
@@ -716,12 +737,14 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  true
                    },
-        "apply_text":  " $a = bcdedit /enum \u0027{current}\u0027 | Out-String; bcdedit /set disabledynamictick yes | Out-Null; bcdedit /deletevalue useplatformclock 2\u003e\u00261 | Out-Null; @{ HadPlatformClock = [bool]($a -match \u0027useplatformclock\\s+Yes\u0027) } "
+        "apply_text":  " param($d) Invoke-Bcd @(\u0027/set\u0027, \u0027disabledynamictick\u0027, \u0027yes\u0027); if ($d.useplatformclock) { Invoke-Bcd @(\u0027/deletevalue\u0027, \u0027useplatformclock\u0027) } "
     },
     {
         "id":  "perf-hags",
@@ -730,7 +753,6 @@
         "cat":  "Performance",
         "risk":  "Moderate",
         "tags":  [
-                     "gaming",
                      "max"
                  ],
         "reg":  [
@@ -757,10 +779,12 @@
         "need":  [
                      "dgpu"
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -797,10 +821,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -811,7 +837,6 @@
         "cat":  "Performance",
         "risk":  "Moderate",
         "tags":  [
-                     "gaming",
                      "max"
                  ],
         "reg":  [
@@ -838,10 +863,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -873,10 +900,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $a = Get-MMAgent -ErrorAction Stop\r\n      Disable-MMAgent -ApplicationPreLaunch -PageCombining -ErrorAction Stop | Out-Null\r\n      @{ PreLaunch = [bool]$a.ApplicationPreLaunch; Combining = [bool]$a.PageCombining }\r\n  "
     },
@@ -887,7 +916,6 @@
         "cat":  "Gaming",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "gaming",
                      "max"
                  ],
@@ -921,21 +949,22 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
     {
         "id":  "game-dvr",
-        "name":  "Disable Game DVR and background capture",
-        "desc":  "Stops Xbox Game Bar background recording, including the saved-clip, microphone and cursor captures. Game Bar overlay shortcuts stop working. It also sets the machine policy AllowGameDVR=0, which turns Game DVR off for every user and can disable other Windows game-capture features; undo restores the previous values.",
+        "name":  "Disable Game DVR background capture (this account)",
+        "desc":  "Stops Xbox Game Bar background recording for your account: saved clips, microphone and cursor capture. Game Bar itself still opens. Nothing machine-wide is changed; that is the separate opt-in \"Game DVR machine policy\".",
         "cat":  "Gaming",
-        "risk":  "Moderate",
+        "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "gaming",
                      "max"
                  ],
@@ -971,18 +1000,6 @@
                         "t":  "DWord"
                     },
                     {
-                        "p":  "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\GameDVR",
-                        "n":  "AppCaptureEnabled",
-                        "v":  0,
-                        "t":  "DWord"
-                    },
-                    {
-                        "p":  "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\GameDVR",
-                        "n":  "AllowGameDVR",
-                        "v":  0,
-                        "t":  "DWord"
-                    },
-                    {
                         "p":  "HKCU:\\Software\\Microsoft\\GameBar",
                         "n":  "UseNexusForGameBarEnabled",
                         "v":  0,
@@ -1011,21 +1028,71 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
+                   },
+        "apply_text":  ""
+    },
+    {
+        "id":  "game-dvr-policy",
+        "name":  "Game DVR machine policy (every user)",
+        "desc":  "Sets the AllowGameDVR=0 policy and the machine-wide AppCaptureEnabled=0. This turns Game DVR off for every account and can disable other Windows game-capture features, so it is never part of a preset.",
+        "cat":  "Gaming",
+        "risk":  "Moderate",
+        "tags":  [
+                     "optin"
+                 ],
+        "reg":  [
+                    {
+                        "p":  "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\GameDVR",
+                        "n":  "AppCaptureEnabled",
+                        "v":  0,
+                        "t":  "DWord"
+                    },
+                    {
+                        "p":  "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\GameDVR",
+                        "n":  "AllowGameDVR",
+                        "v":  0,
+                        "t":  "DWord"
+                    }
+                ],
+        "svc":  [
+
+                ],
+        "task":  [
+
+                 ],
+        "restart":  false,
+        "explorer":  false,
+        "desktop_only":  false,
+        "ssd_only":  false,
+        "vendor":  "",
+        "svc_tol":  1,
+        "min_ram":  0,
+        "need":  [
+
+                 ],
+        "conflict":  "",
+        "script":  {
+                       "apply":  false,
+                       "undo":  false,
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
     {
         "id":  "game-fso",
         "name":  "Disable fullscreen optimizations globally",
-        "desc":  "Forces true exclusive fullscreen behaviour. Helps some older titles; a few modern games prefer it on.",
+        "desc":  "Forces exclusive fullscreen behaviour for every game. Not recommended on Windows 11: it is a global workaround, and modern games rely on fullscreen optimizations for flip-model presentation and VRR. Use Tools \u003e Per-game profile to turn it off only for the games that need it.",
         "cat":  "Gaming",
-        "risk":  "Moderate",
+        "risk":  "Advanced",
         "tags":  [
-                     "gaming"
+                     "optin"
                  ],
         "reg":  [
                     {
@@ -1069,22 +1136,23 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
     {
         "id":  "game-mpo",
         "name":  "Disable Multiplane Overlay (MPO)",
-        "desc":  "Fixes stutter, flicker and black screens on some NVIDIA/AMD setups (multi-monitor, high refresh). Set OverlayTestMode = 5 in the DWM key; undo removes it.",
+        "desc":  "Sets OverlayTestMode = 5 in the DWM key. Not recommended on Windows 11: it is a global workaround for flicker on some older driver and monitor combinations, current drivers fixed most of them, and it makes the desktop compositor do more work. Use it only if you see MPO flicker; undo restores the old value.",
         "cat":  "Gaming",
-        "risk":  "Moderate",
+        "risk":  "Advanced",
         "tags":  [
-                     "gaming",
-                     "max"
+                     "optin"
                  ],
         "reg":  [
                     {
@@ -1110,10 +1178,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -1124,7 +1194,6 @@
         "cat":  "Gaming",
         "risk":  "Moderate",
         "tags":  [
-                     "gaming",
                      "max"
                  ],
         "reg":  [
@@ -1151,10 +1220,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -1165,8 +1236,6 @@
         "cat":  "Gaming",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
-                     "gaming",
                      "max"
                  ],
         "reg":  [
@@ -1223,10 +1292,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -1275,10 +1346,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -1289,7 +1362,6 @@
         "cat":  "Gaming",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "gaming",
                      "max"
                  ],
@@ -1329,22 +1401,23 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
     {
         "id":  "net-nagle",
         "name":  "Disable Nagle algorithm (lower online-game latency)",
-        "desc":  "Sets TcpAckFrequency=1 and TCPNoDelay=1 on active interfaces so small packets are sent immediately.",
+        "desc":  "Sets TcpAckFrequency=1 and TCPNoDelay=1 on active interfaces so small packets are sent immediately. Not recommended on Windows 11: it is not a universal latency win (most games already set TCP_NODELAY or use UDP) and it adds ACK traffic. Undo puts back the exact values each interface had, including none.",
         "cat":  "Network",
-        "risk":  "Moderate",
+        "risk":  "Advanced",
         "tags":  [
-                     "gaming",
-                     "max"
+                     "optin"
                  ],
         "reg":  [
 
@@ -1365,12 +1438,14 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  false
+                       "test":  true,
+                       "snapshot":  true
                    },
-        "apply_text":  "\r\n      $done = @()\r\n      $base = \u0027HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces\u0027\r\n      foreach ($k in Get-ChildItem $base -ErrorAction SilentlyContinue) {\r\n          $p = Get-ItemProperty -LiteralPath $k.PSPath\r\n          if ($p.DhcpIPAddress -or $p.IPAddress) {\r\n              Set-ItemProperty -LiteralPath $k.PSPath -Name TcpAckFrequency -Value 1 -Type DWord\r\n              Set-ItemProperty -LiteralPath $k.PSPath -Name TCPNoDelay -Value 1 -Type DWord\r\n              $done += $k.PSChildName\r\n          }\r\n      }\r\n      , $done\r\n  "
+        "apply_text":  " param($d) foreach ($i in @($d)) { $p = Join-Path $global:OptiTcpIfBase $i.If; Set-RegEntry $p \u0027TcpAckFrequency\u0027 1; Set-RegEntry $p \u0027TCPNoDelay\u0027 1 } "
     },
     {
         "id":  "net-teredo",
@@ -1400,10 +1475,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  " netsh interface teredo set state disabled | Out-Null; $null "
     },
@@ -1440,10 +1517,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -1481,10 +1560,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -1495,7 +1576,6 @@
         "cat":  "Network",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -1529,10 +1609,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -1543,7 +1625,7 @@
         "cat":  "Network",
         "risk":  "Safe",
         "tags":  [
-                     "safe"
+                     "max"
                  ],
         "reg":  [
 
@@ -1564,10 +1646,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  " Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force -Confirm:$false | Out-Null; $null "
     },
@@ -1578,7 +1662,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -1657,10 +1740,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -1671,7 +1756,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -1711,10 +1795,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -1725,7 +1811,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -1765,10 +1850,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -1934,10 +2021,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -1948,7 +2037,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max",
                      "deai"
@@ -2019,10 +2107,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -2086,10 +2176,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -2153,10 +2245,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -2167,7 +2261,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -2219,10 +2312,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -2233,7 +2328,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -2267,10 +2361,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $p = \u0027HKCU:\\Software\\Microsoft\\Siuf\\Rules\u0027\r\n      $snap = Get-RegSnapshot @{ P = $p; N = \u0027PeriodInNanoSeconds\u0027 }\r\n      if ($snap.Exists) { Remove-RegEntry $p \u0027PeriodInNanoSeconds\u0027 }\r\n      @{ Existed = [bool]$snap.Exists; Value = $snap.Value; Type = $snap.Type }\r\n  "
     },
@@ -2317,10 +2413,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -2357,10 +2455,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -2371,7 +2471,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -2405,10 +2504,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -2419,7 +2520,6 @@
         "cat":  "Debloat",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max",
                      "deai"
@@ -2526,10 +2626,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -2592,10 +2694,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  " Get-Process -Name \u0027Widgets\u0027,\u0027WidgetService\u0027,\u0027Win32Bridge.Server\u0027 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; $null "
     },
@@ -2638,10 +2742,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $moved = @(Get-OneDriveRedirectedFolders)\r\n      if ($moved.Count) {\r\n          Write-Log \u0027  NOT uninstalled: these folders are backed up into OneDrive and files may exist only in the cloud:\u0027 \u0027WARN\u0027\r\n          foreach ($m in $moved) { Write-Log \"    $m\" \u0027WARN\u0027 }\r\n          Write-Log \u0027  Open OneDrive \u003e Settings \u003e Sync and backup \u003e Manage backup, stop backing them up, move the files back, then run this again.\u0027 \u0027WARN\u0027\r\n          return @{ Refused = $true; PolicyExisted = $false; PolicyValue = 0; Tasks = @() }\r\n      }\r\n      $pol = \u0027HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\OneDrive\u0027\r\n      $snap = Get-RegSnapshot @{ P = $pol; N = \u0027DisableFileSyncNGSC\u0027 }\r\n      $r = Uninstall-OneDrive\r\n      Set-RegEntry $pol \u0027DisableFileSyncNGSC\u0027 1\r\n      @{ Refused = $false; PolicyExisted = [bool]$snap.Exists; PolicyValue = $snap.Value; Tasks = @($r.Tasks) }\r\n  "
     },
@@ -2652,7 +2758,6 @@
         "cat":  "Debloat",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -2985,10 +3090,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3075,10 +3182,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3110,10 +3219,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  " Dism.exe /Online /Set-ReservedStorageState /State:Disabled | Out-Null; $null "
     },
@@ -3150,10 +3261,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3190,10 +3303,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3230,10 +3345,12 @@
         "need":  [
 
                  ],
+        "conflict":  "Explorer opens to",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3282,10 +3399,12 @@
         "need":  [
 
                  ],
+        "conflict":  "Explorer opens to",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3317,10 +3436,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  " New-Item -Path \u0027HKCU:\\Software\\Classes\\CLSID\\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\\InprocServer32\u0027 -Force -Value \u0027\u0027 | Out-Null; $null "
     },
@@ -3363,10 +3484,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3403,10 +3526,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3443,10 +3568,12 @@
         "need":  [
 
                  ],
+        "conflict":  "search style",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3483,10 +3610,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3497,7 +3626,7 @@
         "cat":  "Interface \u0026 Explorer",
         "risk":  "Safe",
         "tags":  [
-                     "safe"
+                     "max"
                  ],
         "reg":  [
                     {
@@ -3523,10 +3652,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3569,10 +3700,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3615,10 +3748,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3629,7 +3764,7 @@
         "cat":  "Interface \u0026 Explorer",
         "risk":  "Safe",
         "tags":  [
-                     "safe"
+                     "max"
                  ],
         "reg":  [
                     {
@@ -3655,10 +3790,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3695,10 +3832,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3735,10 +3874,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3775,22 +3916,23 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
     {
         "id":  "perf-fth",
         "name":  "Disable Fault Tolerant Heap",
-        "desc":  "FTH applies slow-path mitigations to apps that crashed a few times and keeps them there. Resets its list and turns it off.",
+        "desc":  "FTH applies slower, safer heap handling to apps that crashed several times. This sets Enabled=0; undo restores the old value. The list of apps FTH already tracks is left as it is (resetting it cannot be undone). Not recommended on Windows 11 unless an app is stuck in FTH mode.",
         "cat":  "Performance",
         "risk":  "Moderate",
         "tags":  [
-                     "safe",
-                     "max"
+                     "optin"
                  ],
         "reg":  [
                     {
@@ -3816,22 +3958,23 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
-                       "apply":  true,
+                       "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
-        "apply_text":  " rundll32.exe fthsvc.dll,FthSysprepSpecialize; Set-RegEntry \u0027HKLM:\\SOFTWARE\\Microsoft\\FTH\u0027 \u0027Enabled\u0027 0 \u0027DWord\u0027; $null "
+        "apply_text":  ""
     },
     {
         "id":  "perf-bgapps",
         "name":  "Disable background apps",
-        "desc":  "Store apps no longer run in the background, including the Windows 11 policy that forces it off for every account. Less CPU, RAM and network use; notifications from those apps stop.",
+        "desc":  "Store apps no longer run in the background, including the LetAppsRunInBackground=2 policy that forces it off for every account. Not recommended on Windows 11: Mail, Calendar, Teams, Phone Link and other Store apps stop delivering notifications, and modern Windows already suspends idle background apps.",
         "cat":  "Performance",
-        "risk":  "Safe",
+        "risk":  "Advanced",
         "tags":  [
-                     "safe",
-                     "max"
+                     "optin"
                  ],
         "reg":  [
                     {
@@ -3869,21 +4012,22 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
     {
         "id":  "perf-sleepstudy",
         "name":  "Disable SleepStudy and power diagnostic logging",
-        "desc":  "Turns off Modern Standby / power diagnostic event logs and the Power Efficiency Diagnostics task. Less background disk writes.",
+        "desc":  "Turns off Modern Standby / power diagnostic event logs and the Power Efficiency Diagnostics task. Less background disk writes. Undo puts each log back to the state it had before (on or off).",
         "cat":  "Performance",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -3905,21 +4049,23 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  true
                    },
-        "apply_text":  "\r\n      foreach ($l in \u0027Microsoft-Windows-SleepStudy/Diagnostic\u0027, \u0027Microsoft-Windows-Kernel-Processor-Power/Diagnostic\u0027, \u0027Microsoft-Windows-UserModePowerService/Diagnostic\u0027) { wevtutil.exe set-log $l /e:false 2\u003e\u00261 | Out-Null }\r\n      $null\r\n  "
+        "apply_text":  " param($d) foreach ($l in $global:OptiSleepLogs) { if ($null -ne (Get-EventLogState $l)) { Invoke-Wevtutil @(\u0027set-log\u0027, $l, \u0027/e:false\u0027) } } "
     },
     {
         "id":  "perf-paging",
         "name":  "Keep kernel in RAM (16 GB+ only)",
-        "desc":  "DisablePagingExecutive + DisablePageCombining: kernel and drivers are never paged out. Snappier with plenty of RAM; wasteful on small machines.",
+        "desc":  "DisablePagingExecutive + DisablePageCombining: kernel and drivers are never paged out. Not recommended on Windows 11: it raises committed memory for little measurable gain, because Windows rarely pages kernel code on a PC with enough RAM.",
         "cat":  "Performance",
-        "risk":  "Moderate",
+        "risk":  "Advanced",
         "tags":  [
-                     "max"
+                     "optin"
                  ],
         "reg":  [
                     {
@@ -3951,10 +4097,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -3986,10 +4134,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $done = @()\r\n      foreach ($k in Get-ChildItem $global:SVCROOT -ErrorAction SilentlyContinue) {\r\n          if ($k.PSChildName -match \u0027Xbl|Xbox\u0027) { continue }\r\n          $p = Get-ItemProperty -LiteralPath $k.PSPath -ErrorAction SilentlyContinue\r\n          if ($null -ne $p.Start -and $null -eq $p.SvcHostSplitDisable) {\r\n              try { Set-ItemProperty -LiteralPath $k.PSPath -Name SvcHostSplitDisable -Value 1 -Type DWord -ErrorAction Stop; $done += $k.PSChildName } catch {}\r\n          }\r\n      }\r\n      , $done\r\n  "
     },
@@ -4021,10 +4171,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  " $o = Invoke-Native fsutil @(\u00278dot3name\u0027, \u0027query\u0027); $prev = if ($o -match \u0027(?:state|value)[^0-9]*([0-3])\u0027) { [int]$Matches[1] } else { 2 }; fsutil 8dot3name set 1 | Out-Null; @{ Prev = $prev } "
     },
@@ -4035,7 +4187,6 @@
         "cat":  "Performance",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -4057,10 +4208,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $stamp = Get-Date -Format \u0027yyyyMMdd-HHmmss\u0027\r\n      $bags = Join-Path $OptiBackupDir \"shellbags-$stamp.reg\"\r\n      $mru  = Join-Path $OptiBackupDir \"shellbagmru-$stamp.reg\"\r\n      reg.exe export \u0027HKCU\\SOFTWARE\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\Bags\u0027 $bags /y 2\u003e\u00261 | Out-Null\r\n      reg.exe export \u0027HKCU\\SOFTWARE\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\u0027 $mru /y 2\u003e\u00261 | Out-Null\r\n      Remove-Item \"$global:SHELLBAGS\\Bags\", \"$global:SHELLBAGS\\BagMRU\" -Recurse -Force -ErrorAction SilentlyContinue\r\n      Set-RegEntry \"$global:SHELLBAGS\\Bags\\AllFolders\\Shell\" \u0027FolderType\u0027 \u0027NotSpecified\u0027 \u0027String\u0027\r\n      @{ Bags = $bags; Mru = $mru }\r\n  "
     },
@@ -4071,7 +4224,6 @@
         "cat":  "Performance",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -4098,10 +4250,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4112,7 +4266,6 @@
         "cat":  "Performance",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -4139,10 +4292,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4179,10 +4334,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4193,7 +4350,6 @@
         "cat":  "Performance",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -4220,10 +4376,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4260,10 +4418,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4274,7 +4434,6 @@
         "cat":  "Performance",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -4301,10 +4460,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4341,10 +4502,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4355,7 +4518,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -4383,10 +4545,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4430,10 +4594,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4444,7 +4610,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -4472,10 +4637,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4486,7 +4653,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -4514,10 +4680,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4528,7 +4696,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -4556,10 +4723,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4597,10 +4766,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4611,7 +4782,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -4645,10 +4815,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4686,10 +4858,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4727,10 +4901,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4741,7 +4917,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -4769,10 +4944,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4827,10 +5004,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4841,7 +5020,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -4869,10 +5047,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4883,7 +5063,6 @@
         "cat":  "Debloat",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -4910,10 +5089,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -4924,7 +5105,6 @@
         "cat":  "Debloat",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -4963,10 +5143,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5003,10 +5185,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5043,10 +5227,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5083,10 +5269,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5123,10 +5311,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5181,10 +5371,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5227,10 +5419,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5267,10 +5461,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5307,10 +5503,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5321,7 +5519,6 @@
         "cat":  "AI \u0026 Copilot",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max",
                      "deai"
@@ -5368,10 +5565,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $f = Get-WindowsOptionalFeature -Online -FeatureName Recall -ErrorAction SilentlyContinue\r\n      if ($f -and $f.State -eq \u0027Enabled\u0027) { Disable-WindowsOptionalFeature -Online -FeatureName Recall -NoRestart -ErrorAction SilentlyContinue | Out-Null; @{ WasEnabled = $true } } else { @{ WasEnabled = $false } }\r\n  "
     },
@@ -5382,7 +5581,6 @@
         "cat":  "AI \u0026 Copilot",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max",
                      "deai"
@@ -5423,10 +5621,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5478,10 +5678,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5492,7 +5694,6 @@
         "cat":  "AI \u0026 Copilot",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max",
                      "deai"
@@ -5551,10 +5752,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5565,7 +5768,6 @@
         "cat":  "AI \u0026 Copilot",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max",
                      "deai"
@@ -5642,10 +5844,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5656,7 +5860,6 @@
         "cat":  "AI \u0026 Copilot",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max",
                      "deai"
@@ -5703,10 +5906,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5717,7 +5922,6 @@
         "cat":  "AI \u0026 Copilot",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max",
                      "deai"
@@ -5752,10 +5956,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5788,10 +5994,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      # Same approach as WinUtil\u0027s \"Windows AI - Disable And Remove\": marking CoreAI end-of-life lets Windows remove it.\r\n      try {\r\n          $core = Get-AppxPackage -AllUsers -Name \u0027MicrosoftWindows.Client.CoreAI\u0027 -ErrorAction SilentlyContinue | Select-Object -First 1\r\n          if ($core) {\r\n              $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value\r\n              New-Item -Path \"HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Appx\\AppxAllUserStore\\EndOfLife\\$sid\\$($core.PackageFullName)\" -Force -ErrorAction Stop | Out-Null\r\n          }\r\n      } catch { Write-Log \"  could not mark the Windows AI core package for removal: $($_.Exception.Message)\" \u0027WARN\u0027 }\r\n      $r = Remove-AppxByName ($global:OptiAiApps + \u0027Microsoft.MicrosoftOfficeHub\u0027)\r\n      foreach ($f in $r.Failed) { Write-Log \"  could not remove $f\" \u0027WARN\u0027 }\r\n      # Store version of Copilot (Win11Debloat removes it by Store id)\r\n      if (Get-Command winget -ErrorAction SilentlyContinue) {\r\n          $null = winget list --id XP9CXNGPPJ97XX --source msstore --accept-source-agreements 2\u003e\u00261\r\n          if ($LASTEXITCODE -eq 0) { $null = winget uninstall --id XP9CXNGPPJ97XX --source msstore --silent --accept-source-agreements 2\u003e\u00261 }\r\n      }\r\n      , @($r.Removed)\r\n  "
     },
@@ -5802,7 +6010,6 @@
         "cat":  "AI \u0026 Copilot",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max",
                      "deai"
@@ -5826,10 +6033,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $k = \u0027HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\u0027\r\n      $snap = Get-RegSnapshot @{ P = $k; N = \u0027SettingsPageVisibility\u0027 }\r\n      $cur = if ($snap.Exists) { [string]$snap.Value } else { \u0027\u0027 }\r\n      if ($cur -like \u0027showonly:*\u0027) { Write-Log \u0027  Settings page visibility is in \"show only\" mode; not changed\u0027 \u0027WARN\u0027; return @{ Existed = [bool]$snap.Exists; Value = $cur; Changed = $false } }\r\n      if ($cur -notmatch \u0027(^|[:;])aicomponents(;|$)\u0027) {\r\n          $new = if ($cur -like \u0027hide:*\u0027) { $cur.TrimEnd(\u0027;\u0027) + \u0027;aicomponents\u0027 } else { \u0027hide:aicomponents\u0027 }\r\n          Set-RegEntry $k \u0027SettingsPageVisibility\u0027 $new \u0027String\u0027\r\n      }\r\n      @{ Existed = [bool]$snap.Exists; Value = $cur; Changed = $true }\r\n  "
     },
@@ -5840,7 +6049,6 @@
         "cat":  "Debloat",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max",
                      "deai"
@@ -5887,10 +6095,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5901,7 +6111,6 @@
         "cat":  "Debloat",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max",
                      "deai"
                  ],
@@ -5929,10 +6138,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -5943,7 +6154,6 @@
         "cat":  "Debloat",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max",
                      "deai"
                  ],
@@ -5966,10 +6176,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $base = \u0027HKLM:\\SOFTWARE\\Microsoft\\WindowsUpdate\\Orchestrator\\UScheduler_Oobe\u0027\r\n      $gone = @()\r\n      foreach ($n in \u0027OutlookUpdate\u0027, \u0027DevHomeUpdate\u0027) { if (Test-Path \"$base\\$n\") { Remove-Item \"$base\\$n\" -Recurse -Force -ErrorAction SilentlyContinue; $gone += $n } }\r\n      , $gone\r\n  "
     },
@@ -6013,10 +6225,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -6061,10 +6275,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -6119,10 +6335,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -6154,10 +6372,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $setup = @(Get-ChildItem -Path \"${env:ProgramFiles(x86)}\\Microsoft\\Edge\\Application\\*\\Installer\\setup.exe\" -ErrorAction SilentlyContinue | Select-Object -Last 1)\r\n      if (-not $setup.Count) { Write-Log \u0027  Edge is not installed\u0027 ; return $null }\r\n      Stop-Process -Name \u0027msedge\u0027 -Force -ErrorAction SilentlyContinue\r\n      New-Item -Path \"$env:SystemRoot\\SystemApps\\Microsoft.MicrosoftEdge_8wekyb3d8bbwe\\MicrosoftEdge.exe\" -Force -ErrorAction SilentlyContinue | Out-Null\r\n      $proc = Start-Process -FilePath $setup[0].FullName -ArgumentList \u0027--uninstall --system-level --force-uninstall --delete-profile\u0027 -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue\r\n      if ($proc -and -not $proc.WaitForExit(240000)) { Write-Log \u0027  Edge uninstaller still running after 4 minutes\u0027 \u0027WARN\u0027 }\r\n      $null\r\n  "
     },
@@ -6194,10 +6414,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -6208,7 +6430,7 @@
         "cat":  "Interface \u0026 Explorer",
         "risk":  "Safe",
         "tags":  [
-                     "safe"
+                     "max"
                  ],
         "reg":  [
                     {
@@ -6240,10 +6462,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -6280,10 +6504,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -6320,10 +6546,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -6360,10 +6588,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -6395,10 +6625,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $d = \"$env:SystemRoot\\Installer\\Razer\"\r\n      if (Test-Path -LiteralPath $d) { Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue }\r\n      else { New-Item -Path $d -ItemType Directory -Force | Out-Null }\r\n      \u0026 icacls.exe $d /deny \u0027*S-1-1-0:(W)\u0027 2\u003e\u00261 | Out-Null\r\n      $null\r\n  "
     },
@@ -6430,10 +6662,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      Stop-Process -Name \u0027logi_download_assistant\u0027 -Force -ErrorAction SilentlyContinue\r\n      $root = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }\r\n      $d = Join-Path $root \u0027LogiDownloadAssistant\u0027\r\n      if (Test-Path -LiteralPath $d) { Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue }\r\n      else { New-Item -Path $d -ItemType Directory -Force | Out-Null }\r\n      \u0026 icacls.exe $d /deny \u0027*S-1-1-0:(W)\u0027 2\u003e\u00261 | Out-Null\r\n      $null\r\n  "
     },
@@ -6444,7 +6678,6 @@
         "cat":  "Browsers",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max",
                      "deai"
@@ -6557,10 +6790,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -6571,7 +6806,6 @@
         "cat":  "Browsers",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max",
                      "deai"
@@ -6702,10 +6936,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -6716,7 +6952,6 @@
         "cat":  "Browsers",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max",
                      "deai"
@@ -6817,10 +7052,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -6831,7 +7068,6 @@
         "cat":  "Browsers",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max",
                      "deai"
@@ -6998,10 +7234,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -7012,7 +7250,6 @@
         "cat":  "Browsers",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max",
                      "deai"
@@ -7143,10 +7380,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -7157,7 +7396,6 @@
         "cat":  "Browsers",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max",
                      "deai"
@@ -7204,10 +7442,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -7250,10 +7490,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -7300,10 +7542,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -7335,10 +7579,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $run = \u0027HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\u0027\r\n      $apr = \u0027HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run\u0027\r\n      $done = @{ Run = @(); Tasks = @() }\r\n      $key = Get-Item -LiteralPath $run -ErrorAction SilentlyContinue\r\n      if ($key) {\r\n          foreach ($n in $key.GetValueNames() | Where-Object { $_ -like \u0027Opera*\u0027 }) {\r\n              if (Test-StartupEnabled $apr $n) { Set-StartupItem @{ Name = $n; Approved = $apr } $false; $done.Run += $n }\r\n          }\r\n      }\r\n      foreach ($t in Get-ScheduledTask -TaskPath \u0027\\\u0027 -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like \u0027Opera*\u0027 -and $_.State -ne \u0027Disabled\u0027 }) {\r\n          Disable-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction SilentlyContinue | Out-Null\r\n          $done.Tasks += $t.TaskName\r\n      }\r\n      $done\r\n  "
     },
@@ -7370,10 +7616,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  " Remove-RegKeysWithBackup @(\u0027HKEY_CLASSES_ROOT\\*\\shellex\\ContextMenuHandlers\\ModernSharing\u0027) \u0027ctx-share\u0027 "
     },
@@ -7405,10 +7653,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      Remove-RegKeysWithBackup @(\r\n          \u0027HKEY_CLASSES_ROOT\\*\\shellex\\ContextMenuHandlers\\Sharing\u0027\r\n          \u0027HKEY_CLASSES_ROOT\\Directory\\Background\\shellex\\ContextMenuHandlers\\Sharing\u0027\r\n          \u0027HKEY_CLASSES_ROOT\\Directory\\shellex\\ContextMenuHandlers\\Sharing\u0027\r\n          \u0027HKEY_CLASSES_ROOT\\Drive\\shellex\\ContextMenuHandlers\\Sharing\u0027\r\n          \u0027HKEY_CLASSES_ROOT\\LibraryFolder\\background\\shellex\\ContextMenuHandlers\\Sharing\u0027\r\n          \u0027HKEY_CLASSES_ROOT\\UserLibraryFolder\\shellex\\ContextMenuHandlers\\Sharing\u0027) \u0027ctx-giveaccess\u0027\r\n  "
     },
@@ -7440,10 +7690,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  " Remove-RegKeysWithBackup @(\u0027HKEY_CLASSES_ROOT\\Folder\\ShellEx\\ContextMenuHandlers\\Library Location\u0027, \u0027HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Folder\\ShellEx\\ContextMenuHandlers\\Library Location\u0027) \u0027ctx-library\u0027 "
     },
@@ -7475,10 +7727,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      Remove-RegKeysWithBackup @(\r\n          \u0027HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MyComputer\\NameSpace\\{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}\u0027\r\n          \u0027HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MyComputer\\NameSpace\\{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}\u0027\r\n          \u0027HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MyComputer\\NameSpace\\{3dfdf296-dbec-4fb4-81d1-6a3438bcf4de}\u0027\r\n          \u0027HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MyComputer\\NameSpace\\{3dfdf296-dbec-4fb4-81d1-6a3438bcf4de}\u0027\r\n          \u0027HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Desktop\\NameSpace\\DelegateFolders\\{F5FB2C77-0E2F-4A16-A381-3E560C68BC83}\u0027) \u0027thispc\u0027\r\n  "
     },
@@ -7515,10 +7769,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -7561,10 +7817,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -7601,10 +7859,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -7641,10 +7901,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -7681,10 +7943,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -7721,10 +7985,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -7735,7 +8001,6 @@
         "cat":  "Interface \u0026 Explorer",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -7762,10 +8027,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -7776,7 +8043,6 @@
         "cat":  "Interface \u0026 Explorer",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -7803,10 +8069,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -7838,10 +8106,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  " bcdedit /set \u0027{default}\u0027 bootmenupolicy legacy | Out-Null; $null "
     },
@@ -7852,7 +8122,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -7880,10 +8149,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -7894,7 +8165,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -7922,10 +8192,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -7962,10 +8234,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -7976,7 +8250,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -8009,10 +8282,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8023,7 +8298,6 @@
         "cat":  "Debloat",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max",
                      "deai"
                  ],
@@ -8051,10 +8325,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8065,7 +8341,6 @@
         "cat":  "Debloat",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max",
                      "deai"
                  ],
@@ -8093,10 +8368,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8178,10 +8455,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8192,7 +8471,6 @@
         "cat":  "Debloat",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max",
                      "deai"
                  ],
@@ -8218,10 +8496,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8232,7 +8512,6 @@
         "cat":  "Debloat",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -8259,10 +8538,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8299,10 +8580,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8339,10 +8622,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8385,10 +8670,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8425,10 +8712,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8465,10 +8754,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8511,10 +8802,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8551,10 +8844,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8565,7 +8860,6 @@
         "cat":  "Interface \u0026 Explorer",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -8592,10 +8886,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8606,7 +8902,6 @@
         "cat":  "Interface \u0026 Explorer",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -8633,10 +8928,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8668,10 +8965,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  " New-Item -Path \u0027HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Network\\NewNetworkWindowOff\u0027 -Force | Out-Null; $null "
     },
@@ -8720,10 +9019,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8760,10 +9061,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8774,7 +9077,6 @@
         "cat":  "Performance",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -8807,10 +9109,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8821,7 +9125,6 @@
         "cat":  "Performance",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -8848,10 +9151,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8862,7 +9167,6 @@
         "cat":  "Performance",
         "risk":  "Safe",
         "tags":  [
-                     "gaming",
                      "max"
                  ],
         "reg":  [
@@ -8884,10 +9188,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $prev = @()\r\n      foreach ($a in Get-NetAdapter -Physical -ErrorAction SilentlyContinue) {\r\n          $pm = Get-NetAdapterPowerManagement -Name $a.Name -ErrorAction SilentlyContinue\r\n          if ($pm -and $pm.AllowComputerToTurnOffDevice -ne \u0027Unsupported\u0027) {\r\n              $prev += @{ Name = $a.Name; Value = [string]$pm.AllowComputerToTurnOffDevice }\r\n              try { Set-NetAdapterPowerManagement -Name $a.Name -AllowComputerToTurnOffDevice Disabled -ErrorAction Stop } catch {}\r\n          }\r\n      }\r\n      , $prev\r\n  "
     },
@@ -8898,7 +9204,6 @@
         "cat":  "Network",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -8925,10 +9230,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8973,10 +9280,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -8987,7 +9296,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -9015,10 +9323,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9029,7 +9339,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -9057,10 +9366,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9103,10 +9414,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9117,7 +9430,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -9145,10 +9457,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9159,7 +9473,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -9190,10 +9503,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9204,7 +9519,6 @@
         "cat":  "Privacy \u0026 Telemetry",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "privacy",
                      "max"
                  ],
@@ -9274,10 +9588,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9314,10 +9630,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9328,7 +9646,6 @@
         "cat":  "Debloat",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -9361,10 +9678,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9419,10 +9738,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9465,10 +9786,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9500,10 +9823,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $now = [DateTime]::UtcNow\r\n      $start = $now.ToString(\u0027yyyy-MM-ddTHH:mm:ssZ\u0027); $end = $now.AddDays(35).ToString(\u0027yyyy-MM-ddTHH:mm:ssZ\u0027)\r\n      foreach ($n in \u0027PauseFeatureUpdatesStartTime\u0027, \u0027PauseQualityUpdatesStartTime\u0027, \u0027PauseUpdatesStartTime\u0027) { Set-RegEntry \u0027HKLM:\\SOFTWARE\\Microsoft\\WindowsUpdate\\UX\\Settings\u0027 $n $start \u0027String\u0027 }\r\n      foreach ($n in \u0027PauseFeatureUpdatesEndTime\u0027, \u0027PauseQualityUpdatesEndTime\u0027, \u0027PauseUpdatesExpiryTime\u0027) { Set-RegEntry \u0027HKLM:\\SOFTWARE\\Microsoft\\WindowsUpdate\\UX\\Settings\u0027 $n $end \u0027String\u0027 }\r\n      $null\r\n  "
     },
@@ -9535,10 +9860,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $hosts = \"$env:SystemRoot\\System32\\drivers\\etc\\hosts\"\r\n      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12\r\n      $raw = (Invoke-WebRequest -Uri \u0027https://raw.githubusercontent.com/crazy-max/WindowsSpyBlocker/master/data/hosts/spy.txt\u0027 -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop).Content\r\n      $entries = @($raw -split \"`n\" | ForEach-Object { if ($_ -match \u0027^\\s*0\\.0\\.0\\.0\\s+([a-z0-9][a-z0-9\\.\\-]+)\\s*$\u0027) { $Matches[1] } } |\r\n                   Where-Object { $_ -notmatch \u0027blob\\.core\\.windows\\.net$|visualstudio|nuget|dotnet\u0027 } | Sort-Object -Unique)\r\n      if ($entries.Count -lt 50) { throw \"blocklist looked wrong ($($entries.Count) entries), hosts file left untouched\" }\r\n      $backup = Join-Path $OptiBackupDir (\u0027hosts-{0}.bak\u0027 -f (Get-Date -Format \u0027yyyyMMdd-HHmmss\u0027))\r\n      Copy-Item -LiteralPath $hosts -Destination $backup -Force\r\n      Add-HostsBlock -Path $hosts -Entries $entries\r\n      ipconfig /flushdns | Out-Null\r\n      @{ Backup = $backup; Count = $entries.Count }\r\n  "
     },
@@ -9570,10 +9897,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $base = \u0027HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Render\u0027\r\n      $prop = \u0027{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},3\u0027\r\n      $prev = @()\r\n      foreach ($dev in Get-ChildItem -Path $base -ErrorAction SilentlyContinue) {\r\n          $fx = Join-Path $dev.PSPath \u0027FxProperties\u0027\r\n          $had = Test-Path -LiteralPath $fx\r\n          $old = if ($had) { (Get-ItemProperty -LiteralPath $fx -Name $prop -ErrorAction SilentlyContinue).$prop } else { $null }\r\n          $prev += @{ Path = $fx; Had = $had; Old = $old }\r\n          try { Set-RegEntry -Path $fx -Name $prop -Value \u0027{5860E1C5-F95C-4a7a-8EC8-8AEF24F379A1}\u0027 -Type String } catch {}\r\n      }\r\n      try { Restart-Service audiosrv -Force -ErrorAction Stop } catch {}\r\n      , $prev\r\n  "
     },
@@ -9584,7 +9913,6 @@
         "cat":  "Gaming",
         "risk":  "Safe",
         "tags":  [
-                     "gaming",
                      "max"
                  ],
         "reg":  [
@@ -9606,10 +9934,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $done = @()\r\n      foreach ($proto in \u0027ms-gamebar\u0027, \u0027ms-gamebarservices\u0027) {\r\n          $native = \"HKEY_CURRENT_USER\\Software\\Classes\\$proto\"\r\n          $ps = \"HKCU:\\Software\\Classes\\$proto\"\r\n          $existed = Test-Path -LiteralPath $ps\r\n          $file = $null\r\n          if ($existed) {\r\n              $file = Join-Path $global:OptiBackupDir (\"gamebar-{0}-{1}.reg\" -f $proto, (Get-Date -Format \u0027yyyyMMdd-HHmmss\u0027))\r\n              reg.exe export $native $file /y | Out-Null\r\n              if (-not (Test-Path -LiteralPath $file)) { throw \"could not back up $proto, left untouched\" }\r\n          }\r\n          if (-not $existed) { New-Item -Path $ps -Force | Out-Null }\r\n          Set-Item -LiteralPath $ps -Value \"URL:$proto\"\r\n          New-ItemProperty -LiteralPath $ps -Name \u0027URL Protocol\u0027 -Value \u0027\u0027 -PropertyType String -Force | Out-Null\r\n          New-ItemProperty -LiteralPath $ps -Name \u0027NoOpenWith\u0027 -Value \u0027\u0027 -PropertyType String -Force | Out-Null\r\n          $cmd = Join-Path $ps \u0027shell\\open\\command\u0027\r\n          New-Item -Path $cmd -Force | Out-Null\r\n          Set-Item -LiteralPath $cmd -Value \u0027%SystemRoot%/System32/systray.exe\u0027\r\n          $done += @{ Proto = $proto; Existed = $existed; File = $file }\r\n      }\r\n      , $done\r\n  "
     },
@@ -9620,7 +9950,6 @@
         "cat":  "Interface \u0026 Explorer",
         "risk":  "Safe",
         "tags":  [
-                     "gaming",
                      "max"
                  ],
         "reg":  [
@@ -9647,10 +9976,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9661,7 +9992,7 @@
         "cat":  "Interface \u0026 Explorer",
         "risk":  "Safe",
         "tags":  [
-                     "gaming"
+                     "max"
                  ],
         "reg":  [
                     {
@@ -9693,10 +10024,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9733,10 +10066,12 @@
         "need":  [
 
                  ],
+        "conflict":  "taskbar grouping",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9773,10 +10108,12 @@
         "need":  [
 
                  ],
+        "conflict":  "taskbar grouping",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9813,10 +10150,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9853,10 +10192,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9893,10 +10234,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9933,10 +10276,12 @@
         "need":  [
 
                  ],
+        "conflict":  "Explorer opens to",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -9973,10 +10318,12 @@
         "need":  [
 
                  ],
+        "conflict":  "drive letters",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -10013,10 +10360,12 @@
         "need":  [
 
                  ],
+        "conflict":  "drive letters",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -10053,10 +10402,12 @@
         "need":  [
 
                  ],
+        "conflict":  "drive letters",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -10067,7 +10418,6 @@
         "cat":  "Interface \u0026 Explorer",
         "risk":  "Safe",
         "tags":  [
-                     "safe",
                      "max"
                  ],
         "reg":  [
@@ -10094,10 +10444,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -10129,10 +10481,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $base = \u0027HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MyComputer\\NameSpace\u0027\r\n      $ids = \u0027{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}\u0027, \u0027{d3162b92-9365-467a-956b-92703aca08af}\u0027, \u0027{088e3905-0323-4b02-9826-5d99428e115f}\u0027, \u0027{1CF1260C-4DD0-4ebb-811F-33C572699FDE}\u0027, \u0027{3dfdf296-dbec-4fb4-81d1-6a3438bcf4de}\u0027, \u0027{24ad3ad4-a569-4530-98e1-ab02f9417aa8}\u0027, \u0027{f86fa3ab-70d2-4fc7-9c99-fcbf05467f3a}\u0027\r\n      $prev = @()\r\n      foreach ($id in $ids) {\r\n          $p = Join-Path $base $id\r\n          $existed = Test-Path -LiteralPath $p\r\n          if (-not $existed) { New-Item -Path $p -Force | Out-Null }\r\n          $item = Get-ItemProperty -LiteralPath $p\r\n          $prev += @{ Path = $p; Existed = $existed; HadHide = ($null -ne $item.HideIfEnabled); Hide = $item.HideIfEnabled; HadHidden = ($null -ne $item.HiddenByDefault); Hidden = $item.HiddenByDefault }\r\n          if ($null -ne $item.HideIfEnabled) { Remove-ItemProperty -LiteralPath $p -Name \u0027HideIfEnabled\u0027 -ErrorAction SilentlyContinue }\r\n          Set-RegEntry $p \u0027HiddenByDefault\u0027 0\r\n      }\r\n      , $prev\r\n  "
     },
@@ -10169,10 +10523,12 @@
         "need":  [
 
                  ],
+        "conflict":  "All apps view",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -10209,10 +10565,12 @@
         "need":  [
 
                  ],
+        "conflict":  "All apps view",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -10249,10 +10607,12 @@
         "need":  [
 
                  ],
+        "conflict":  "All apps view",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -10289,10 +10649,12 @@
         "need":  [
 
                  ],
+        "conflict":  "search style",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -10329,10 +10691,12 @@
         "need":  [
 
                  ],
+        "conflict":  "search style",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -10369,10 +10733,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -10407,10 +10773,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  "\r\n      $db = Join-Path $env:LOCALAPPDATA \u0027Packages\\Microsoft.WindowsStore_8wekyb3d8bbwe\\LocalState\\store.db\u0027\r\n      if (-not (Test-Path -LiteralPath $db)) { throw \u0027Microsoft Store database was not found for this account\u0027 }\r\n      \u0026 icacls.exe $db /deny \u0027*S-1-1-0:F\u0027 | Out-Null\r\n      if ($LASTEXITCODE -ne 0) { throw \"could not update permissions on the Store database (exit $LASTEXITCODE)\" }\r\n      $null\r\n  "
     },
@@ -10447,10 +10815,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -10493,10 +10863,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -10539,10 +10911,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -10580,10 +10954,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -10621,10 +10997,12 @@
         "need":  [
                      "hdd"
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  false,
                        "undo":  false,
-                       "test":  false
+                       "test":  false,
+                       "snapshot":  false
                    },
         "apply_text":  ""
     },
@@ -10657,10 +11035,12 @@
         "need":  [
 
                  ],
+        "conflict":  "",
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  true
+                       "test":  true,
+                       "snapshot":  false
                    },
         "apply_text":  " $o = Invoke-Native fsutil @(\u0027behavior\u0027, \u0027query\u0027, \u0027DisableDeleteNotify\u0027); $prev = if ($o -match \u0027NTFS\\s+DisableDeleteNotify\\s*=\\s*(\\d)\u0027) { [int]$Matches[1] } else { 0 }; fsutil behavior set DisableDeleteNotify 0 | Out-Null; @{ Prev = $prev } "
     }

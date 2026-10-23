@@ -7,32 +7,27 @@ $global:SVCROOT   = 'HKLM:\SYSTEM\CurrentControlSet\Services'
 $WU        = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
 
 # ======================================================================= PERFORMANCE
-T -Id 'perf-fth' -Cat $P -Name 'Disable Fault Tolerant Heap' -Tags safe, max -Risk Moderate `
-  -Desc 'FTH applies slow-path mitigations to apps that crashed a few times and keeps them there. Resets its list and turns it off.' `
-  -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\FTH' 'Enabled' 0 ) `
-  -Apply { rundll32.exe fthsvc.dll,FthSysprepSpecialize; Set-RegEntry 'HKLM:\SOFTWARE\Microsoft\FTH' 'Enabled' 0 'DWord'; $null }
+T -Id 'perf-fth' -Cat $P -Name 'Disable Fault Tolerant Heap' -Tags optin -Risk Moderate `
+  -Desc 'FTH applies slower, safer heap handling to apps that crashed several times. This sets Enabled=0; undo restores the old value. The list of apps FTH already tracks is left as it is (resetting it cannot be undone). Not recommended on Windows 11 unless an app is stuck in FTH mode.' `
+  -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\FTH' 'Enabled' 0 )
 
-T -Id 'perf-bgapps' -Cat $P -Name 'Disable background apps' -Tags safe, max `
-  -Desc 'Store apps no longer run in the background, including the Windows 11 policy that forces it off for every account. Less CPU, RAM and network use; notifications from those apps stop.' `
+T -Id 'perf-bgapps' -Cat $P -Name 'Disable background apps' -Tags optin -Risk Advanced `
+  -Desc 'Store apps no longer run in the background, including the LetAppsRunInBackground=2 policy that forces it off for every account. Not recommended on Windows 11: Mail, Calendar, Teams, Phone Link and other Store apps stop delivering notifications, and modern Windows already suspends idle background apps.' `
   -Reg @(
       Rg "$CV\BackgroundAccessApplications" 'GlobalUserDisabled' 1
       Rg "$CV\Search" 'BackgroundAppGlobalToggle' 0
       Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy' 'LetAppsRunInBackground' 2
   )
 
-T -Id 'perf-sleepstudy' -Cat $P -Name 'Disable SleepStudy and power diagnostic logging' -Tags safe, max `
-  -Desc 'Turns off Modern Standby / power diagnostic event logs and the Power Efficiency Diagnostics task. Less background disk writes.' `
+T -Id 'perf-sleepstudy' -Cat $P -Name 'Disable SleepStudy and power diagnostic logging' -Tags max `
+  -Desc 'Turns off Modern Standby / power diagnostic event logs and the Power Efficiency Diagnostics task. Less background disk writes. Undo puts each log back to the state it had before (on or off).' `
   -Task @( 'Microsoft\Windows\Power Efficiency Diagnostics\AnalyzeSystem' ) `
-  -Apply {
-      foreach ($l in 'Microsoft-Windows-SleepStudy/Diagnostic', 'Microsoft-Windows-Kernel-Processor-Power/Diagnostic', 'Microsoft-Windows-UserModePowerService/Diagnostic') { wevtutil.exe set-log $l /e:false 2>&1 | Out-Null }
-      $null
-  } `
-  -Undo {
-      foreach ($l in 'Microsoft-Windows-SleepStudy/Diagnostic', 'Microsoft-Windows-Kernel-Processor-Power/Diagnostic', 'Microsoft-Windows-UserModePowerService/Diagnostic') { wevtutil.exe set-log $l /e:true 2>&1 | Out-Null }
-  }
+  -Snapshot { Get-EventLogStates $global:OptiSleepLogs } `
+  -Apply { param($d) foreach ($l in $global:OptiSleepLogs) { if ($null -ne (Get-EventLogState $l)) { Invoke-Wevtutil @('set-log', $l, '/e:false') } } } `
+  -Undo  { param($d) Restore-EventLogStates $d }
 
-T -Id 'perf-paging' -Cat $P -Name 'Keep kernel in RAM (16 GB+ only)' -Tags max -Risk Moderate -Restart -MinRamGB 15.5 `
-  -Desc 'DisablePagingExecutive + DisablePageCombining: kernel and drivers are never paged out. Snappier with plenty of RAM; wasteful on small machines.' `
+T -Id 'perf-paging' -Cat $P -Name 'Keep kernel in RAM (16 GB+ only)' -Tags optin -Risk Advanced -Restart -MinRamGB 15.5 `
+  -Desc 'DisablePagingExecutive + DisablePageCombining: kernel and drivers are never paged out. Not recommended on Windows 11: it raises committed memory for little measurable gain, because Windows rarely pages kernel code on a PC with enough RAM.' `
   -Reg @(
       Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' 'DisablePagingExecutive' 1
       Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' 'DisablePageCombining' 1
@@ -60,7 +55,7 @@ T -Id 'perf-8dot3' -Cat $P -Name 'NTFS: stop creating 8.3 short names' -Tags max
   -Undo  { param($d) $v = if ($d -and $null -ne $d.Prev) { $d.Prev } else { 2 }; fsutil 8dot3name set $v | Out-Null } `
   -Test  { (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -ErrorAction SilentlyContinue).NtfsDisable8dot3NameCreation -eq 1 }
 
-T -Id 'perf-foldertype' -Cat $P -Name 'Explorer: stop auto-detecting folder types' -Tags safe, max -Explorer `
+T -Id 'perf-foldertype' -Cat $P -Name 'Explorer: stop auto-detecting folder types' -Tags max -Explorer `
   -Desc 'Every folder opens as a generic folder instead of Windows guessing "Pictures/Music" per folder, which is a classic cause of slow Explorer. Folder view memory is backed up and reset.' `
   -Apply {
       $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -79,11 +74,11 @@ T -Id 'perf-foldertype' -Cat $P -Name 'Explorer: stop auto-detecting folder type
   } `
   -Test { (Get-ItemProperty "$global:SHELLBAGS\Bags\AllFolders\Shell" -ErrorAction SilentlyContinue).FolderType -eq 'NotSpecified' }
 
-T -Id 'perf-maintenance' -Cat $P -Name 'Automatic Maintenance: never wake the PC' -Tags safe, max `
+T -Id 'perf-maintenance' -Cat $P -Name 'Automatic Maintenance: never wake the PC' -Tags max `
   -Desc 'Scheduled maintenance still runs when the PC is on, but it can no longer wake it from sleep at night.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Task Scheduler\Maintenance' 'WakeUp' 0 )
 
-T -Id 'perf-iconcache' -Cat $P -Name 'Bigger icon cache (4 MB)' -Tags safe, max -Explorer `
+T -Id 'perf-iconcache' -Cat $P -Name 'Bigger icon cache (4 MB)' -Tags max -Explorer `
   -Desc 'Explorer keeps more icons in memory, so big folders redraw faster.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer' 'Max Cached Icons' '4096' 'String' )
 
@@ -91,7 +86,7 @@ T -Id 'perf-hover' -Cat $P -Name 'Instant hover tooltips' -Tags max `
   -Desc 'Mouse hover delay for tooltips and file info drops from 400 ms to 20 ms.' `
   -Reg @( Rg 'HKCU:\Control Panel\Mouse' 'MouseHoverTime' '20' 'String' )
 
-T -Id 'perf-wpbt' -Cat $P -Name 'Block WPBT (firmware-injected programs)' -Tags safe, max -Restart `
+T -Id 'perf-wpbt' -Cat $P -Name 'Block WPBT (firmware-injected programs)' -Tags max -Restart `
   -Desc 'Stops firmware from dropping and running OEM software on every boot (the Windows Platform Binary Table). Also a security hardening.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' 'DisableWpbtExecution' 1 )
 
@@ -99,7 +94,7 @@ T -Id 'perf-forceend' -Cat $P -Name 'Force-close apps on shutdown and sign-out' 
   -Desc 'Apps are closed immediately without the "save changes?" wait. Faster, but unsaved work is lost.' `
   -Reg @( Rg $DESK 'AutoEndTasks' '1' 'String' )
 
-T -Id 'perf-aeroshake' -Cat $P -Name 'Disable Aero Shake' -Tags safe, max `
+T -Id 'perf-aeroshake' -Cat $P -Name 'Disable Aero Shake' -Tags max `
   -Desc 'Shaking a window no longer minimizes all the others (usually triggered by accident).' `
   -Reg @( Rg $EXA 'DisallowShaking' 1 )
 
@@ -109,7 +104,7 @@ T -Id 'net-smbthrottle' -Cat $N -Name 'SMB: remove bandwidth throttling' -Tags m
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters' 'DisableBandwidthThrottling' 1 )
 
 # ======================================================================= PRIVACY
-T -Id 'priv-experiment' -Cat $V -Name 'Opt out of Microsoft experiments' -Tags safe, privacy, max `
+T -Id 'priv-experiment' -Cat $V -Name 'Opt out of Microsoft experiments' -Tags privacy, max `
   -Desc 'Stops Microsoft from using your PC as a test subject for unfinished features.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\PolicyManager\default\System\AllowExperimentation' 'value' 0 )
 
@@ -117,15 +112,15 @@ T -Id 'priv-pca' -Cat $V -Name 'Disable Program Compatibility Assistant' -Tags p
   -Desc 'No more "this program might not have installed correctly" popups and app-usage reporting.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppCompat' 'AITEnable' 0; Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppCompat' 'DisablePCA' 1 )
 
-T -Id 'priv-perftrack' -Cat $V -Name 'Disable responsiveness tracking' -Tags safe, privacy, max `
+T -Id 'priv-perftrack' -Cat $V -Name 'Disable responsiveness tracking' -Tags privacy, max `
   -Desc 'Stops Windows from collecting and reporting app responsiveness events (Windows Diagnostic Infrastructure).' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WDI\{9c5a40da-b965-4fc3-8781-88dd50a6299d}' 'ScenarioExecutionEnabled' 0 )
 
-T -Id 'priv-mru' -Cat $V -Name 'Disable most-used-apps tracking' -Tags safe, privacy, max `
+T -Id 'priv-mru' -Cat $V -Name 'Disable most-used-apps tracking' -Tags privacy, max `
   -Desc 'Start no longer builds a "most used" list from what you launch.' `
   -Reg @( Rg "$CV\Policies\Explorer" 'NoInstrumentation' 1 )
 
-T -Id 'priv-rsop' -Cat $V -Name 'Disable RSoP policy logging' -Tags safe, privacy, max `
+T -Id 'priv-rsop' -Cat $V -Name 'Disable RSoP policy logging' -Tags privacy, max `
   -Desc 'Stops logging of resultant-set-of-policy data after every Group Policy refresh.' `
   -Reg @( Rg "$POL\System" 'RSoPLogging' 0 )
 
@@ -133,7 +128,7 @@ T -Id 'priv-devicehealth' -Cat $V -Name 'Disable device health attestation repor
   -Desc 'Stops device-health reporting to Microsoft at startup.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Policies\Microsoft\DeviceHealthAttestationService' 'EnableDeviceHealthAttestationService' 0 )
 
-T -Id 'priv-ceip' -Cat $V -Name 'Disable Customer Experience Improvement Program' -Tags safe, privacy, max `
+T -Id 'priv-ceip' -Cat $V -Name 'Disable Customer Experience Improvement Program' -Tags privacy, max `
   -Desc 'Turns off CEIP / SQM data collection for Windows and App-V.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Policies\Microsoft\SQMClient\Windows' 'CEIPEnable' 0; Rg 'HKLM:\SOFTWARE\Policies\Microsoft\AppV\CEIP' 'CEIPEnable' 0 )
 
@@ -145,7 +140,7 @@ T -Id 'priv-dotnet' -Cat $V -Name 'Opt out of .NET CLI telemetry' -Tags privacy,
   -Desc 'Sets DOTNET_CLI_TELEMETRY_OPTOUT=1 system-wide for developers using dotnet.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' 'DOTNET_CLI_TELEMETRY_OPTOUT' '1' 'String' )
 
-T -Id 'priv-oobe' -Cat $V -Name 'Skip post-update privacy re-prompt' -Tags safe, privacy, max `
+T -Id 'priv-oobe' -Cat $V -Name 'Skip post-update privacy re-prompt' -Tags privacy, max `
   -Desc 'Feature updates will not show the privacy-settings screen that can reset your choices.' `
   -Reg @( Rg "$POL\OOBE" 'DisablePrivacyExperience' 1 )
 
@@ -158,16 +153,16 @@ T -Id 'priv-shared' -Cat $V -Name 'Disable Shared Experiences and Cross Device R
       Rg "$CV\CrossDeviceResume\Configuration" 'IsResumeAllowed' 0
   )
 
-T -Id 'priv-msrt' -Cat $V -Name 'Stop Malicious Software Removal Tool reporting' -Tags safe, privacy, max `
+T -Id 'priv-msrt' -Cat $V -Name 'Stop Malicious Software Removal Tool reporting' -Tags privacy, max `
   -Desc 'MSRT still removes malware but stops sending infection reports.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Policies\Microsoft\MRT' 'DontReportInfectionInformation' 1 )
 
 # ======================================================================= WINDOWS UPDATE BEHAVIOR (updates stay on)
-T -Id 'wu-noreboot' -Cat $D -Name 'Windows Update: no forced restarts while signed in' -Tags safe, max `
+T -Id 'wu-noreboot' -Cat $D -Name 'Windows Update: no forced restarts while signed in' -Tags max `
   -Desc 'Sets the NoAutoRebootWithLoggedOnUsers policy so scheduled update restarts wait until you sign out. Updates still install. It is not a guarantee: Windows can still show restart reminders and restart after its deadlines.' `
   -Reg @( Rg "$WU\AU" 'NoAutoRebootWithLoggedOnUsers' 1 )
 
-T -Id 'wu-insider' -Cat $D -Name 'Block Windows Insider enrollment' -Tags safe, max `
+T -Id 'wu-insider' -Cat $D -Name 'Block Windows Insider enrollment' -Tags max `
   -Desc 'Prevents accidental enrollment in preview builds that can undo tweaks and cause instability.' `
   -Reg @( Rg $WU 'ManagePreviewBuilds' 1; Rg $WU 'ManagePreviewBuildsPolicyValue' 0; Rg "$POL\PreviewBuilds" 'AllowBuildPreview' 0 )
 
@@ -214,7 +209,7 @@ $AI = 'AI & Copilot'
 $WAI = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'
 $EDGEP = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
 
-T -Id 'ai-recall' -Cat $AI -Name 'Turn off Recall and AI data analysis' -Tags safe, privacy, max, deai -Restart `
+T -Id 'ai-recall' -Cat $AI -Name 'Turn off Recall and AI data analysis' -Tags privacy, max, deai -Restart `
   -Desc 'Policy blocks Recall snapshots and AI data analysis for you and the machine; the Recall Windows feature is switched off where it exists (Copilot+ PCs).' `
   -Reg @(
       Rg $WAI 'DisableAIDataAnalysis' 1
@@ -228,7 +223,7 @@ T -Id 'ai-recall' -Cat $AI -Name 'Turn off Recall and AI data analysis' -Tags sa
   } `
   -Undo { param($d) if ($d -and $d.WasEnabled) { Enable-WindowsOptionalFeature -Online -FeatureName Recall -NoRestart -ErrorAction SilentlyContinue | Out-Null } }
 
-T -Id 'ai-clicktodo' -Cat $AI -Name 'Turn off Click to Do and AI search suggestions' -Tags safe, privacy, max, deai `
+T -Id 'ai-clicktodo' -Cat $AI -Name 'Turn off Click to Do and AI search suggestions' -Tags privacy, max, deai `
   -Desc 'Disables the Click to Do overlay and dynamic search-box highlights in the taskbar.' `
   -Reg @(
       Rg $WAI 'DisableClickToDo' 1
@@ -244,7 +239,7 @@ T -Id 'ai-copilot-button' -Cat $AI -Name 'Hide Copilot button and block Copilot 
       Rg "$POL\WindowsCopilot" 'TurnOffWindowsCopilot' 1
   )
 
-T -Id 'ai-apps' -Cat $AI -Name 'Notepad, Paint and Photos: turn off AI features' -Tags safe, privacy, max, deai `
+T -Id 'ai-apps' -Cat $AI -Name 'Notepad, Paint and Photos: turn off AI features' -Tags privacy, max, deai `
   -Desc 'Group-policy switches that hide Notepad AI (Rewrite/Summarize), Paint Cocreator, Generative Fill and Image Creator. Which switches apply depends on the app version.' `
   -Reg @(
       Rg 'HKLM:\SOFTWARE\Policies\WindowsNotepad' 'DisableAIFeatures' 1
@@ -255,7 +250,7 @@ T -Id 'ai-apps' -Cat $AI -Name 'Notepad, Paint and Photos: turn off AI features'
       Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Paint' 'DisableRemoveBackground' 1
   )
 
-T -Id 'ai-edge' -Cat $AI -Name 'Edge: turn off Copilot sidebar and page context' -Tags safe, privacy, max, deai `
+T -Id 'ai-edge' -Cat $AI -Name 'Edge: turn off Copilot sidebar and page context' -Tags privacy, max, deai `
   -Desc 'Edge policies: hides the sidebar/Copilot hub, stops Copilot reading page content, hides the Microsoft 365 Copilot icon.' `
   -Reg @(
       Rg $EDGEP 'HubsSidebarEnabled' 0
@@ -269,7 +264,7 @@ T -Id 'ai-edge' -Cat $AI -Name 'Edge: turn off Copilot sidebar and page context'
       Rg $EDGEP 'NewTabPageBingChatEnabled' 0
   )
 
-T -Id 'ai-cloudsearch' -Cat $AI -Name 'Search: no cloud account content or search highlights' -Tags safe, privacy, max, deai `
+T -Id 'ai-cloudsearch' -Cat $AI -Name 'Search: no cloud account content or search highlights' -Tags privacy, max, deai `
   -Desc 'Stops Windows Search from querying your Microsoft/work account cloud content and removes the daily search highlights (doodles, trending topics) from the search box.' `
   -Reg @(
       Rg "$CV\SearchSettings" 'IsMSACloudSearchEnabled' 0
@@ -278,7 +273,7 @@ T -Id 'ai-cloudsearch' -Cat $AI -Name 'Search: no cloud account content or searc
       Rg "$POL\Windows Search" 'EnableDynamicContentInWSB' 0
   )
 
-T -Id 'ai-tailored' -Cat $AI -Name 'No tailored experiences from your diagnostic data' -Tags safe, privacy, max, deai `
+T -Id 'ai-tailored' -Cat $AI -Name 'No tailored experiences from your diagnostic data' -Tags privacy, max, deai `
   -Desc 'Windows stops using your diagnostic data to personalize tips, ads and recommendations.' `
   -Reg @(
       Rg "$CV\Privacy" 'TailoredExperiencesWithDiagnosticDataEnabled' 0
@@ -308,14 +303,9 @@ T -Id 'ai-remove-apps' -Cat $AI -Name 'Uninstall the Copilot and AI app packages
       , @($r.Removed)
   } `
   -Undo { Write-Log '  Copilot apps cannot be restored automatically: reinstall from the Microsoft Store if you want them back.' 'WARN' } `
-  -Test {
-      foreach ($pat in ($global:OptiAiApps + 'Microsoft.MicrosoftOfficeHub')) {
-          foreach ($p in @(Get-AppxPackage -AllUsers -Name $pat -ErrorAction SilentlyContinue)) { if (-not $p.NonRemovable -and -not $p.IsFramework) { return $false } }
-      }
-      $true
-  }
+  -Test { Test-AppxGone ($global:OptiAiApps + 'Microsoft.MicrosoftOfficeHub') }
 
-T -Id 'ai-settingspage' -Cat $AI -Name 'Hide the Settings "AI components" page' -Tags safe, privacy, max, deai `
+T -Id 'ai-settingspage' -Cat $AI -Name 'Hide the Settings "AI components" page' -Tags privacy, max, deai `
   -Desc 'Hides Settings > System > AI components (Windows 11 24H2+), as WinUtil does. Other pages you hid with this policy are kept.' `
   -Apply {
       $k = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'
@@ -340,7 +330,7 @@ T -Id 'ai-settingspage' -Cat $AI -Name 'Hide the Settings "AI components" page' 
   }
 
 # ======================================================================= MORE DEBLOAT
-T -Id 'debloat-spotlight' -Cat $D -Name 'Turn off Windows Spotlight and lock-screen promos' -Tags safe, privacy, max, deai `
+T -Id 'debloat-spotlight' -Cat $D -Name 'Turn off Windows Spotlight and lock-screen promos' -Tags privacy, max, deai `
   -Desc 'No Spotlight desktop icon or lock-screen "fun facts", tips and promoted content.' `
   -Reg @(
       Rg "$POL\CloudContent" 'DisableWindowsSpotlightFeatures' 1
@@ -349,11 +339,11 @@ T -Id 'debloat-spotlight' -Cat $D -Name 'Turn off Windows Spotlight and lock-scr
       Rg 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableWindowsSpotlightFeatures' 1
   )
 
-T -Id 'debloat-teamsauto' -Cat $D -Name 'Stop Teams (Chat) from auto-installing' -Tags safe, max, deai `
+T -Id 'debloat-teamsauto' -Cat $D -Name 'Stop Teams (Chat) from auto-installing' -Tags max, deai `
   -Desc 'Prevents Windows from silently installing the consumer Teams app on new sessions and updates.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Communications' 'ConfigureChatAutoInstall' 0 )
 
-T -Id 'debloat-oobeapps' -Cat $D -Name 'Block forced Outlook and Dev Home installs' -Tags safe, max, deai `
+T -Id 'debloat-oobeapps' -Cat $D -Name 'Block forced Outlook and Dev Home installs' -Tags max, deai `
   -Desc 'Deletes the Windows Update orchestrator entries that reinstall the new Outlook and Dev Home after feature updates.' `
   -Apply {
       $base = 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe'
@@ -400,7 +390,7 @@ T -Id 'sys-utc' -Cat $P -Name 'Hardware clock in UTC (dual boot with Linux)' -Ta
   -Desc 'Windows keeps the hardware clock in UTC like Linux does, so the time stays right when you dual boot (WinUtil).' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\TimeZoneInformation' 'RealTimeIsUniversal' 1 'QWord' )
 
-T -Id 'ui-bsod' -Cat $I -Name 'Detailed blue-screen information' -Tags safe `
+T -Id 'ui-bsod' -Cat $I -Name 'Detailed blue-screen information' -Tags max `
   -Desc 'Shows the stop code and parameters on a blue screen instead of the smiley face (WinUtil).' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\CrashControl' 'DisplayParameters' 1; Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\CrashControl' 'DisableEmoticon' 1 )
 
@@ -469,7 +459,7 @@ $FFX = 'HKLM:\SOFTWARE\Policies\Mozilla\Firefox'
 $VIV = 'HKLM:\SOFTWARE\Policies\Vivaldi'
 $NOTE = ' Applied as browser policy, so the browser shows "managed by your organization". Undo removes it.'
 
-T -Id 'br-chrome-debloat' -Cat $B -Name 'Chrome: no telemetry, background mode or promos' -Tags safe, privacy, max, deai `
+T -Id 'br-chrome-debloat' -Cat $B -Name 'Chrome: no telemetry, background mode or promos' -Tags privacy, max, deai `
   -Desc ('Turns off usage metrics, background running, startup boost, default-browser nags, shopping and promo tabs, feedback surveys and Privacy Sandbox ad topics.' + $NOTE) `
   -Reg @(
       Rg $CHR 'MetricsReportingEnabled' 0
@@ -489,7 +479,7 @@ T -Id 'br-chrome-debloat' -Cat $B -Name 'Chrome: no telemetry, background mode o
       Rg $CHR 'PrivacySandboxSiteEnabledAdsEnabled' 0
   )
 
-T -Id 'br-chrome-ai' -Cat $B -Name 'Chrome: turn off Gemini and generative AI features' -Tags safe, privacy, max, deai `
+T -Id 'br-chrome-ai' -Cat $B -Name 'Chrome: turn off Gemini and generative AI features' -Tags privacy, max, deai `
   -Desc ('Disables Gemini integration, Help me write, tab organizer, AI themes, tab compare and the AI-mode omnibox entry.' + $NOTE) `
   -Reg @(
       Rg $CHR 'GenAiDefaultSettings' 2
@@ -512,7 +502,7 @@ T -Id 'br-chrome-ai' -Cat $B -Name 'Chrome: turn off Gemini and generative AI fe
       Rg $CHR 'VoiceTypingSettings' 2
   )
 
-T -Id 'br-brave-debloat' -Cat $B -Name 'Brave: remove Rewards, Wallet, VPN, News, Talk and AI Chat' -Tags safe, privacy, max, deai `
+T -Id 'br-brave-debloat' -Cat $B -Name 'Brave: remove Rewards, Wallet, VPN, News, Talk and AI Chat' -Tags privacy, max, deai `
   -Desc ('Hides the crypto, ads, VPN, news, Talk and Leo features and turns off metrics, stats ping, web discovery and background mode.' + $NOTE) `
   -Reg @(
       Rg $BRV 'BraveRewardsDisabled' 1
@@ -530,7 +520,7 @@ T -Id 'br-brave-debloat' -Cat $B -Name 'Brave: remove Rewards, Wallet, VPN, News
       Rg $BRV 'UrlKeyedAnonymizedDataCollectionEnabled' 0
   )
 
-T -Id 'br-edge-debloat' -Cat $B -Name 'Edge: remove new-tab feed, workspaces, Bing ads and promos' -Tags safe, privacy, max, deai `
+T -Id 'br-edge-debloat' -Cat $B -Name 'Edge: remove new-tab feed, workspaces, Bing ads and promos' -Tags privacy, max, deai `
   -Desc ('Extra Edge policies on top of "Edge: disable nags": new-tab news feed, promotional tabs, workspaces, Bing ads, default-browser nag, Do Not Track, metrics, and the Microsoft Editor sidebar extension WinUtil blocks.' + $NOTE) `
   -Reg @(
       Rg $EDG 'PromotionalTabsEnabled' 0
@@ -559,7 +549,7 @@ T -Id 'br-edge-debloat' -Cat $B -Name 'Edge: remove new-tab feed, workspaces, Bi
       Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Edge\ExtensionInstallBlocklist' '1' 'ofefcgjbeghpigppfmkologfjadafddi' 'String'
   )
 
-T -Id 'br-firefox-debloat' -Cat $B -Name 'Firefox: no telemetry, studies, Pocket, sponsored content or nags' -Tags safe, privacy, max, deai `
+T -Id 'br-firefox-debloat' -Cat $B -Name 'Firefox: no telemetry, studies, Pocket, sponsored content or nags' -Tags privacy, max, deai `
   -Desc ('Disables telemetry, Shield studies, Pocket, sponsored top sites and suggestions, the default-browser agent, feedback commands, whats-new pages and extension/feature recommendations.' + $NOTE) `
   -Reg @(
       Rg $FFX 'DisableTelemetry' 1
@@ -582,7 +572,7 @@ T -Id 'br-firefox-debloat' -Cat $B -Name 'Firefox: no telemetry, studies, Pocket
       Rg "$FFX\UserMessaging" 'SkipOnboarding' 1
   )
 
-T -Id 'br-firefox-ai' -Cat $B -Name 'Firefox: turn off AI chatbot, link previews and AI tab groups' -Tags safe, privacy, max, deai `
+T -Id 'br-firefox-ai' -Cat $B -Name 'Firefox: turn off AI chatbot, link previews and AI tab groups' -Tags privacy, max, deai `
   -Desc ('Sets the GenerativeAI policy so the sidebar chatbot, AI link previews and AI tab-group suggestions are off (Firefox 139 and newer).' + $NOTE) `
   -Reg @(
       Rg "$FFX\GenerativeAI" 'Enabled' 0
@@ -700,11 +690,11 @@ T -Id 'ui-settingshome' -Cat $I -Name 'Hide the Settings home page' `
   -Desc 'Settings opens on System instead of the Home page with cloud and account promos.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'SettingsPageVisibility' 'hide:home' 'String' )
 
-T -Id 'ui-sharetray' -Cat $I -Name 'Disable the Share drag tray' -Tags safe, max `
+T -Id 'ui-sharetray' -Cat $I -Name 'Disable the Share drag tray' -Tags max `
   -Desc 'Stops the "drag files here to share" tray that appears when dragging files to the top of the screen.' `
   -Reg @( Rg "$CV\CDP" 'DragTrayEnabled' 0 )
 
-T -Id 'ui-phonelink-start' -Cat $I -Name 'Hide Phone Link in the Start menu' -Tags safe, max `
+T -Id 'ui-phonelink-start' -Cat $I -Name 'Hide Phone Link in the Start menu' -Tags max `
   -Desc 'Removes the Phone Link companion panel from Start.' `
   -Reg @( Rg "$CV\Start\Companions\Microsoft.YourPhone_8wekyb3d8bbwe" 'IsEnabled' 0 )
 
@@ -715,11 +705,11 @@ T -Id 'ui-legacyboot' -Cat $I -Name 'Classic boot menu (F8 advanced options)' -R
   -Test  { (bcdedit /enum '{current}' | Out-String) -match 'bootmenupolicy\s+Legacy' }
 
 # ---- privacy / debloat
-T -Id 'priv-searchhistory' -Cat $V -Name 'Disable device search history' -Tags safe, privacy, max `
+T -Id 'priv-searchhistory' -Cat $V -Name 'Disable device search history' -Tags privacy, max `
   -Desc 'Windows stops remembering what you search for on this device.' `
   -Reg @( Rg "$CV\SearchSettings" 'IsDeviceSearchHistoryEnabled' 0 )
 
-T -Id 'priv-speech' -Cat $V -Name 'Disable online speech recognition' -Tags safe, privacy, max `
+T -Id 'priv-speech' -Cat $V -Name 'Disable online speech recognition' -Tags privacy, max `
   -Desc 'Voice data is no longer sent to Microsoft for cloud speech recognition.' `
   -Reg @( Rg 'HKCU:\Software\Microsoft\Speech_OneCore\Settings\OnlineSpeechPrivacy' 'HasAccepted' 0 )
 
@@ -727,15 +717,15 @@ T -Id 'priv-findmydevice' -Cat $V -Name 'Disable Find My Device' -Tags privacy -
   -Desc 'Stops location reporting for Find My Device. You lose the ability to locate this PC from your Microsoft account.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Policies\Microsoft\FindMyDevice' 'AllowFindMyDevice' 0 )
 
-T -Id 'priv-anon' -Cat $V -Name 'Block anonymous enumeration of accounts and shares' -Tags safe, max `
+T -Id 'priv-anon' -Cat $V -Name 'Block anonymous enumeration of accounts and shares' -Tags max `
   -Desc 'Security hardening: anonymous users can no longer list accounts or share names.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' 'RestrictAnonymous' 1; Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' 'RestrictAnonymousSAM' 1 )
 
-T -Id 'debloat-devicemeta' -Cat $D -Name 'Do not auto-download device apps from manufacturers' -Tags safe, max, deai `
+T -Id 'debloat-devicemeta' -Cat $D -Name 'Do not auto-download device apps from manufacturers' -Tags max, deai `
   -Desc 'Windows stops fetching vendor companion apps and icons when you plug in hardware.' `
   -Reg @( Rg "$POL\Device Metadata" 'PreventDeviceMetadataFromNetwork' 1 )
 
-T -Id 'debloat-settings365' -Cat $D -Name 'Remove Microsoft 365 and account promos from Settings' -Tags safe, max, deai `
+T -Id 'debloat-settings365' -Cat $D -Name 'Remove Microsoft 365 and account promos from Settings' -Tags max, deai `
   -Desc 'Hides the consumer account-state banners and offers in the Settings app.' `
   -Reg @( Rg "$POL\CloudContent" 'DisableConsumerAccountStateContent' 1 )
 
@@ -752,11 +742,11 @@ T -Id 'debloat-suggestions2' -Cat $D -Name 'Turn off remaining Windows suggestio
       Rg "$CV\Mobility" 'OptedIn' 0
   )
 
-T -Id 'debloat-aiservice' -Cat $D -Name 'AI Fabric service: start on demand only' -Tags safe, max, deai `
+T -Id 'debloat-aiservice' -Cat $D -Name 'AI Fabric service: start on demand only' -Tags max, deai `
   -Desc 'Sets the Windows AI Fabric service (WSAIFabricSvc) to Manual so it does not start with Windows.' `
   -Svc @( Sx 'WSAIFabricSvc' 3 )
 
-T -Id 'wu-asap' -Cat $D -Name 'Windows Update: do not get new features as soon as available' -Tags safe, max `
+T -Id 'wu-asap' -Cat $D -Name 'Windows Update: do not get new features as soon as available' -Tags max `
   -Desc 'Turns off "Get the latest updates as soon as they are available" so feature rollouts reach you later, after they have settled.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' 'IsContinuousInnovationOptedIn' 0 )
 
@@ -792,11 +782,11 @@ T -Id 'ui-fullctx' -Cat $I -Name 'Full right-click menu on more than 15 selected
   -Desc 'Windows stops hiding menu entries when you right-click a large selection.' `
   -Reg @( Rg "$CV\Explorer" 'MultipleInvokePromptMinimum' 100 )
 
-T -Id 'ui-officefiles' -Cat $I -Name 'No cloud/Office files in Quick access' -Tags safe, max `
+T -Id 'ui-officefiles' -Cat $I -Name 'No cloud/Office files in Quick access' -Tags max `
   -Desc 'Quick access stops listing recent Office/cloud documents.' `
   -Reg @( Rg "$CV\Explorer" 'ShowCloudFilesInQuickAccess' 0 )
 
-T -Id 'ui-autoplay' -Cat $I -Name 'Disable AutoPlay for drives and devices' -Tags safe, max `
+T -Id 'ui-autoplay' -Cat $I -Name 'Disable AutoPlay for drives and devices' -Tags max `
   -Desc 'Inserting a USB stick or card no longer pops up AutoPlay. Also a malware-spreading vector closed.' `
   -Reg @( Rg "$CV\Explorer\AutoplayHandlers" 'DisableAutoplay' 1 )
 
@@ -814,15 +804,15 @@ T -Id 'ui-printscreen' -Cat $I -Name 'Print Screen does not open Snipping Tool' 
   -Desc 'Frees the Print Screen key for other screenshot tools (it copies the screen as before).' `
   -Reg @( Rg 'HKCU:\Control Panel\Keyboard' 'PrintScreenKeyForSnippingEnabled' 0 )
 
-T -Id 'perf-shortcuts' -Cat $P -Name 'Do not search for missing shortcut targets' -Tags safe, max `
+T -Id 'perf-shortcuts' -Cat $P -Name 'Do not search for missing shortcut targets' -Tags max `
   -Desc 'Windows stops hunting the whole disk when a shortcut is broken, which can freeze Explorer for seconds.' `
   -Reg @( Rg "$CV\Policies\Explorer" 'NoResolveSearch' 1; Rg "$CV\Policies\Explorer" 'NoResolveTrack' 1 )
 
-T -Id 'perf-openwith' -Cat $P -Name 'Do not look up apps online for unknown file types' -Tags safe, max `
+T -Id 'perf-openwith' -Cat $P -Name 'Do not look up apps online for unknown file types' -Tags max `
   -Desc 'Opening an unknown file no longer queries Microsoft for "Look for an app in the Store".' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'NoInternetOpenWith' 1 )
 
-T -Id 'perf-nicpower' -Cat $P -Name 'Network adapters: never power down to save energy' -Tags gaming, max -DesktopOnly `
+T -Id 'perf-nicpower' -Cat $P -Name 'Network adapters: never power down to save energy' -Tags max -DesktopOnly `
   -Desc 'Disables "Allow the computer to turn off this device to save power" on physical network adapters: fewer dropouts and wake-up lag. Previous settings are saved.' `
   -Apply {
       $prev = @()
@@ -845,7 +835,7 @@ T -Id 'perf-nicpower' -Cat $P -Name 'Network adapters: never power down to save 
       $any
   }
 
-T -Id 'sec-nullsess' -Cat $N -Name 'Restrict anonymous (null session) access to shares' -Tags safe, max `
+T -Id 'sec-nullsess' -Cat $N -Name 'Restrict anonymous (null session) access to shares' -Tags max `
   -Desc 'Security hardening: anonymous connections can no longer reach named pipes and shares.' `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters' 'RestrictNullSessAccess' 1 )
 
@@ -856,11 +846,11 @@ T -Id 'priv-settingtips' -Cat $V -Name 'Disable online tips in Settings' -Tags s
       Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'AllowOnlineTips' 0
   )
 
-T -Id 'priv-lockcamera' -Cat $V -Name 'Disable camera on the lock screen' -Tags safe, privacy, max `
+T -Id 'priv-lockcamera' -Cat $V -Name 'Disable camera on the lock screen' -Tags privacy, max `
   -Desc 'Swiping on the lock screen can no longer open the camera.' `
   -Reg @( Rg "$POL\Personalization" 'NoLockScreenCamera' 1 )
 
-T -Id 'priv-speechmodel' -Cat $V -Name 'Stop automatic speech-model downloads' -Tags safe, privacy, max `
+T -Id 'priv-speechmodel' -Cat $V -Name 'Stop automatic speech-model downloads' -Tags privacy, max `
   -Desc 'Windows no longer downloads speech data updates in the background.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Policies\Microsoft\Speech' 'AllowSpeechModelUpdate' 0 )
 
@@ -868,16 +858,16 @@ T -Id 'priv-settingsync' -Cat $V -Name 'Disable settings sync to your Microsoft 
   -Desc 'Themes, passwords-metadata and preferences are no longer synced across your devices.' `
   -Reg @( Rg "$POL\SettingSync" 'DisableSettingSync' 2; Rg "$POL\SettingSync" 'DisableSettingSyncUserOverride' 1 )
 
-T -Id 'priv-msgsync' -Cat $V -Name 'Disable message cloud sync' -Tags safe, privacy, max `
+T -Id 'priv-msgsync' -Cat $V -Name 'Disable message cloud sync' -Tags privacy, max `
   -Desc 'Blocks SMS/message sync to the cloud.' `
   -Reg @( Rg "$POL\Messaging" 'AllowMessageSync' 0 )
 
-T -Id 'priv-nvidia' -Cat $V -Name 'NVIDIA: opt out of telemetry' -Tags safe, privacy, max `
+T -Id 'priv-nvidia' -Cat $V -Name 'NVIDIA: opt out of telemetry' -Tags privacy, max `
   -Desc 'Turns off NVIDIA Control Panel usage telemetry and the NVIDIA telemetry container service (if installed).' `
   -Reg @( Rg 'HKCU:\Software\NVIDIA Corporation\NVControlPanel2\Client' 'OptInOrOutPreference' 0 ) `
   -Svc @( Sx 'NvTelemetryContainer' 4 )
 
-T -Id 'priv-office' -Cat $V -Name 'Microsoft Office: opt out of telemetry and feedback' -Tags safe, privacy, max `
+T -Id 'priv-office' -Cat $V -Name 'Microsoft Office: opt out of telemetry and feedback' -Tags privacy, max `
   -Desc 'User policies that disable Office customer-data upload, telemetry, feedback, screenshots and the Office logging service.' `
   -Reg @(
       Rg 'HKCU:\Software\Policies\Microsoft\office\16.0\common' 'sendcustomerdata' 0
@@ -894,7 +884,7 @@ T -Id 'debloat-apparchive' -Cat $D -Name 'Do not auto-archive Store apps' -Tags 
   -Desc 'Windows stops silently "archiving" (unloading) apps you have not used for a while.' `
   -Reg @( Rg "$POL\Appx" 'AllowAutomaticAppArchiving' 0 )
 
-T -Id 'wu-nag' -Cat $D -Name 'Windows Update: remove "update and shut down" nag' -Tags safe, max `
+T -Id 'wu-nag' -Cat $D -Name 'Windows Update: remove "update and shut down" nag' -Tags max `
   -Desc 'The power menu defaults to plain Shut down and the "Get the latest updates" link is hidden.' `
   -Reg @( Rg "$WU\AU" 'NoAUAsDefaultShutdownOption' 1; Rg 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' 'HideMCTLink' 1 )
 
@@ -995,7 +985,7 @@ T -Id 'audio-loudnesseq' -Cat $P -Name 'Unhide "Loudness Equalization" on audio 
 # ======================================================================= 2026 MODULES (WinUtil + Win11Debloat, both MIT)
 # Registry values and behavior follow those projects. Original values are snapshotted, so undo restores this PC.
 
-T -Id 'game-barpop' -Cat $G -Name 'Stop Game Bar popups when a game or controller opens' -Tags gaming, max `
+T -Id 'game-barpop' -Cat $G -Name 'Stop Game Bar popups when a game or controller opens' -Tags max `
   -Desc 'Adapted from Win11Debloat: points the ms-gamebar and ms-gamebarservices links at systray so Windows stops opening Game Bar when a game launches or a controller connects. Your previous registration is exported first.' `
   -Apply {
       $done = @()
@@ -1033,19 +1023,19 @@ T -Id 'game-barpop' -Cat $G -Name 'Stop Game Bar popups when a game or controlle
       (Test-Path -LiteralPath $cmd) -and ((Get-Item -LiteralPath $cmd).GetValue('') -match 'systray\.exe')
   }
 
-T -Id 'ui-snapassist' -Cat $I -Name 'No app suggestions when snapping windows' -Tags gaming, max -Explorer `
+T -Id 'ui-snapassist' -Cat $I -Name 'No app suggestions when snapping windows' -Tags max -Explorer `
   -Desc 'Adapted from Win11Debloat: turns off Snap Assist, the row of other windows offered after you snap one to a side or corner.' `
   -Reg @( Rg $EXA 'SnapAssist' 0 )
 
-T -Id 'ui-snaplayouts' -Cat $I -Name 'Hide snap layout flyouts' -Tags gaming -Explorer `
+T -Id 'ui-snaplayouts' -Cat $I -Name 'Hide snap layout flyouts' -Tags max -Explorer `
   -Desc 'Adapted from Win11Debloat: hides the snap layout popup on the maximize button and when a window is dragged to the top of the screen. Snapping itself stays on.' `
   -Reg @( Rg $EXA 'EnableSnapBar' 0; Rg $EXA 'EnableSnapAssistFlyout' 0 )
 
-T -Id 'ui-taskbar-labels' -Cat $I -Name 'Taskbar: never combine buttons, show labels' -Tags max -Explorer `
+T -Id 'ui-taskbar-labels' -Conflict 'taskbar grouping' -Cat $I -Name 'Taskbar: never combine buttons, show labels' -Tags max -Explorer `
   -Desc 'Adapted from Win11Debloat: the main taskbar keeps a separate button and a label for every window.' `
   -Reg @( Rg $EXA 'TaskbarGlomLevel' 2 )
 
-T -Id 'ui-taskbar-whenfull' -Cat $I -Name 'Taskbar: combine buttons only when full' -Explorer `
+T -Id 'ui-taskbar-whenfull' -Conflict 'taskbar grouping' -Cat $I -Name 'Taskbar: combine buttons only when full' -Explorer `
   -Desc 'Adapted from Win11Debloat: the main taskbar shows labels until it runs out of room, then combines them.' `
   -Reg @( Rg $EXA 'TaskbarGlomLevel' 1 )
 
@@ -1061,23 +1051,23 @@ T -Id 'ui-mmtaskbar-active' -Cat $I -Name 'Extra monitors: show a window only wh
   -Desc 'Adapted from Win11Debloat: each window is listed only on the taskbar of the monitor it sits on.' `
   -Reg @( Rg $EXA 'MMTaskbarMode' 2 )
 
-T -Id 'ui-explorer-dl' -Cat $I -Name 'Open Explorer to Downloads' -Explorer `
+T -Id 'ui-explorer-dl' -Conflict 'Explorer opens to' -Cat $I -Name 'Open Explorer to Downloads' -Explorer `
   -Desc 'Adapted from Win11Debloat: File Explorer starts in Downloads instead of Home or This PC.' `
   -Reg @( Rg $EXA 'LaunchTo' 3 )
 
-T -Id 'ui-letters-first' -Cat $I -Name 'Show drive letters before the drive name' -Explorer `
+T -Id 'ui-letters-first' -Conflict 'drive letters' -Cat $I -Name 'Show drive letters before the drive name' -Explorer `
   -Desc 'Adapted from Win11Debloat: Explorer lists "C: Local Disk" instead of "Local Disk (C:)".' `
   -Reg @( Rg "$CV\Explorer" 'ShowDriveLettersFirst' 4 )
 
-T -Id 'ui-letters-net' -Cat $I -Name 'Show network drive letters before the name' -Explorer `
+T -Id 'ui-letters-net' -Conflict 'drive letters' -Cat $I -Name 'Show network drive letters before the name' -Explorer `
   -Desc 'Adapted from Win11Debloat: only network drives put the letter first. Local drives stay "name (letter)". Replaces the all-drives letter layout if that was applied.' `
   -Reg @( Rg "$CV\Explorer" 'ShowDriveLettersFirst' 1 )
 
-T -Id 'ui-letters-hide' -Cat $I -Name 'Hide drive letters' -Tags optin -Explorer `
+T -Id 'ui-letters-hide' -Conflict 'drive letters' -Cat $I -Name 'Hide drive letters' -Tags optin -Explorer `
   -Desc 'Adapted from Win11Debloat: Explorer shows drive names without letters. Undo restores the previous layout.' `
   -Reg @( Rg "$CV\Explorer" 'ShowDriveLettersFirst' 2 )
 
-T -Id 'ui-spotlight-learn' -Cat $I -Name 'Hide "Learn about this picture" on the desktop' -Tags safe, max `
+T -Id 'ui-spotlight-learn' -Cat $I -Name 'Hide "Learn about this picture" on the desktop' -Tags max `
   -Desc 'Adapted from Win11Debloat: hides the Spotlight desktop shortcut. Rotating Spotlight wallpaper can stay on. This does not turn Spotlight off.' `
   -Reg @( Rg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel' '{2cc5ca98-6485-489a-920e-b3e88a6ccce3}' 1 )
 
@@ -1112,23 +1102,23 @@ T -Id 'ui-thispc-folders' -Cat $I -Name 'This PC: show Desktop, Documents, Downl
       ($null -ne $item) -and ($item.HiddenByDefault -eq 0) -and ($null -eq $item.HideIfEnabled)
   }
 
-T -Id 'ui-allapps-grid' -Cat $I -Name 'Start All apps: grid' -Explorer `
+T -Id 'ui-allapps-grid' -Conflict 'All apps view' -Cat $I -Name 'Start All apps: grid' -Explorer `
   -Desc 'Adapted from Win11Debloat (Windows 11 25H2, build 26200 and newer): the All apps list uses the alphabetical grid.' `
   -Reg @( Rg "$CV\Start" 'AllAppsViewMode' 1 )
 
-T -Id 'ui-allapps-list' -Cat $I -Name 'Start All apps: list' -Explorer `
+T -Id 'ui-allapps-list' -Conflict 'All apps view' -Cat $I -Name 'Start All apps: list' -Explorer `
   -Desc 'Adapted from Win11Debloat (Windows 11 25H2, build 26200 and newer): the All apps list uses the alphabetical list. Category view is the Windows default; undo restores whatever you had.' `
   -Reg @( Rg "$CV\Start" 'AllAppsViewMode' 2 )
 
-T -Id 'ui-allapps-hide' -Cat $I -Name 'Hide All apps in Start' -Tags optin -Risk Moderate -Explorer `
+T -Id 'ui-allapps-hide' -Conflict 'All apps view' -Cat $I -Name 'Hide All apps in Start' -Tags optin -Risk Moderate -Explorer `
   -Desc 'Adapted from Win11Debloat (build 26200 and newer): removes the All apps section from Start. Installed apps are harder to find. Undo restores the section.' `
   -Reg @( Rg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'NoStartMenuMorePrograms' 1 )
 
-T -Id 'ui-search-icon' -Cat $I -Name 'Taskbar search: icon only' -Explorer `
+T -Id 'ui-search-icon' -Conflict 'search style' -Cat $I -Name 'Taskbar search: icon only' -Explorer `
   -Desc 'Adapted from Win11Debloat: replaces the search box with a search icon. Win+S still opens search.' `
   -Reg @( Rg "$CV\Search" 'SearchboxTaskbarMode' 1 )
 
-T -Id 'ui-search-label' -Cat $I -Name 'Taskbar search: icon and label' -Explorer `
+T -Id 'ui-search-label' -Conflict 'search style' -Cat $I -Name 'Taskbar search: icon and label' -Explorer `
   -Desc 'Adapted from Win11Debloat: shows a search icon with the word Search, narrower than the full box.' `
   -Reg @( Rg "$CV\Search" 'SearchboxTaskbarMode' 3 )
 

@@ -21,8 +21,8 @@ $tweaks = foreach ($t in $global:OptiCatalog) {
         svc  = @($t.Svc  | ForEach-Object { [ordered]@{ name = $_.Name; start = [int]$_.Start } })
         task = @($t.Task)
         restart = $t.Restart; explorer = $t.Explorer; desktop_only = $t.DesktopOnly; ssd_only = $t.SSDOnly
-        vendor = $t.Vendor; svc_tol = $t.SvcTol; min_ram = $t.MinRamGB; need = @($t.Need)
-        script = [ordered]@{ apply = [bool]$t.Apply; undo = [bool]$t.Undo; test = [bool]$t.Test }
+        vendor = $t.Vendor; svc_tol = $t.SvcTol; min_ram = $t.MinRamGB; need = @($t.Need); conflict = [string]$t.Conflict
+        script = [ordered]@{ apply = [bool]$t.Apply; undo = [bool]$t.Undo; test = [bool]$t.Test; snapshot = [bool]$t.Snapshot }
         apply_text = $(if ($t.Apply) { $t.Apply.ToString() } else { '' })
     }
 }

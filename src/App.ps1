@@ -269,7 +269,8 @@ function Set-Score {
 }
 
 function Update-Score {
-    $applicable = @($global:TwRows | Where-Object { ($_.Tag.Tags -contains 'safe' -or $_.Tag.Tags -contains 'smart') -and $_.Tag.Tags -notcontains 'optin' -and (Test-Applicable $_.Tag) })
+    # the same tweaks Smart optimize would tick on this PC
+    $applicable = @($global:TwRows | Where-Object { (Test-AutoPick $_.Tag) -and (Test-Applicable $_.Tag) })
     if (-not $applicable.Count) { return }
     $on = @($applicable | Where-Object { $_.Extra -eq 'Applied' }).Count
     Set-Score ([int][math]::Round(100 * $on / $applicable.Count)) $on $applicable.Count
@@ -346,18 +347,20 @@ function Update-AutoCleanState {
     $global:AutoCleanSync = $true
     try {
         $st = Get-AutoCleanStatus
+        if ($st.Enabled) { Update-AutoCleanScript }
         $UI.ChkAutoClean.IsChecked = [bool]$st.Enabled
         if (-not $st.Enabled) {
             $UI.AutoCleanInfo.Text = if ($st.Last) { 'Off. Last run {0:g}.' -f [datetime]$st.Last.Time } else { 'Off. When on, a background task runs every hour, even with Optimaxer closed.' }
         } else {
             $parts = @()
             if ($st.Last) {
-                $parts += 'Last run {0:t}: RAM +{1:N0} MB, {2:N1} MB of temp files removed.' -f [datetime]$st.Last.Time, ($st.Last.RamFreedKB / 1024), ($st.Last.TempFreedBytes / 1MB)
+                $parts += 'Last run {0:t}: {1:N1} MB of temp files removed.' -f [datetime]$st.Last.Time, ($st.Last.TempFreedBytes / 1MB)
             } else { $parts += 'Waiting for the first run.' }
             if ($st.Next) { $parts += 'Next run {0:t}.' -f $st.Next }
             $UI.AutoCleanInfo.Text = $parts -join ' '
         }
     } catch { $UI.AutoCleanInfo.Text = '' }
+    try { $UI.EvidenceInfo.Text = Get-EvidenceText } catch { $UI.EvidenceInfo.Text = '' }
     $global:AutoCleanSync = $false
 }
 
@@ -386,6 +389,8 @@ $UI.ChkAutoClean.Add_Click({
 # ================================================================ tweaks page
 $global:TwRows = New-Object 'System.Collections.ObjectModel.ObservableCollection[OptiRow]'
 $global:TwViews = New-Object System.Collections.ArrayList
+$global:TwBaseDesc = @{}
+$global:TwConflictSync = $false
 $global:OptiFilters['tw'] = ''
 $UI.TwSearch.Add_TextChanged({
     $global:OptiFilters['tw'] = $UI.TwSearch.Text
@@ -398,15 +403,26 @@ foreach ($t in $global:OptiCatalog) {
     if ($t.Vendor) { $notes += "$($t.Vendor) systems only" }
     if ($t.Restart) { $notes += 'restart needed' }
     if ($t.Tags -contains 'optin') { $notes += 'opt-in, never in presets' }
+    if ($t.Conflict) { $notes += 'one choice per group: ' + $t.Conflict }
     $d = if ($notes) { "$($t.Desc)  [$($notes -join ', ')]" } else { $t.Desc }
+    $global:TwBaseDesc[$t.Id] = $d
     $global:TwRows.Add((New-Row $t.Id $t.Name $d $t.Cat $t.Risk '' $false $t))
 }
 function Update-TwCount {
     $n = @($global:TwRows | Where-Object IsChecked).Count
     $UI.TwCount.Text = if ($n) { "$n selected" } else { '' }
 }
+function Clear-ConflictPeers {
+    # Ticking a tweak in a conflict group (search style, drive letters, ...) unticks the others in that group.
+    param($Row)
+    $g = $Row.Tag.Conflict
+    if (-not $g -or -not $Row.IsChecked -or $global:TwConflictSync) { return }
+    $global:TwConflictSync = $true
+    try { foreach ($r in $global:TwRows) { if ($r -ne $Row -and $r.IsChecked -and $r.Tag.Conflict -eq $g) { $r.IsChecked = $false } } }
+    finally { $global:TwConflictSync = $false }
+}
 foreach ($row in $global:TwRows) {
-    $row.add_PropertyChanged({ param($s, $e) if ($e.PropertyName -eq 'IsChecked') { Update-TwCount } })
+    $row.add_PropertyChanged({ param($s, $e) if ($e.PropertyName -eq 'IsChecked') { Clear-ConflictPeers $s; Update-TwCount } })
 }
 foreach ($cat in @($global:TwRows | Group-Object Group)) {
     $head = New-Object Windows.Controls.TextBlock -Property @{ Text = $cat.Name }
@@ -453,9 +469,18 @@ function Update-TweakStatus {
 
 function Set-Preset {
     param([string]$Tag)
+    Set-SkipNotes @{}
+    $ids = if ($Tag -eq 'none') { @() } else { @(Get-PresetTweakIds $Tag $global:Sys) }
+    $pick = @{}; foreach ($id in $ids) { $pick[$id] = $true }
+    foreach ($row in $global:TwRows) { $row.IsChecked = $pick.ContainsKey($row.Id) }
+}
+
+function Set-SkipNotes {
+    # Shows on each row why Smart optimize left it unticked (risk or the hardware fact), or clears the notes.
+    param($Skipped)
     foreach ($row in $global:TwRows) {
-        $t = $row.Tag
-        $row.IsChecked = ($Tag -ne 'none') -and ($t.Tags -contains $Tag) -and (Test-Applicable $t)
+        $base = $global:TwBaseDesc[$row.Id]
+        $row.Desc = if ($Skipped.ContainsKey($row.Id)) { "$base  [Smart optimize did not tick this: $($Skipped[$row.Id])]" } else { $base }
     }
 }
 
@@ -465,7 +490,9 @@ function Set-SmartPreset {
     $plan = Get-SmartPlan $global:Sys $applied
     $pick = @{}; foreach ($id in $plan.Ids) { $pick[$id] = $true }
     foreach ($row in $global:TwRows) { $row.IsChecked = $pick.ContainsKey($row.Id) }
+    Set-SkipNotes $plan.Skipped
     foreach ($n in $plan.Notes) { Write-Log "  $n" }
+    foreach ($id in ($plan.Skipped.Keys | Sort-Object)) { $t = Get-TweakById $id; Write-Log "  not ticked: $($t.Name) ($($plan.Skipped[$id]))" }
     Write-Log "Auto-detect: $($plan.Ids.Count) tweak(s) selected for this PC ($($global:Sys.Tags -join ', '))." 'OK'
     return $plan.Ids.Count
 }
@@ -481,25 +508,27 @@ function Invoke-TweakJob {
         if ($adv) { $msg += "`n`nAdvanced tweaks selected (read their descriptions):`n - " + ($adv -join "`n - ") }
         if (-not (Confirm-Action $msg)) { return }
     }
-    [void](Start-OptiJob "$Mode $($sel.Count) tweak(s)" -Catalog -ArgList @(@($sel | ForEach-Object Id), $Mode, [bool]$UI.ChkRestore.IsChecked) -Script {
+    Start-TweakBatchJob @($sel | ForEach-Object Id) $Mode ([bool]$UI.ChkRestore.IsChecked)
+}
+
+function Start-TweakBatchJob {
+    # Runs Invoke-TweakBatch in the background. If the restore point fails nothing has been applied; the user is
+    # asked whether to go on without one, and only a Yes starts a second run with the restore point turned off.
+    param([string[]]$Ids, [string]$Mode, [bool]$RestorePoint)
+    $global:TwLastBatch = @{ Ids = $Ids; Mode = $Mode }
+    [void](Start-OptiJob "$Mode $($Ids.Count) tweak(s)" -Catalog -ArgList @($Ids, $Mode, $RestorePoint) -Script {
         param($ids, $mode, $restorePoint)
-        if ($mode -eq 'apply' -and $restorePoint) { [void](New-OptiRestorePoint 'Optimaxer - before tweaks') }
-        $restart = $false; $explorer = $false; $ok = 0
-        foreach ($id in $ids) {
-            $t = Get-TweakById $id
-            if (-not $t) { continue }
-            $on = if ($mode -eq 'apply') { Invoke-TweakApply $t } else { Invoke-TweakUndo $t }
-            if ($t.Restart) { $restart = $true }
-            if ($t.Explorer) { $explorer = $true }
-            if (($mode -eq 'apply') -eq [bool]$on) { $ok++ }
-            @{ Id = $id; On = [bool]$on }
-        }
-        if ($explorer) { Write-Log 'Restarting Explorer to apply interface changes'; Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue }
-        Write-Log "Finished: $ok of $($ids.Count) tweak(s) verified." 'OK'
-        if ($restart) { Write-Log 'Restart Windows for all changes to take full effect.' 'OK' }
+        Invoke-TweakJobBody $ids $mode $restorePoint
     } -OnDone {
         param($res)
-        $map = @{}; foreach ($r in $res) { $map[$r.Id] = [bool]$r.On }
+        if (@($res) -contains 'restore-failed') {
+            $b = $global:TwLastBatch
+            if (Confirm-Action "The restore point could not be created, so nothing was changed.`n`nApply the $($b.Ids.Count) tweak(s) anyway, without a restore point? Every tweak still saves its original values for undo.") {
+                Start-TweakBatchJob $b.Ids $b.Mode $false
+            } else { Write-Log 'Cancelled: no tweaks applied.' 'WARN' }
+            return
+        }
+        $map = @{}; foreach ($r in $res) { if ($r -is [hashtable]) { $map[$r.Id] = [bool]$r.On } }
         foreach ($row in $global:TwRows) { if ($map.ContainsKey($row.Id)) { $row.Extra = if ($map[$row.Id]) { 'Applied' } else { '' } } }
         Update-Score
     })
@@ -960,7 +989,8 @@ function Start-AppRemove {
         foreach ($n in $names) {
             $r = Remove-AppxByName $n
             if ($r.Failed.Count) { $bad++; foreach ($f in $r.Failed) { Write-Log "  $f" 'WARN' } }
-            elseif ($r.Removed.Count) { $done++; Write-Log "  removed $n" }
+            elseif (-not (Test-AppxGone $n)) { $bad++; Write-Log "  $n : still installed or still provisioned for new accounts" 'WARN' }
+            elseif ($r.Removed.Count) { $done++; Write-Log "  removed $n (installed and provisioned copies)" }
             else { Write-Log "  $n : nothing to remove (already gone)" }
         }
         Write-Log "Apps removed: $done, with problems: $bad" $(if ($bad) { 'WARN' } else { 'OK' })
@@ -1051,6 +1081,12 @@ $global:Tools = [ordered]@{
     regbackup = @{ Title = 'Export registry backup';    Desc = 'Saves .reg exports of the policy, Explorer, memory and network keys that Optimaxer edits, to the backups folder.' }
     rstrui  = @{ Title = 'Open System Restore';         Desc = 'Roll your PC back to a restore point.' }
     drivers = @{ Title = 'Vendor driver center';        Desc = 'Opens the official download page for your detected board/system vendor (MSI, Acer, Gigabyte) in your browser. Nothing is downloaded or installed by Optimaxer.' }
+    bootcost = @{ Title = 'Boot cost';                  Desc = 'Reads the boot times Windows logged and the apps, services and drivers it flagged as slowing boot. Pick startup entries to turn off; turn them back on from the Startup page.' }
+    gameprof = @{ Title = 'Per-game profile';           Desc = 'Pick game .exe files: high-performance GPU and fullscreen optimizations off for those games only. Undo removes only what this added.' }
+    gameundo = @{ Title = 'Remove per-game profiles';   Desc = 'Puts back the GPU and compatibility values each game had before.' }
+    searchex = @{ Title = 'Search: skip build folders'; Desc = 'Finds node_modules, .git, target and build folders in your profile and excludes them from Windows Search. The indexer stays on. Run again with none ticked to undo.' }
+    wake     = @{ Title = 'Wake sources';               Desc = 'Lists devices and scheduled tasks that can wake this PC. You pick what to disarm; update and Defender tasks are never offered. Run again to re-arm.' }
+    sample   = @{ Title = 'Before/after sample';        Desc = 'Records the last boot time and a 10-second idle CPU sample. Take one before tweaking and one after a restart. A sample, not an FPS benchmark.' }
     revert  = @{ Title = 'Undo ALL Optimaxer tweaks';   Desc = 'Restores every setting changed by this tool to its original value.'; Danger = $true }
 }
 
@@ -1157,9 +1193,9 @@ $toolJobs = @{
     }
     store = { Start-Process wsreset.exe -Wait; Write-Log 'Store cache reset.' 'OK' }
     revert = {
-        $state = Get-OptiState
-        foreach ($id in @($state.Keys)) { $t = Get-TweakById $id; if ($t) { [void](Invoke-TweakUndo $t) } }
-        Write-Log "Reverted $($state.Count) tweak(s)." 'OK'
+        $r = Invoke-UndoAll
+        foreach ($id in $r.Failed.Keys) { Write-Log "  NOT undone: $id ($($r.Failed[$id] -join '; '))" 'WARN' }
+        [void](Undo-OptiFeatures)
     }
 }
 
@@ -1181,6 +1217,106 @@ foreach ($k in $global:Tools.Keys) {
     [void]$UI.ToolsPanel.Children.Add($b)
 }
 
+function Show-PickList {
+    # Modal check list. Items: @{ Key; Label; Checked }. Returns the keys that are ticked, or $null on Cancel.
+    param([string]$Title, [string]$Intro, $Items, [string]$Ok = 'Apply')
+    $w = New-Object Windows.Window -Property @{ Title = $Title; Width = 640; Height = 520; WindowStartupLocation = 'CenterOwner'; Owner = $global:Win }
+    $w.Resources.MergedDictionaries.Add($global:Win.Resources)   # the palette brushes live on the main window
+    Set-Res $w ([Windows.Controls.Control]::BackgroundProperty) 'Bg'
+    $dock = New-Object Windows.Controls.DockPanel -Property @{ Margin = '16' }
+    $intro = New-Object Windows.Controls.TextBlock -Property @{ Text = $Intro; TextWrapping = 'Wrap'; Margin = '0,0,0,10' }
+    Set-Res $intro ([Windows.Controls.TextBlock]::ForegroundProperty) 'Text'
+    [Windows.Controls.DockPanel]::SetDock($intro, 'Top'); [void]$dock.Children.Add($intro)
+    $bar = New-Object Windows.Controls.StackPanel -Property @{ Orientation = 'Horizontal'; HorizontalAlignment = 'Right'; Margin = '0,10,0,0' }
+    $bOk = New-Object Windows.Controls.Button -Property @{ Content = $Ok; MinWidth = 96; Height = 32; IsDefault = $true; Margin = '0,0,8,0' }
+    $bCancel = New-Object Windows.Controls.Button -Property @{ Content = 'Cancel'; MinWidth = 96; Height = 32; IsCancel = $true }
+    [void]$bar.Children.Add($bOk); [void]$bar.Children.Add($bCancel)
+    [Windows.Controls.DockPanel]::SetDock($bar, 'Bottom'); [void]$dock.Children.Add($bar)
+    $list = New-Object Windows.Controls.StackPanel
+    $boxes = @()
+    foreach ($i in $Items) {
+        $cb = New-Object Windows.Controls.CheckBox -Property @{ Content = $i.Label; IsChecked = [bool]$i.Checked; Tag = $i.Key; Margin = '0,3,0,3' }
+        Set-Res $cb ([Windows.Controls.Control]::ForegroundProperty) 'Text'
+        [void]$list.Children.Add($cb); $boxes += $cb
+    }
+    $sv = New-Object Windows.Controls.ScrollViewer -Property @{ Content = $list; VerticalScrollBarVisibility = 'Auto' }
+    [void]$dock.Children.Add($sv)
+    $w.Content = $dock
+    $bOk.Add_Click({ $w.DialogResult = $true })
+    if (-not $w.ShowDialog()) { return $null }
+    return @($boxes | Where-Object { $_.IsChecked } | ForEach-Object { $_.Tag })
+}
+
+function Invoke-FeatureTool {
+    # Tools that need a choice from the user first: the read part runs as a job, the pick list on the UI thread,
+    # then the change runs as a second job.
+    param([string]$Key)
+    switch ($Key) {
+        'bootcost' {
+            [void](Start-OptiJob 'Reading boot cost' -Script { Get-BootCost } -OnDone {
+                param($res)
+                $r = $res | Select-Object -First 1
+                if (-not $r -or $r.Error) { Write-Log $(if ($r) { $r.Error } else { 'No answer.' }) 'WARN'; return }
+                foreach ($b in $r.Boots) { Write-Log ("  boot {0:g}: {1:N1} s (main path {2:N1} s)" -f $b.Time, ($b.BootMs / 1000), ($b.MainPathMs / 1000)) }
+                if (-not $r.Slow.Count) { Write-Log 'Windows has not flagged anything as slowing boot.' 'OK'; return }
+                foreach ($s in $r.Slow) { Write-Log ("  +{0:N1} s  {1} ({2}){3}" -f ($s.Ms / 1000), $s.Name, $s.Kind, $(if ($s.Startup) { "  startup entry: $($s.Startup)" } else { '' })) }
+                $items = @($r.Slow | Where-Object { $_.Item -and $_.Item.Enabled } | ForEach-Object { @{ Key = $_.Startup; Label = ('+{0:N1} s  {1}  ({2})' -f ($_.Ms / 1000), $_.Name, $_.Item.Scope); Checked = $false } })
+                if (-not $items.Count) { Write-Log 'None of the slow items is a startup entry Optimaxer can turn off; they are services or drivers.' 'OK'; return }
+                $pick = Show-PickList 'Boot cost' 'Slowest startup entries Windows recorded. Ticked ones are turned off at sign-in; turn them back on from the Startup page.' $items 'Turn off'
+                if (-not $pick) { return }
+                $sel = @($r.Slow | Where-Object { $_.Item -and $pick -contains $_.Startup } | ForEach-Object { @{ Name = $_.Item.Name; Approved = $_.Item.Approved; Kind = $_.Item.Kind; TaskPath = $_.Item.TaskPath } })
+                [void](Start-OptiJob 'Turning off slow startup entries' -ArgList @(, $sel) -Script {
+                    param($items)
+                    foreach ($i in $items) { Set-StartupItem $i $false; Write-Log "  $($i.Name): disabled (turn it back on from the Startup page)" 'OK' }
+                } -OnDone { if ($global:Loaded['startup']) { Update-Startup } })
+            })
+        }
+        'gameprof' {
+            $dlg = New-Object Microsoft.Win32.OpenFileDialog -Property @{ Filter = 'Programs (*.exe)|*.exe'; Multiselect = $true; Title = 'Pick game executables' }
+            if (-not $dlg.ShowDialog()) { return }
+            [void](Start-OptiJob 'Setting per-game profiles' -ArgList @(, @($dlg.FileNames)) -Script { param($exe) Add-GameProfile $exe })
+        }
+        'gameundo' { [void](Start-OptiJob 'Removing per-game profiles' -Script { [void](Remove-GameProfile) }) }
+        'searchex' {
+            [void](Start-OptiJob 'Looking for build folders' -Script { @{ Found = @(Find-DevTrees); Done = @((Get-OptiFeatures).SearchExclusions.Values | ForEach-Object Dir) } } -OnDone {
+                param($res)
+                $r = $res | Select-Object -First 1
+                $all = @(@($r.Found) + @($r.Done) | Where-Object { $_ } | Select-Object -Unique)
+                if (-not $all.Count) { Write-Log 'No node_modules, .git, target or build folders found in your profile.' 'OK'; return }
+                $items = @($all | ForEach-Object { @{ Key = $_; Label = $_; Checked = $true } })
+                $pick = Show-PickList 'Search: skip build folders' 'Ticked folders are excluded from Windows Search. Untick everything and press Apply to remove the exclusions this tool added.' $items
+                if ($null -eq $pick) { return }
+                [void](Start-OptiJob 'Updating Search exclusions' -ArgList @(, @($pick)) -Script {
+                    param($dirs)
+                    if (-not @($dirs).Count) { [void](Remove-SearchExclusions) } else { [void](Add-SearchExclusions $dirs) }
+                    Write-Log $(if (Test-SearchExclusions) { 'Search exclusions verified.' } else { 'Some folders are still indexed.' }) $(if (Test-SearchExclusions) { 'OK' } else { 'WARN' })
+                })
+            })
+        }
+        'wake' {
+            [void](Start-OptiJob 'Reading wake sources' -Script { @{ Now = (Get-WakeSources); Mine = (Get-OptiFeatures).Wake } } -OnDone {
+                param($res)
+                $r = $res | Select-Object -First 1
+                $mine = $r.Mine
+                if (@($mine.Devices).Count -or @($mine.Tasks).Count) {
+                    if (Confirm-Action "Optimaxer disarmed $(@($mine.Devices).Count) device(s) and $(@($mine.Tasks).Count) task(s) earlier. Re-arm them now?") {
+                        [void](Start-OptiJob 'Re-arming wake sources' -Script { [void](Restore-WakeSources) })
+                    }
+                    return
+                }
+                $items = @(@($r.Now.Devices) | ForEach-Object { @{ Key = "dev|$_"; Label = "Device: $_"; Checked = $false } }) + @(@($r.Now.Tasks) | ForEach-Object { @{ Key = "task|$($_.Full)"; Label = "Task: $($_.Full)"; Checked = $false } })
+                if (-not $items.Count) { Write-Log 'Nothing can wake this PC except update and Defender tasks.' 'OK'; return }
+                $pick = Show-PickList 'Wake sources' 'Tick what should no longer wake the PC. Keyboard and mouse wake are usually wanted. Update and Defender tasks are not listed.' $items 'Disarm'
+                if (-not $pick) { return }
+                $dev = @($pick | Where-Object { $_ -like 'dev|*' } | ForEach-Object { $_.Substring(4) })
+                $tsk = @($pick | Where-Object { $_ -like 'task|*' } | ForEach-Object { $_.Substring(5) })
+                [void](Start-OptiJob 'Disarming wake sources' -ArgList @($dev, $tsk) -Script { param($d, $t) Disable-WakeSources $d $t })
+            })
+        }
+        'sample' { [void](Start-OptiJob 'Taking a before/after sample (10 s, keep the PC idle)' -Script { Save-OptiEvidence } -OnDone { $UI.EvidenceInfo.Text = Get-EvidenceText }) }
+    }
+}
+
 function Invoke-Tool {
     param([string]$Key)
     if ($Key -eq 'rstrui') { Start-Process rstrui.exe; return }
@@ -1194,6 +1330,7 @@ function Invoke-Tool {
     if (-not (Test-Elevated)) { return }
     if ($Key -eq 'defrag' -and -not (Confirm-Action 'Defragmenting hard disks can take an hour or more and the app stays busy until it finishes. Continue?')) { return }
     if ($Key -eq 'revert' -and -not (Confirm-Action 'Restore ALL settings changed by Optimaxer to their original values?')) { return }
+    if ($Key -in 'bootcost', 'gameprof', 'gameundo', 'searchex', 'wake', 'sample') { Invoke-FeatureTool $Key; return }
     $after = if ($Key -eq 'revert') { { Update-TweakStatus } } else { $null }
     [void](Start-OptiJob $global:Tools[$Key].Title -Catalog:($Key -eq 'revert') -Script $toolJobs[$Key] -OnDone $after)
 }

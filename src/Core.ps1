@@ -135,11 +135,17 @@ function Compare-RegValue {
 }
 
 function Restore-RegSnapshot {
+    # Puts one saved value back (or removes it when it did not exist). Returns $false when the write failed.
     param($Rec)
     try {
         if ($Rec.Exists) { Set-RegEntry $Rec.P $Rec.N $Rec.Value $Rec.Type }
-        else             { Remove-RegEntry $Rec.P $Rec.N }
-    } catch { Write-Log "  restore failed $($Rec.P)\$($Rec.N): $($_.Exception.Message)" 'WARN' }
+        else {
+            if ((Test-Path -LiteralPath $Rec.P) -and $null -ne (Get-ItemProperty -LiteralPath $Rec.P -Name $Rec.N -ErrorAction SilentlyContinue)) {
+                Remove-ItemProperty -LiteralPath $Rec.P -Name $Rec.N -ErrorAction Stop
+            }
+        }
+        return $true
+    } catch { Write-Log "  restore failed $($Rec.P)\$($Rec.N): $($_.Exception.Message)" 'WARN'; return $false }
 }
 
 # ---------------------------------------------------------------- services
@@ -206,7 +212,8 @@ function Set-TaskEnabled {
     try {
         if ($Enabled) { Enable-ScheduledTask  -TaskPath $s.Path -TaskName $s.Name -ErrorAction Stop | Out-Null }
         else          { Disable-ScheduledTask -TaskPath $s.Path -TaskName $s.Name -ErrorAction Stop | Out-Null }
-    } catch { Write-Log "  task $Full : $($_.Exception.Message)" 'WARN' }
+        return $true
+    } catch { Write-Log "  task $Full : $($_.Exception.Message)" 'WARN'; return $false }
 }
 
 # ---------------------------------------------------------------- power (powercfg output is parsed language-independently)
@@ -288,6 +295,131 @@ function New-OptiRestorePoint {
     }
 }
 
+# ---------------------------------------------------------------- snapshot helpers for script tweaks
+# Each Get-* reads what a tweak will change and the matching Restore-* puts exactly that back. A Restore-* throws when
+# a step fails, so Invoke-TweakUndo keeps the record.
+
+# TCP interface keys (net-nagle). A variable so tests can point it at a scratch key.
+$global:OptiTcpIfBase = 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces'
+
+function Get-NagleSnapshot {
+    # One entry per interface with an IP address: whether TcpAckFrequency / TCPNoDelay existed, and their values.
+    foreach ($k in Get-ChildItem -LiteralPath $global:OptiTcpIfBase -ErrorAction SilentlyContinue) {
+        $p = Get-ItemProperty -LiteralPath $k.PSPath -ErrorAction SilentlyContinue
+        if (-not ($p.DhcpIPAddress -or $p.IPAddress)) { continue }
+        $path = Join-Path $global:OptiTcpIfBase $k.PSChildName
+        $rec = @{ If = $k.PSChildName }
+        foreach ($n in 'TcpAckFrequency', 'TCPNoDelay') {
+            $s = Get-RegSnapshot @{ P = $path; N = $n }
+            $rec[$n] = @{ Exists = [bool]$s.Exists; Value = $s.Value; Type = $s.Type }
+        }
+        $rec
+    }
+}
+
+function Restore-NagleSnapshot {
+    param($Data)
+    $bad = @()
+    foreach ($i in @($Data)) {
+        if (-not $i) { continue }
+        if ($i -is [string]) {
+            # record from v2.13.5 or older: only the interface name was kept, and those versions deleted both values
+            Remove-ItemProperty -LiteralPath (Join-Path $global:OptiTcpIfBase $i) -Name TcpAckFrequency, TCPNoDelay -ErrorAction SilentlyContinue
+            continue
+        }
+        $path = Join-Path $global:OptiTcpIfBase $i.If
+        foreach ($n in 'TcpAckFrequency', 'TCPNoDelay') {
+            $o = $i.$n
+            if (-not $o) { continue }
+            if (-not (Restore-RegSnapshot @{ P = $path; N = $n; Exists = [bool]$o.Exists; Value = $o.Value; Type = $o.Type })) { $bad += "$path\$n" }
+        }
+    }
+    if ($bad.Count) { throw "could not restore $($bad -join ', ')" }
+}
+
+function Test-NagleApplied {
+    $any = $false
+    foreach ($i in @(Get-NagleSnapshot)) {
+        $any = $true
+        if (-not ($i.TcpAckFrequency.Exists -and $i.TcpAckFrequency.Value -eq 1 -and $i.TCPNoDelay.Exists -and $i.TCPNoDelay.Value -eq 1)) { return $false }
+    }
+    return $any
+}
+
+function Invoke-Bcd {
+    param([string[]]$Arguments)
+    $o = Invoke-Native bcdedit.exe $Arguments
+    if ($global:OptiExit -ne 0) { throw "bcdedit $($Arguments -join ' ') failed: $($o.Trim())" }
+    return $o
+}
+
+function Get-BcdTimerValues {
+    # The boot entries perf-timer touches, exactly as bcdedit prints them for {current}; $null = not set.
+    $o = Invoke-Bcd @('/enum', '{current}')
+    $v = @{}
+    foreach ($n in 'disabledynamictick', 'useplatformclock', 'useplatformtick') {
+        $v[$n] = if ($o -match "(?im)^$n\s+(\S+)\s*$") { $Matches[1] } else { $null }
+    }
+    return $v
+}
+
+function Restore-BcdTimerValues {
+    param($Data)
+    if (-not $Data) { throw 'no saved boot values' }
+    if ($null -ne $Data.HadPlatformClock) {
+        # record from v2.13.5 or older, which kept only this flag
+        [void](Invoke-Bcd @('/deletevalue', 'disabledynamictick'))
+        if ($Data.HadPlatformClock) { [void](Invoke-Bcd @('/set', 'useplatformclock', 'yes')) }
+        return
+    }
+    $now = Get-BcdTimerValues
+    foreach ($n in 'disabledynamictick', 'useplatformclock', 'useplatformtick') {
+        $old = $Data.$n
+        if ($old) { if ($now[$n] -ne $old) { [void](Invoke-Bcd @('/set', $n, $old)) } }
+        elseif ($now[$n]) { [void](Invoke-Bcd @('/deletevalue', $n)) }
+    }
+}
+
+$global:OptiSleepLogs = @('Microsoft-Windows-SleepStudy/Diagnostic', 'Microsoft-Windows-Kernel-Processor-Power/Diagnostic', 'Microsoft-Windows-UserModePowerService/Diagnostic')
+
+function Invoke-Wevtutil {
+    param([string[]]$Arguments)
+    $o = Invoke-Native wevtutil.exe $Arguments
+    if ($global:OptiExit -ne 0) { throw "wevtutil $($Arguments -join ' ') failed: $($o.Trim())" }
+    return $o
+}
+
+function Get-EventLogState {
+    # $true / $false = the log's enabled flag; $null = this Windows has no such log.
+    param([string]$Log)
+    $o = Invoke-Native wevtutil.exe @('gl', $Log)
+    if ($global:OptiExit -ne 0) { return $null }
+    if ($o -match '(?im)^\s*enabled:\s*(true|false)') { return ($Matches[1] -eq 'true') }
+    return $null
+}
+
+function Get-EventLogStates {
+    param([string[]]$Logs)
+    $h = @{}
+    foreach ($l in $Logs) { $s = Get-EventLogState $l; if ($null -ne $s) { $h[$l] = $s } }
+    return $h
+}
+
+function Restore-EventLogStates {
+    param($Data)
+    # records from v2.13.5 or older saved nothing; those versions always turned the logs back on
+    if ($null -eq $Data) { $Data = @{}; foreach ($l in $global:OptiSleepLogs) { if ($null -ne (Get-EventLogState $l)) { $Data[$l] = $true } } }
+    $bad = @()
+    # a hashtable right after apply, a PSCustomObject once it went through state.json
+    $pairs = if ($Data -is [hashtable]) { foreach ($k in $Data.Keys) { @{ Name = $k; Value = $Data[$k] } } }
+             else { foreach ($p in $Data.PSObject.Properties) { @{ Name = $p.Name; Value = $p.Value } } }
+    foreach ($p in @($pairs)) {
+        $want = if ([bool]$p.Value) { 'true' } else { 'false' }
+        try { [void](Invoke-Wevtutil @('set-log', $p.Name, "/e:$want")) } catch { $bad += $p.Name }
+    }
+    if ($bad.Count) { throw "could not restore log state: $($bad -join ', ')" }
+}
+
 # ---------------------------------------------------------------- tweak engine
 function Get-TweakById {
     param([string]$Id)
@@ -357,6 +489,9 @@ function Find-SharedOriginal {
 }
 
 function Invoke-TweakApply {
+    # Order matters for undo: every original value (registry, services, tasks and the tweak's own -Snapshot script)
+    # is read first and the record is written to state.json BEFORE the first change. A step that fails later
+    # cannot leave a change on disk without its original value saved.
     param($T)
     Write-Log "Apply: $($T.Name)"
     Clear-TaskCache
@@ -364,64 +499,168 @@ function Invoke-TweakApply {
     $fresh = -not ($state.ContainsKey($T.Id) -and (Test-Tweak $T))
     $rec = if ($fresh) { @{ Reg = @(); Svc = @(); Task = @(); Data = $null; Time = (Get-Date).ToString('s') } } else { $state[$T.Id] }
 
+    # 1. read the originals (no writes)
+    $svcSnaps = @{}; $taskSnaps = @{}
     foreach ($r in $T.Reg) {
-        try {
-            if ($fresh) {
-                $shared = Find-SharedOriginal $state $T.Id 'Reg' $r.P $r.N
-                if ($shared) { $rec.Reg += @{ P = $r.P; N = $r.N; Exists = [bool]$shared.Exists; Value = $shared.Value; Type = $shared.Type } }
-                else {
-                    $s = Get-RegSnapshot $r
-                    $rec.Reg += @{ P = $r.P; N = $r.N; Exists = $s.Exists; Value = $s.Value; Type = $s.Type }
-                }
-            }
-            Set-RegEntry $r.P $r.N $r.V $r.T
-        } catch {
+        if (-not $fresh) { break }
+        $shared = Find-SharedOriginal $state $T.Id 'Reg' $r.P $r.N
+        if ($shared) { $rec.Reg += @{ P = $r.P; N = $r.N; Exists = [bool]$shared.Exists; Value = $shared.Value; Type = $shared.Type } }
+        else {
+            $s = Get-RegSnapshot $r
+            $rec.Reg += @{ P = $r.P; N = $r.N; Exists = $s.Exists; Value = $s.Value; Type = $s.Type }
+        }
+    }
+    foreach ($s in $T.Svc) {
+        $snap = Get-SvcSnapshot $s.Name
+        if (-not $snap) { continue }
+        $svcSnaps[$s.Name] = $snap
+        if ($fresh) { $sh = Find-SharedOriginal $state $T.Id 'Svc' $s.Name; $rec.Svc += $(if ($sh) { @{ Name = $s.Name; Start = [int]$sh.Start; Delayed = [int]$sh.Delayed } } else { $snap }) }
+    }
+    foreach ($tk in $T.Task) {
+        $snap = Get-TaskSnapshot $tk
+        if (-not $snap) { continue }
+        $taskSnaps[$tk] = $snap
+        if ($fresh) { $sh = Find-SharedOriginal $state $T.Id 'Task' $tk; $rec.Task += $(if ($sh) { @{ Full = $tk; Enabled = [int]$sh.Enabled } } else { $snap }) }
+    }
+    if ($fresh -and $T.Snapshot) {
+        try { $rec.Data = & $T.Snapshot }
+        catch {
+            Write-Log "  could not read the current values, nothing changed: $($_.Exception.Message)" 'WARN'
+            return (Test-Tweak $T)
+        }
+    }
+
+    # 2. save the record before anything changes
+    $state[$T.Id] = $rec
+    try { Save-OptiState $state }
+    catch {
+        Write-Log "  could not save the undo record, nothing changed: $($_.Exception.Message)" 'WARN'
+        return (Test-Tweak $T)
+    }
+
+    # 3. change things
+    foreach ($r in $T.Reg) {
+        try { Set-RegEntry $r.P $r.N $r.V $r.T }
+        catch {
             $msg = $_.Exception.Message
             if ($msg -match 'not allowed|denied') { $msg += ' (this key is write-protected on this PC by Windows, a policy or another tool)' }
             Write-Log "  registry $($r.P)\$($r.N): $msg" 'WARN'
         }
     }
     foreach ($s in $T.Svc) {
-        $snap = Get-SvcSnapshot $s.Name
+        $snap = $svcSnaps[$s.Name]
         if (-not $snap) { continue }
-        if ($fresh) { $sh = Find-SharedOriginal $state $T.Id 'Svc' $s.Name; $rec.Svc += $(if ($sh) { @{ Name = $s.Name; Start = [int]$sh.Start; Delayed = [int]$sh.Delayed } } else { $snap }) }
         if ($snap.Start -ne $s.Start -and -not (Set-SvcStart $s.Name $s.Start)) { Write-Log "  service $($s.Name): could not change (protected?)" 'WARN' }
     }
-    foreach ($tk in $T.Task) {
-        $snap = Get-TaskSnapshot $tk
-        if (-not $snap) { continue }
-        if ($fresh) { $sh = Find-SharedOriginal $state $T.Id 'Task' $tk; $rec.Task += $(if ($sh) { @{ Full = $tk; Enabled = [int]$sh.Enabled } } else { $snap }) }
-        Set-TaskEnabled $tk $false
-    }
+    foreach ($tk in $T.Task) { if ($taskSnaps[$tk]) { [void](Set-TaskEnabled $tk $false) } }
     if ($T.Apply) {
         try {
-            $d = & $T.Apply
-            if ($fresh) { $rec.Data = $d }
+            $d = if ($T.Snapshot) { & $T.Apply $rec.Data } else { & $T.Apply }
+            # tweaks without a -Snapshot script return their originals from Apply; save them as soon as they exist
+            if ($fresh -and -not $T.Snapshot) { $rec.Data = $d; $state[$T.Id] = $rec; Save-OptiState $state }
         } catch { Write-Log "  script: $($_.Exception.Message)" 'WARN' }
     }
-    $state[$T.Id] = $rec
-    Save-OptiState $state
     return (Test-Tweak $T)
 }
 
+# Ids whose last undo left something unrestored, with the failed steps. Filled by Invoke-TweakUndo.
+$global:OptiUndoFailed = @{}
+
 function Invoke-TweakUndo {
+    # Restores every saved original. The record is removed only when every step worked; otherwise it stays so the
+    # undo can be retried, the failed steps are logged, and the id is listed in $global:OptiUndoFailed.
     param($T)
     Write-Log "Undo: $($T.Name)"
     Clear-TaskCache
     $state = Get-OptiState
     $rec = $state[$T.Id]
+    $failed = @()
     if ($rec) {
-        foreach ($r in @($rec.Reg)) { Restore-RegSnapshot $r }
-        foreach ($s in @($rec.Svc)) { [void](Set-SvcStart $s.Name $s.Start $s.Delayed) }
-        foreach ($tk in @($rec.Task)) { if ($tk.Enabled) { Set-TaskEnabled $tk.Full $true } }
+        foreach ($r in @($rec.Reg)) { if (-not (Restore-RegSnapshot $r)) { $failed += "registry $($r.P)\$($r.N)" } }
+        foreach ($s in @($rec.Svc)) { if (-not (Set-SvcStart $s.Name $s.Start $s.Delayed)) { $failed += "service $($s.Name)" } }
+        foreach ($tk in @($rec.Task)) { if ($tk.Enabled -and -not (Set-TaskEnabled $tk.Full $true)) { $failed += "task $($tk.Full)" } }
     } elseif ($T.Reg.Count -or $T.Svc.Count -or $T.Task.Count) {
         Write-Log '  no saved original values for this tweak (was it applied by Optimaxer?)' 'WARN'
     }
     if ($T.Undo) {
-        try { & $T.Undo $(if ($rec) { $rec.Data }) | Out-Null } catch { Write-Log "  undo script: $($_.Exception.Message)" 'WARN' }
+        try { & $T.Undo $(if ($rec) { $rec.Data }) | Out-Null } catch { $failed += "undo script: $($_.Exception.Message)" }
     }
-    if ($state.ContainsKey($T.Id)) { $state.Remove($T.Id); Save-OptiState $state }
+    if ($failed.Count) {
+        $global:OptiUndoFailed[$T.Id] = $failed
+        foreach ($f in $failed) { Write-Log "  not restored: $f" 'WARN' }
+        Write-Log "  $($T.Name) was not fully undone; its saved values are kept so you can try again." 'WARN'
+    } else {
+        $global:OptiUndoFailed.Remove($T.Id)
+        if ($state.ContainsKey($T.Id)) { $state.Remove($T.Id); Save-OptiState $state }
+    }
     return (Test-Tweak $T)
+}
+
+function Invoke-UndoAll {
+    # Undoes every tweak that has a saved record. Returns @{ Undone = ids; Failed = @{ id = steps } }.
+    $state = Get-OptiState
+    $done = @(); $bad = @{}
+    foreach ($id in @($state.Keys)) {
+        $t = Get-TweakById $id
+        if (-not $t) { continue }
+        [void](Invoke-TweakUndo $t)
+        if ($global:OptiUndoFailed.ContainsKey($id)) { $bad[$id] = $global:OptiUndoFailed[$id] } else { $done += $id }
+    }
+    if ($bad.Count) { Write-Log ("Undo all: {0} tweak(s) restored, {1} NOT undone: {2}" -f $done.Count, $bad.Count, (@($bad.Keys) -join ', ')) 'WARN' }
+    else { Write-Log "Undo all: $($done.Count) tweak(s) restored." 'OK' }
+    return @{ Undone = $done; Failed = $bad }
+}
+
+function Invoke-TweakBatch {
+    # Shared by the window and unattended mode. When a restore point was requested and could not be made, nothing is
+    # applied and RestoreFailed is set; the caller decides whether to go on without one.
+    param([string[]]$Ids, [ValidateSet('apply', 'undo')][string]$Mode, [bool]$RestorePoint)
+    if ($Mode -eq 'apply' -and $RestorePoint) {
+        if (-not (New-OptiRestorePoint 'Optimaxer - before tweaks')) {
+            Write-Log 'No restore point, so nothing was changed.' 'WARN'
+            return @{ RestoreFailed = $true; Results = @(); Restart = $false; Explorer = $false }
+        }
+    }
+    $results = @(); $restart = $false; $explorer = $false
+    foreach ($id in $Ids) {
+        $t = Get-TweakById $id
+        if (-not $t) { Write-Log "Unknown tweak id: $id" 'WARN'; continue }
+        $on = if ($Mode -eq 'apply') { Invoke-TweakApply $t } else { Invoke-TweakUndo $t }
+        if ($t.Restart) { $restart = $true }
+        if ($t.Explorer) { $explorer = $true }
+        $results += @{ Id = $id; On = [bool]$on; Ok = (($Mode -eq 'apply') -eq [bool]$on) -and -not $global:OptiUndoFailed.ContainsKey($id) }
+    }
+    return @{ RestoreFailed = $false; Results = $results; Restart = $restart; Explorer = $explorer }
+}
+
+function Invoke-TweakJobBody {
+    # What the window's Apply/Undo job runs. Emits 'restore-failed' (and changes nothing) when the requested restore
+    # point could not be made; otherwise one @{ Id; On } per tweak.
+    param([string[]]$Ids, [string]$Mode, [bool]$RestorePoint)
+    $r = Invoke-TweakBatch -Ids $Ids -Mode $Mode -RestorePoint $RestorePoint
+    if ($r.RestoreFailed) { return 'restore-failed' }
+    if ($r.Explorer) { Write-Log 'Restarting Explorer to apply interface changes'; Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue }
+    $ok = @($r.Results | Where-Object { $_.Ok }).Count
+    $notUndone = @($r.Results | Where-Object { $Mode -eq 'undo' -and -not $_.Ok } | ForEach-Object Id)
+    Write-Log "Finished: $ok of $(@($Ids).Count) tweak(s) verified." $(if ($ok -eq @($Ids).Count) { 'OK' } else { 'WARN' })
+    if ($notUndone.Count) { Write-Log "Not undone: $($notUndone -join ', '). Their saved values are kept; see the log lines above." 'WARN' }
+    if ($r.Restart) { Write-Log 'Restart Windows for all changes to take full effect.' 'OK' }
+    foreach ($x in $r.Results) { @{ Id = $x.Id; On = $x.On } }
+}
+
+function Invoke-UnattendedTweaks {
+    # -Silent: returns the process exit code. 3 = the restore point failed and nothing was applied.
+    param([string[]]$Ids, [switch]$NoRestorePoint)
+    $r = Invoke-TweakBatch -Ids $Ids -Mode apply -RestorePoint (-not $NoRestorePoint)
+    if ($r.RestoreFailed) {
+        Write-Log 'Restore point failed: nothing was applied. Fix System Restore, or run again with -NoRestorePoint.' 'ERROR'
+        return 3
+    }
+    $ok = @($r.Results | Where-Object { $_.Ok }).Count
+    $bad = @($r.Results).Count - $ok + @($Ids | Where-Object { -not (Get-TweakById $_) }).Count
+    foreach ($x in @($r.Results | Where-Object { -not $_.Ok })) { Write-Log "  not verified: $($x.Id)" 'WARN' }
+    Write-Log "Done: $ok tweak(s) verified, $bad not verified." $(if ($bad) { 'WARN' } else { 'OK' })
+    return $(if ($bad) { 1 } else { 0 })
 }
 
 # ---------------------------------------------------------------- startup items
@@ -623,7 +862,7 @@ function Test-RegKeysGone {
     return $true
 }
 
-# ---------------------------------------------------------------- hourly auto clean (RAM + temp files)
+# ---------------------------------------------------------------- hourly auto clean (temp files)
 # A scheduled task runs a small script as SYSTEM every hour. The script is copied to Program Files, which only
 # administrators can write, so a standard user cannot edit something that runs with SYSTEM rights.
 $global:OptiAutoName = 'Auto Clean'
@@ -665,15 +904,8 @@ function Clear-OldTemp {
     return $freed
 }
 
-$before = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory
-$trimmed = 0; $standby = $false
-if (-not $ReportOnly) {
-    $trimmed = [OptiMem]::TrimWorkingSets()
-    $standby = [OptiMem]::PurgeStandbyList()
-    Start-Sleep -Seconds 2
-}
-$after = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory
-
+# Working sets and the standby list are left alone: standby memory is the file cache, and emptying it every hour
+# only makes Windows read the same files from disk again.
 $tempFreed = [int64]0
 $roots = @("$env:SystemRoot\Temp")
 foreach ($u in Get-ChildItem -LiteralPath (Join-Path $env:SystemDrive 'Users') -Directory -Force) {
@@ -682,18 +914,29 @@ foreach ($u in Get-ChildItem -LiteralPath (Join-Path $env:SystemDrive 'Users') -
 }
 foreach ($r in $roots) { $tempFreed += [int64](Clear-OldTemp $r) }
 
-$ramKB = [math]::Max(0, [int64]$after - [int64]$before)
-$rec = [pscustomobject]@{ Time = (Get-Date).ToString('s'); RamFreedKB = $ramKB; TempFreedBytes = $tempFreed; Processes = $trimmed; Standby = $standby; ReportOnly = [bool]$ReportOnly }
+$rec = [pscustomobject]@{ Time = (Get-Date).ToString('s'); TempFreedBytes = $tempFreed; ReportOnly = [bool]$ReportOnly }
 $rec | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $data 'autoclean.json') -Encoding UTF8
-$line = '[{0}] INFO  Auto clean: RAM +{1:N0} MB, temp files {2:N1} MB removed ({3} processes trimmed)' -f (Get-Date -Format 'HH:mm:ss'), ($ramKB / 1024), ($tempFreed / 1MB), $trimmed
+$line = '[{0}] INFO  Auto clean: temp files {1:N1} MB removed' -f (Get-Date -Format 'HH:mm:ss'), ($tempFreed / 1MB)
 Add-Content -LiteralPath (Join-Path $data 'optimaxer.log') -Value $line -Encoding UTF8
 '@
 }
 
 function Get-AutoCleanScript {
-    # param() has to be the first statement, so it goes ahead of the native helper block.
-    $native = Get-Content -LiteralPath (Join-Path $global:OptiRoot 'src\Native.ps1') -Raw
-    return ("param([switch]`$ReportOnly)`r`n" + $native + "`r`n" + (Get-AutoCleanBody))
+    # param() has to be the first statement. The hourly script does not touch memory, so no native helpers.
+    return ("param([switch]`$ReportOnly)`r`n" + (Get-AutoCleanBody))
+}
+
+function Update-AutoCleanScript {
+    # A task installed by v2.13.x still runs a script that empties the standby list. Rewrite it in place (same path,
+    # same task) so the hourly run only deletes old temp files. Needs administrator rights; quietly does nothing without.
+    $script = Join-Path $env:ProgramFiles 'Optimaxer\AutoClean.ps1'
+    if (-not (Test-Path -LiteralPath $script)) { return }
+    try {
+        if ((Get-Content -LiteralPath $script -Raw -ErrorAction Stop) -match 'PurgeStandbyList|TrimWorkingSets') {
+            Set-Content -LiteralPath $script -Value (Get-AutoCleanScript) -Encoding UTF8 -ErrorAction Stop
+            Write-Log 'Auto clean updated: the hourly task now only removes old temp files.' 'OK'
+        }
+    } catch {}
 }
 
 function Test-AutoClean {
@@ -719,9 +962,9 @@ function Enable-AutoClean {
     $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration (New-TimeSpan -Days 9999)
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
-    Register-ScheduledTask -TaskName $global:OptiAutoName -TaskPath $global:OptiAutoPath -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Optimaxer: frees RAM and removes temp files older than an hour, every hour.' -Force -ErrorAction Stop | Out-Null
+    Register-ScheduledTask -TaskName $global:OptiAutoName -TaskPath $global:OptiAutoPath -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Optimaxer: removes temp files older than an hour, every hour.' -Force -ErrorAction Stop | Out-Null
     Start-ScheduledTask -TaskName $global:OptiAutoName -TaskPath $global:OptiAutoPath -ErrorAction SilentlyContinue
-    Write-Log 'Auto clean on: RAM and temp files are cleaned every hour (first run now).' 'OK'
+    Write-Log 'Auto clean on: temp files older than an hour are removed every hour (first run now).' 'OK'
 }
 
 function Disable-AutoClean {
@@ -1089,38 +1332,83 @@ $global:OptiVendorDriverUrl = @{
     Gigabyte = 'https://www.gigabyte.com/Support'
 }
 
-function Get-PresetTweakIds {
-    param([string]$Preset, $Traits)
-    if ($Preset -eq 'auto') { return @((Get-SmartPlan $Traits).Ids) }
-    foreach ($t in $global:OptiCatalog) {
-        if (-not (Test-TweakFits $t $Traits)) { continue }
-        if ($t.Tags -contains $Preset) { $t.Id }
+function Resolve-ConflictIds {
+    # Keeps the first id of each conflict group (search style, drive letters, ...) so a preset never ticks two
+    # tweaks that write the same setting.
+    param([string[]]$Ids)
+    $seen = @{}
+    foreach ($id in $Ids) {
+        $t = Get-TweakById $id
+        $g = if ($t) { $t.Conflict } else { '' }
+        if ($g) { if ($seen.ContainsKey($g)) { continue }; $seen[$g] = $true }
+        $id
     }
 }
 
-function Get-SmartPlan {
-    # Picks tweaks for THIS machine: the recommended set, plus 'smart'-tagged tweaks whose hardware condition fits,
-    # plus the gaming set on PCs with a discrete GPU. Opt-in and unfit tweaks never appear.
-    # Returns @{ Ids; Notes } - Notes explains the choices in plain language for the log.
-    param($Traits, $Applied)
-    $gaming = @($Traits.Tags) -contains 'dgpu'
-    $ids = @(); $notes = New-Object System.Collections.ArrayList
-    foreach ($t in $global:OptiCatalog) {
+function Get-PresetTweakIds {
+    param([string]$Preset, $Traits)
+    if ($Preset -eq 'auto') { return @((Get-SmartPlan $Traits).Ids) }
+    $ids = foreach ($t in $global:OptiCatalog) {
         if ($t.Tags -contains 'optin') { continue }
         if (-not (Test-TweakFits $t $Traits)) { continue }
-        $pick = ($t.Tags -contains 'safe') -or ($t.Tags -contains 'smart') -or ($gaming -and ($t.Tags -contains 'gaming'))
-        if (-not $pick) { continue }
+        if ($t.Tags -contains $Preset) { $t.Id }
+    }
+    @(Resolve-ConflictIds @($ids))
+}
+
+function Test-AutoPick {
+    # The one rule every automatic plan uses (Smart optimize, -Preset auto, the desktop app): Risk must be Safe, and
+    # the tweak must be in the recommended set or be a hardware-gated 'smart' tweak. Gaming tags never auto-select.
+    param($T)
+    if ($T.Tags -contains 'optin') { return $false }
+    if ($T.Risk -ne 'Safe') { return $false }
+    return ($T.Tags -contains 'safe') -or ($T.Tags -contains 'smart')
+}
+
+function Get-TweakFitReason {
+    # Plain-language hardware fact that rules a tweak out on this PC, or '' when it fits.
+    param($T, $Traits)
+    if ($T.DesktopOnly -and $Traits.Laptop) { return 'this PC is a laptop' }
+    if ($T.SSDOnly -and -not $Traits.SSD) { return 'the system drive is a hard disk' }
+    if ($T.Vendor -and $T.Vendor -ne $Traits.Vendor) { return "not a $($T.Vendor) system" }
+    if ($T.MinRamGB -and $Traits.RamGB -and $Traits.RamGB -lt $T.MinRamGB) { return ('{0:N0} GB RAM, needs {1:N0} GB' -f $Traits.RamGB, $T.MinRamGB) }
+    $names = @{ dgpu = 'a discrete GPU'; hdd = 'a hard disk'; ssd = 'an SSD'; laptop = 'a laptop'; desktop = 'a desktop'; lowend = 'low-end hardware'; nvidia = 'an NVIDIA GPU'; win11 = 'Windows 11' }
+    foreach ($n in @($T.Need)) {
+        if (-not $n) { continue }
+        if ($n.StartsWith('!')) { $k = $n.Substring(1); if (@($Traits.Tags) -contains $k) { return "not for $(if ($names[$k]) { $names[$k] } else { $k })" } }
+        elseif (@($Traits.Tags) -notcontains $n) { return "needs $(if ($names[$n]) { $names[$n] } else { $n })" }
+    }
+    return ''
+}
+
+function Get-SmartPlan {
+    # Picks tweaks for THIS machine with Test-AutoPick: Safe-risk recommended tweaks plus Safe 'smart' tweaks whose
+    # hardware gate fits. Moderate and Advanced tweaks are never ticked, whatever their tags; nor are opt-in or unfit ones.
+    # Returns @{ Ids; Notes; Skipped = @{ id = reason } } - Notes and Skipped explain the choices in plain language.
+    param($Traits, $Applied)
+    $ids = @(); $notes = New-Object System.Collections.ArrayList; $skipped = @{}
+    foreach ($t in $global:OptiCatalog) {
+        $why = Get-TweakFitReason $t $Traits
+        $tagged = ($t.Tags -contains 'safe') -or ($t.Tags -contains 'smart') -or ($t.Tags -contains 'gaming')
+        if ($t.Tags -contains 'optin') { continue }
+        if ($t.Risk -ne 'Safe') {
+            # every Moderate or Advanced tweak gets a reason, so the Tweaks page can say why it stayed unticked
+            $skipped[$t.Id] = $(if ($why) { "$($t.Risk) risk, and $why" } else { "$($t.Risk) risk: left for you to tick" })
+            continue
+        }
+        if ($why) { if ($tagged) { $skipped[$t.Id] = "does not fit: $why" }; continue }
+        if (-not (Test-AutoPick $t)) { continue }
         if ($Applied -and $Applied.ContainsKey($t.Id) -and $Applied[$t.Id]) { continue }
         $ids += $t.Id
     }
+    $ids = @(Resolve-ConflictIds $ids)
     $tg = @($Traits.Tags)
-    [void]$notes.Add($(if ($tg -contains 'laptop') { 'Laptop: battery-friendly set, no always-max-power tweaks.' } else { 'Desktop: performance power plan and CPU tweaks included.' }))
-    [void]$notes.Add($(if ($tg -contains 'ssd') { 'SSD: TRIM and disk-wear tweaks included.' } else { 'Hard disk: prefetch/SysMain left on; run Defragment in Tools.' }))
-    if ($gaming) { [void]$notes.Add('Discrete GPU: gaming latency set included.') }
-    if ($tg -contains 'ram8') { [void]$notes.Add('8 GB or less RAM: memory compression stays on, background load trimmed.') }
-    if ($tg -contains 'ram16') { [void]$notes.Add('16 GB or more RAM: RAM-heavy tweaks included.') }
-    if ($tg -contains 'lowend') { [void]$notes.Add('Low-end hardware: visual effects trimmed for speed.') }
-    return @{ Ids = @($ids); Notes = @($notes) }
+    [void]$notes.Add('Only Safe tweaks are ticked. Moderate and Advanced are left for you to tick.')
+    [void]$notes.Add($(if ($tg -contains 'laptop') { 'Laptop: desktop-only tweaks are skipped.' } else { 'Desktop: no power-plan or CPU-power change is ticked; pick those yourself if you want them.' }))
+    [void]$notes.Add($(if ($tg -contains 'ssd') { 'SSD: TRIM check included.' } else { 'Hard disk: SSD-only tweaks are skipped; run Defragment in Tools.' }))
+    if ($Traits.RamGB) { [void]$notes.Add(('{0:N0} GB RAM: tweaks that need more memory than this are skipped.' -f $Traits.RamGB)) }
+    if ($tg -contains 'dgpu') { [void]$notes.Add('Discrete GPU found: gaming tweaks are not ticked automatically; use the Gaming preset if you want them.') }
+    return @{ Ids = @($ids); Notes = @($notes); Skipped = $skipped }
 }
 
 # ---------------------------------------------------------------- desktop shortcut (optionally "Run as administrator")
@@ -1140,3 +1428,6 @@ function New-OptiShortcut {
     }
 }
 
+
+# ---------------------------------------------------------------- tools with their own undo records
+. (Join-Path $PSScriptRoot 'Features.ps1')

@@ -1,6 +1,6 @@
 # Orion Store + Optimaxer for Windows
 
-One Windows window, one exe. The Orion app catalog (PC, Android and TV, with search, categories, detail pages and downloads) sits next to Optimaxer's tuning tools: 199 tweaks with undo, services, startup items, a cleaner, DNS and network tools, and maintenance helpers. Written in Rust with eframe/egui.
+One Windows window, one exe. The Orion app catalog (PC, Android and TV, with search, categories, detail pages and downloads) sits next to Optimaxer's tuning tools: 200 tweaks with undo, services, startup items, a cleaner, DNS and network tools, and maintenance helpers. Written in Rust with eframe/egui.
 
 Optimaxer started as a Windows PowerShell and WPF app. Its engine is ported to Rust here, so nothing in this build runs PowerShell except one call that creates a System Restore point.
 
@@ -31,9 +31,9 @@ Unchanged from the original client. It loads `config.json`, `apps.json` and `mir
 
 Overview. Live gauges for processor, memory and the system drive, a 60 second history of CPU and memory, the processor, graphics, Windows edition, uptime and process count, and quick actions (Smart optimize, Free RAM, Scan for junk).
 
-Tweaks. 199 of the 216 Optimaxer tweaks (performance, gaming, network, privacy, AI and Copilot removal, interface). Each tweak saves the original values before its first change, so it can be undone on its own, in any order. Presets are Auto-detect, Recommended, Gaming, Privacy, Remove AI and debloat, and Maximum.
+Tweaks. 200 of the 217 Optimaxer tweaks (performance, gaming, network, privacy, AI and Copilot removal, interface). Each tweak writes its original values to disk before its first change, so it can be undone on its own, in any order. If a restore step fails, the record is kept and the log names the step. Presets are Auto-detect, Recommended, Gaming, Privacy, Remove AI and debloat, and Maximum; opt-in tweaks are in none of them. Tweaks that write the same setting (search box style, drive letters, taskbar grouping, All apps view, where Explorer opens) allow one choice per group.
 
-Smart optimize and Auto-detect read the machine (laptop or desktop, SSD or HDD and NVMe, RAM, CPU threads, GPU, Windows build, board vendor) and select only the tweaks that fit and are not applied yet. A discrete GPU adds the gaming set, a laptop skips the always-max-power tweaks, and 16 GB+ RAM tweaks stay off smaller machines.
+Smart optimize and Auto-detect read the machine (laptop or desktop, SSD or HDD and NVMe, RAM, CPU threads, GPU, Windows build, board vendor) and select only Safe-risk tweaks from the recommended set, plus Safe hardware-gated ones that fit and are not applied yet. Moderate and Advanced tweaks are never selected automatically; each row says why Smart optimize left it unticked (its risk, or a hardware fact such as "this PC is a laptop"). No power-plan, CPU-power or boot-configuration change is part of an automatic plan. If a requested restore point fails, nothing is applied until you confirm.
 
 Services. About 220 services with Optimaxer's recommended Manual and Disabled lists. 57 core services are hidden and cannot be changed. A JSON backup is written before every change, and "Restore last backup" puts it back.
 

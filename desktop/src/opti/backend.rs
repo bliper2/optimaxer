@@ -331,6 +331,8 @@ pub mod fake {
         pub commands: RefCell<Vec<String>>,
         pub answers: RefCell<BTreeMap<String, String>>,
         pub deny_writes: RefCell<BTreeSet<String>>,
+        /// Command-line prefixes that exit with code 1.
+        pub fail: RefCell<BTreeSet<String>>,
     }
 
     fn k(s: &str) -> String {
@@ -420,7 +422,8 @@ pub mod fake {
             let line = format!("{exe} {}", args.join(" "));
             self.commands.borrow_mut().push(line.clone());
             let text = self.answers.borrow().iter().find(|(p, _)| line.starts_with(p.as_str())).map(|(_, t)| t.clone()).unwrap_or_default();
-            CmdOut { code: 0, text }
+            let code = if self.fail.borrow().iter().any(|p| line.starts_with(p.as_str())) { 1 } else { 0 };
+            CmdOut { code, text }
         }
     }
 }

@@ -61,7 +61,7 @@ pub struct Record {
 #[derive(Default)]
 pub struct State {
     pub records: BTreeMap<String, Record>,
-    path: PathBuf,
+    pub(crate) path: PathBuf,
 }
 
 pub fn state_dir() -> PathBuf {

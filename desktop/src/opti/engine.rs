@@ -155,20 +155,20 @@ impl<'a> Engine<'a> {
         out
     }
 
+    /// Same order as the PowerShell Invoke-TweakApply: every original is read first and the record is saved BEFORE
+    /// the first change, so a step that fails later cannot leave a change behind without its original value.
     pub fn apply(&self, t: &Tweak, state: &mut State, log: &mut dyn FnMut(&str)) -> bool {
         log(&format!("Apply: {}", t.name));
         self.clear_cache();
         let fresh = !(state.contains(&t.id) && self.test(t, state));
         let mut rec = if fresh { Record { time: super::now_iso(), ..Default::default() } } else { state.records.get(&t.id).cloned().unwrap_or_default() };
 
+        // 1. read the originals
+        let mut svc_now = Vec::new();
         for r in &t.reg {
             if fresh {
                 let saved = find_shared_reg(state, &t.id, &r.p, &r.n).unwrap_or_else(|| snapshot_reg(self.sys, &r.p, &r.n));
                 rec.reg.push(saved);
-            }
-            if let Err(e) = self.sys.reg_set(&r.p, &r.n, &r.wanted()) {
-                let hint = if e.to_lowercase().contains("denied") { " (write-protected here, or run as administrator)" } else { "" };
-                log(&format!("  WARN registry {}\\{}: {e}{hint}", r.p, r.n));
             }
         }
         for s in &t.svc {
@@ -177,57 +177,113 @@ impl<'a> Engine<'a> {
                 let saved = find_shared_svc(state, &t.id, &s.name).unwrap_or(SvcRec { name: s.name.clone(), start: snap.start as i64, delayed: snap.delayed as i64 });
                 rec.svc.push(saved);
             }
-            if snap.start != s.start && !self.sys.svc_set(&s.name, s.start, false) {
-                log(&format!("  WARN service {}: could not change (protected?)", s.name));
-            }
+            svc_now.push((s, snap));
         }
+        let mut tasks_now = Vec::new();
         for tk in &t.task {
             let Some(enabled) = self.task_enabled(tk) else { continue };
             if fresh {
                 let saved = find_shared_task(state, &t.id, tk).unwrap_or(TaskRec { full: tk.clone(), enabled: enabled as i64 });
                 rec.task.push(saved);
             }
+            tasks_now.push(tk);
+        }
+        let snap = match &t.special {
+            Some(sp) => match sp.snapshot(&self.ctx()) {
+                Ok(s) => s,
+                Err(e) => {
+                    log(&format!("  WARN could not read the current values, nothing changed: {e}"));
+                    return self.test(t, state);
+                }
+            },
+            None => None,
+        };
+        if fresh {
+            if let Some(s) = &snap {
+                rec.data = s.clone();
+            }
+        }
+
+        // 2. save the record before anything changes
+        state.records.insert(t.id.clone(), rec.clone());
+        if let Err(e) = state.save() {
+            log(&format!("  WARN could not save the undo record, nothing changed: {e}"));
+            if fresh {
+                state.records.remove(&t.id);
+            }
+            return self.test(t, state);
+        }
+
+        // 3. change things
+        for r in &t.reg {
+            if let Err(e) = self.sys.reg_set(&r.p, &r.n, &r.wanted()) {
+                let hint = if e.to_lowercase().contains("denied") { " (write-protected here, or run as administrator)" } else { "" };
+                log(&format!("  WARN registry {}\\{}: {e}{hint}", r.p, r.n));
+            }
+        }
+        for (s, now) in svc_now {
+            if now.start != s.start && !self.sys.svc_set(&s.name, s.start, false) {
+                log(&format!("  WARN service {}: could not change (protected?)", s.name));
+            }
+        }
+        for tk in tasks_now {
             if let Err(e) = self.sys.task_set(tk, false) {
                 log(&format!("  WARN task {tk}: {e}"));
             }
             self.tasks.borrow_mut().remove(tk.as_str());
         }
         if let Some(sp) = &t.special {
-            match sp.apply(&self.ctx(), log) {
-                Ok(data) => {
-                    if fresh {
-                        rec.data = data;
+            let res = match &snap {
+                Some(s) => sp.apply_snapshot(&self.ctx(), s, log).map(|_| None),
+                None => sp.apply(&self.ctx(), log).map(Some),
+            };
+            match res {
+                // ports without a snapshot return their undo data from apply: save it as soon as it exists
+                Ok(Some(data)) if fresh => {
+                    rec.data = data;
+                    state.records.insert(t.id.clone(), rec);
+                    if let Err(e) = state.save() {
+                        log(&format!("  WARN could not save the undo record: {e}"));
                     }
                 }
+                Ok(_) => {}
                 Err(e) => log(&format!("  WARN {e}")),
             }
-        }
-        state.records.insert(t.id.clone(), rec);
-        if let Err(e) = state.save() {
-            log(&format!("  WARN could not save the undo record: {e}"));
         }
         self.clear_cache();
         self.test(t, state)
     }
 
+    #[cfg(test)]
     pub fn undo(&self, t: &Tweak, state: &mut State, log: &mut dyn FnMut(&str)) -> bool {
+        self.undo_checked(t, state, log).0
+    }
+
+    /// Restores every saved original. Returns (still active, steps that failed). The record is removed only when
+    /// nothing failed; otherwise it is kept so the undo can be tried again.
+    pub fn undo_checked(&self, t: &Tweak, state: &mut State, log: &mut dyn FnMut(&str)) -> (bool, Vec<String>) {
         log(&format!("Undo: {}", t.name));
         self.clear_cache();
         let rec = state.records.get(&t.id).cloned();
+        let mut failed = Vec::new();
         match &rec {
             Some(rec) => {
                 for r in &rec.reg {
-                    restore_reg(self.sys, r, log);
+                    if !restore_reg(self.sys, r, log) {
+                        failed.push(format!("registry {}\\{}", r.p, r.n));
+                    }
                 }
                 for s in &rec.svc {
                     if !self.sys.svc_set(&s.name, s.start as u32, s.delayed != 0) {
                         log(&format!("  WARN service {}: could not restore", s.name));
+                        failed.push(format!("service {}", s.name));
                     }
                 }
                 for tk in &rec.task {
                     if tk.enabled != 0 {
                         if let Err(e) = self.sys.task_set(&tk.full, true) {
                             log(&format!("  WARN task {}: {e}", tk.full));
+                            failed.push(format!("task {}", tk.full));
                         }
                     }
                 }
@@ -238,15 +294,24 @@ impl<'a> Engine<'a> {
             None => {}
         }
         if let Some(sp) = &t.special {
-            sp.undo(&self.ctx(), rec.as_ref().map(|r| &r.data).unwrap_or(&serde_json::Value::Null), log);
-        }
-        if state.records.remove(&t.id).is_some() {
-            if let Err(e) = state.save() {
-                log(&format!("  WARN could not save the undo record: {e}"));
+            if let Err(e) = sp.undo(&self.ctx(), rec.as_ref().map(|r| &r.data).unwrap_or(&serde_json::Value::Null), log) {
+                failed.push(e);
             }
         }
+        if failed.is_empty() {
+            if state.records.remove(&t.id).is_some() {
+                if let Err(e) = state.save() {
+                    log(&format!("  WARN could not save the undo record: {e}"));
+                }
+            }
+        } else {
+            for f in &failed {
+                log(&format!("  WARN not restored: {f}"));
+            }
+            log(&format!("  WARN {} was not fully undone; its saved values are kept so you can try again.", t.name));
+        }
         self.clear_cache();
-        self.test(t, state)
+        (self.test(t, state), failed)
     }
 }
 
@@ -257,7 +322,7 @@ fn snapshot_reg(sys: &dyn System, path: &str, name: &str) -> RegRec {
     }
 }
 
-fn restore_reg(sys: &dyn System, r: &RegRec, log: &mut dyn FnMut(&str)) {
+fn restore_reg(sys: &dyn System, r: &RegRec, log: &mut dyn FnMut(&str)) -> bool {
     let res = if r.exists {
         match RegData::from_json(&r.value, r.ty.as_deref().unwrap_or("String")) {
             Some(d) => sys.reg_set(&r.p, &r.n, &d),
@@ -266,8 +331,12 @@ fn restore_reg(sys: &dyn System, r: &RegRec, log: &mut dyn FnMut(&str)) {
     } else {
         sys.reg_delete_value(&r.p, &r.n)
     };
-    if let Err(e) = res {
-        log(&format!("  WARN restore failed {}\\{}: {e}", r.p, r.n));
+    match res {
+        Ok(()) => true,
+        Err(e) => {
+            log(&format!("  WARN restore failed {}\\{}: {e}", r.p, r.n));
+            false
+        }
     }
 }
 
@@ -437,6 +506,45 @@ mod tests {
         e.apply(&t, &mut st, &mut |_| {});
         e.apply(&t, &mut st, &mut |_| {});
         assert_eq!(st.records["t"].reg[0].value, serde_json::json!(5));
+    }
+
+    #[test]
+    fn record_is_saved_before_the_first_change_and_kept_when_undo_fails() {
+        let sys = FakeSystem::default();
+        sys.put(K, "A", RegData::Dword(5));
+        let mut st = state("order");
+        let e = Engine::new(&sys, PathBuf::new());
+        // the write is refused: the original must already be on disk
+        sys.deny_writes.borrow_mut().insert(K.to_lowercase());
+        e.apply(&reg_tweak("t", K, "A", 0), &mut st, &mut |_| {});
+        let disk = State::load_from(st.path.clone(), None);
+        assert_eq!(disk.records["t"].reg[0].value, serde_json::json!(5));
+        // the restore is refused too: the record stays and the failure is reported
+        let (_, failed) = e.undo_checked(&reg_tweak("t", K, "A", 0), &mut st, &mut |_| {});
+        assert!(!failed.is_empty());
+        assert!(st.contains("t") && State::load_from(st.path.clone(), None).contains("t"));
+        sys.deny_writes.borrow_mut().clear();
+        let (_, failed) = e.undo_checked(&reg_tweak("t", K, "A", 0), &mut st, &mut |_| {});
+        assert!(failed.is_empty() && !st.contains("t"));
+    }
+
+    #[test]
+    fn nagle_through_the_engine_restores_the_old_value() {
+        let sys = FakeSystem::default();
+        let a = r"HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\{A}";
+        sys.put(a, "IPAddress", RegData::Multi(vec!["10.0.0.2".into()]));
+        sys.put(a, "TcpAckFrequency", RegData::Dword(2));
+        let cat = crate::opti::catalog::Catalog::load();
+        let t = cat.find("net-nagle").unwrap();
+        let mut st = state("nagle");
+        let e = Engine::new(&sys, PathBuf::new());
+        e.apply(t, &mut st, &mut |_| {});
+        assert_eq!(sys.reg_get(a, "TCPNoDelay"), Some(RegData::Dword(1)));
+        let mut st = State::load_from(st.path.clone(), None);
+        let (_, failed) = e.undo_checked(t, &mut st, &mut |_| {});
+        assert!(failed.is_empty(), "{failed:?}");
+        assert_eq!(sys.reg_get(a, "TcpAckFrequency"), Some(RegData::Dword(2)));
+        assert_eq!(sys.reg_get(a, "TCPNoDelay"), None);
     }
 
     #[test]
