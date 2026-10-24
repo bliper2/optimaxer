@@ -1,3 +1,5 @@
+<p align="center"><img src="../assets/logo.png" width="96" alt="Optimaxer logo"></p>
+
 # Orion Store + Optimaxer for Windows
 
 One Windows window, one exe. The Orion app catalog (PC, Android and TV, with search, categories, detail pages and downloads) sits next to Optimaxer's tuning tools: 200 tweaks with undo, services, startup items, a cleaner, DNS and network tools, and maintenance helpers. Written in Rust with eframe/egui.

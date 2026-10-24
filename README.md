@@ -100,7 +100,7 @@ Optimaxer checks GitHub Releases once per launch (Settings > Updates, or Tools >
 ## Development
 Desktop app tests: `cargo test` in `desktop/`.
 Linux edition tests: `python -m unittest discover -s linux/tests` (runs on any OS with a fake system).
-`Optimaxer.ps1 -NoElevate -Screenshot <dir>` renders every page to PNG. `tools/make-logo.ps1` regenerates the logo files from `assets/logo.xaml`. Bump `VERSION` and include it in the release zip so the updater sees new releases.
+`Optimaxer.ps1 -NoElevate -Screenshot <dir>` renders every page to PNG. `tools/make-logo.ps1` builds `assets/optimaxer.ico` and the site favicon from `assets/logo.png`. The 16 px frame is `assets/logo-small.png`. Bump `VERSION` and include it in the release zip so the updater sees new releases.
 
 ## Credits
 The desktop app's Store client and app catalog come from [Orion Store](https://github.com/RookieEnough/Orion-Store) by RookieEnough (GPL-3.0), with catalog data from [Orion-Data](https://github.com/RookieEnough/Orion-Data). Thank you to everyone who works on it.

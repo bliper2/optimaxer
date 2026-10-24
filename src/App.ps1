@@ -19,13 +19,20 @@ foreach ($m in [regex]::Matches($xamlText, 'x:Name="(\w+)"')) { $UI[$m.Groups[1]
 $global:UI = $UI
 $global:Win = $win
 
-# brand mark: same vector in the title bar and as window/taskbar icon (assets\logo.xaml, assets\optimaxer.ico)
+# brand mark: title bar uses assets\logo.png, the window and shortcuts use assets\optimaxer.ico
 try {
-    $logoXaml = Join-Path $global:OptiRoot 'assets\logo.xaml'
-    if (Test-Path -LiteralPath $logoXaml) {
-        $vb = New-Object Windows.Controls.Viewbox -Property @{ Stretch = 'Uniform' }
-        $vb.Child = [Windows.Markup.XamlReader]::Parse((Get-Content -LiteralPath $logoXaml -Raw))
-        $UI.LogoHost.Content = $vb
+    $logoPath = Join-Path $global:OptiRoot 'assets\logo.png'
+    if (Test-Path -LiteralPath $logoPath) {
+        $bmp = New-Object Windows.Media.Imaging.BitmapImage
+        $bmp.BeginInit()
+        $bmp.CacheOption = 'OnLoad'
+        $bmp.UriSource = New-Object System.Uri $logoPath
+        $bmp.EndInit()
+        $bmp.Freeze()
+        $img = New-Object Windows.Controls.Image
+        $img.Source = $bmp
+        $img.Stretch = 'Uniform'
+        $UI.LogoHost.Content = $img
     }
     $icoPath = Join-Path $global:OptiRoot 'assets\optimaxer.ico'
     if (Test-Path -LiteralPath $icoPath) { $win.Icon = [Windows.Media.Imaging.BitmapFrame]::Create([uri]$icoPath) }
