@@ -18,9 +18,16 @@ fn window_size() -> [f32; 2] {
         .unwrap_or([1180.0, 760.0])
 }
 
+fn window_icon() -> egui::IconData {
+    let img = image::load_from_memory(include_bytes!("../../assets/logo.png")).expect("assets/logo.png").into_rgba8();
+    let (width, height) = img.dimensions();
+    egui::IconData { rgba: img.into_raw(), width, height }
+}
+
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
+            .with_icon(window_icon())
             .with_title("Orion Store + Optimaxer")
             // no system title bar: the app draws its own caption buttons; the screenshot run keeps the frame because wgpu
             // fails to allocate while capturing an undecorated window

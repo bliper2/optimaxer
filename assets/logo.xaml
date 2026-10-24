@@ -1,5 +1,5 @@
 <Canvas xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Width="32" Height="32">
-  <!-- Optimaxer mark: performance gauge (270 degree arc) with an upward chevron, on a rounded blue badge -->
+  <!-- Previous vector mark. The live logo is assets/logo.png. tools/make-logo.ps1 builds the ico from that file. -->
   <Rectangle Width="32" Height="32" RadiusX="8" RadiusY="8">
     <Rectangle.Fill>
       <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
