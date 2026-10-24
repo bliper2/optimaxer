@@ -1070,7 +1070,7 @@ function Set-FeatureJob {
 # ================================================================ tools page
 $global:Tools = [ordered]@{
     restore = @{ Title = 'Create restore point';        Desc = 'Snapshot system settings so you can roll back from Windows System Restore.' }
-    ram     = @{ Title = 'Free RAM now';                Desc = 'Trims process working sets and purges the standby list. Helps when memory is nearly full.' }
+    ram     = @{ Title = 'Free RAM now';                Desc = 'Clears every RAM cache Windows allows: process and system working sets, file cache, modified and standby lists, identical pages and the registry cache.' }
     drives  = @{ Title = 'Trim SSDs';                   Desc = 'Runs TRIM on every SSD. Takes seconds.' }
     defrag  = @{ Title = 'Defragment hard disks';       Desc = 'Slow: can take an hour or more on large HDDs. Runs in the background.' }
     health  = @{ Title = 'Disk health report';          Desc = 'Health, temperature, wear and error counters of your drives.' }
@@ -1099,10 +1099,10 @@ $toolJobs = @{
     ram = {
         . "$OptiRoot\src\Native.ps1"
         $before = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory
-        $n = [OptiMem]::TrimWorkingSets(); $s = [OptiMem]::PurgeStandbyList()
+        foreach ($l in [OptiMem]::ClearAll()) { Write-Log "  $l" $(if ($l -like 'ok *') { 'INFO' } else { 'WARN' }) }
         Start-Sleep -Seconds 1
         $after = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory
-        Write-Log ("Trimmed {0} processes, standby purge {1}. Free RAM +{2}. (Windows re-caches as you work; this is mainly useful when memory is full.)" -f $n, $(if ($s) { 'ok' } else { 'skipped (needs admin)' }), (Format-Size (($after - $before) * 1KB))) 'OK'
+        Write-Log ("RAM caches cleared. Free RAM {0} -> {1} (+{2}). Windows refills the file cache as you open files again." -f (Format-Size ($before * 1KB)), (Format-Size ($after * 1KB)), (Format-Size ([math]::Max(0, $after - $before) * 1KB))) 'OK'
     }
     drives = {
         foreach ($v in Get-Volume | Where-Object { $_.DriveLetter -and $_.DriveType -eq 'Fixed' }) {

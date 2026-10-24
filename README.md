@@ -47,7 +47,7 @@ Or download the zip from [Releases](https://github.com/bliper2/optimaxer/release
 - **Network**: DNS provider switch (+DoH), latency benchmark, stack reset; opt-in hosts-file telemetry block.
 - **Features**: Hyper-V, WSL, Sandbox, .NET 3.5 and more.
 - **Auto clean**: one checkbox on the Dashboard schedules an hourly background task (runs as SYSTEM, even with Optimaxer closed) that deletes temp files older than an hour. It does not touch memory: the standby list is Windows' file cache, and emptying it every hour only makes Windows read the same files again. Turning it off removes the task.
-- **Tools**: free RAM, TRIM/defrag, disk health, SFC, DISM, Windows Update reset, icon/Store cache, performance counters, registry backup, update check, System Restore, and:
+- **Tools**: Free RAM (clears every RAM cache Windows allows: process and system working sets, file cache, modified and standby lists including low priority, identical pages and the registry cache; on demand only, never on a schedule), TRIM/defrag, disk health, SFC, DISM, Windows Update reset, icon/Store cache, performance counters, registry backup, update check, System Restore, and:
   - **Boot cost**: the boot times Windows logged and the apps, services and drivers it flagged as slowing boot. You pick startup entries to turn off; the Startup page turns them back on.
   - **Per-game profile**: pick game .exe files to get the high-performance GPU and fullscreen optimizations off for those games only (replaces the global FSO and MPO workarounds). Undo removes only what it added and puts back values that were there before.
   - **Search: skip build folders**: excludes node_modules, .git, target and build folders in your profile from Windows Search. The indexer stays on.
