@@ -43,7 +43,7 @@ Cleaner. 32 targets: temp files, update and shader caches, browser and app cache
 
 Network. DNS provider switch with DNS-over-HTTPS where the provider offers it, flush, stack reset, and a latency benchmark (TCP connect time to port 53).
 
-Tools. Restore point, free RAM, TRIM, SFC, DISM, Windows Update reset, icon and Store cache reset, performance counters, registry backup, System Restore, and "Undo ALL Optimaxer tweaks".
+Tools. Restore point, Free RAM (clears process and system working sets, the file cache, the modified and standby lists, identical pages and the registry cache), TRIM, SFC, DISM, Windows Update reset, icon and Store cache reset, performance counters, registry backup, System Restore, and "Undo ALL Optimaxer tweaks".
 
 ## How the two halves connect
 

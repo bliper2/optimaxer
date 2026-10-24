@@ -32,7 +32,7 @@ pub struct ToolInfo {
 
 pub const TOOLS: [ToolInfo; 10] = [
     ToolInfo { tool: Tool::RestorePoint, title: "Create restore point", desc: "Snapshot system settings so you can roll back from Windows System Restore.", changes_system: true },
-    ToolInfo { tool: Tool::FreeRam, title: "Free RAM now", desc: "Trims the working set of running processes. Helps when memory is nearly full; Windows re-caches as you work.", changes_system: true },
+    ToolInfo { tool: Tool::FreeRam, title: "Free RAM now", desc: "Clears every RAM cache Windows allows: process and system working sets, file cache, modified and standby lists, identical pages and the registry cache.", changes_system: true },
     ToolInfo { tool: Tool::Trim, title: "Trim SSDs", desc: "Runs TRIM on every SSD. Takes seconds.", changes_system: true },
     ToolInfo { tool: Tool::Sfc, title: "Scan system files (SFC)", desc: "Repairs corrupted Windows system files. Takes several minutes.", changes_system: true },
     ToolInfo { tool: Tool::Dism, title: "Repair Windows image (DISM)", desc: "RestoreHealth: fixes the component store. Needs internet. Run before SFC if SFC fails.", changes_system: true },
@@ -107,6 +107,84 @@ fn trim_working_sets() -> u32 {
     n
 }
 
+// region memory caches
+// ntdll and the privilege calls are declared here: windows-sys has no binding for NtSetSystemInformation.
+#[link(name = "ntdll")]
+unsafe extern "system" {
+    fn NtSetSystemInformation(class: i32, info: *mut core::ffi::c_void, len: u32) -> i32;
+}
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn SetSystemFileCacheSize(min: isize, max: isize, flags: u32) -> i32;
+    fn GetCurrentProcess() -> *mut core::ffi::c_void;
+    fn GetLastError() -> u32;
+}
+#[link(name = "advapi32")]
+unsafe extern "system" {
+    fn OpenProcessToken(process: *mut core::ffi::c_void, access: u32, token: *mut *mut core::ffi::c_void) -> i32;
+    fn LookupPrivilegeValueW(system: *const u16, name: *const u16, luid: *mut i64) -> i32;
+    fn AdjustTokenPrivileges(token: *mut core::ffi::c_void, disable_all: i32, new: *const TokenPrivilege, len: u32, prev: *mut core::ffi::c_void, ret: *mut u32) -> i32;
+}
+
+#[repr(C, packed(4))]
+struct TokenPrivilege {
+    count: u32,
+    luid: i64,
+    attributes: u32,
+}
+
+const SYSTEM_MEMORY_LIST_INFORMATION: i32 = 80;
+const SYSTEM_COMBINE_PHYSICAL_MEMORY_INFORMATION: i32 = 130;
+const SYSTEM_REGISTRY_RECONCILIATION_INFORMATION: i32 = 155;
+
+fn enable_privilege(name: &str) -> bool {
+    let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: all out-pointers are valid locals; the token handle is closed before returning.
+    unsafe {
+        let mut tok = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), 0x28, &mut tok) == 0 {
+            return false;
+        }
+        let mut luid = 0i64;
+        let ok = LookupPrivilegeValueW(std::ptr::null(), wide.as_ptr(), &mut luid) != 0 && {
+            let tp = TokenPrivilege { count: 1, luid, attributes: 2 };
+            AdjustTokenPrivileges(tok, 0, &tp, 0, std::ptr::null_mut(), std::ptr::null_mut()) != 0 && GetLastError() == 0
+        };
+        CloseHandle(tok);
+        ok
+    }
+}
+
+fn memory_list_command(command: i32) -> i32 {
+    let mut c = command;
+    // SAFETY: a 4-byte command for SystemMemoryListInformation.
+    unsafe { NtSetSystemInformation(SYSTEM_MEMORY_LIST_INFORMATION, (&mut c as *mut i32).cast(), 4) }
+}
+
+/// Every RAM cache Windows lets a program empty, in RAMMap's order. One line per step. Windows refills the file
+/// cache as programs read files again.
+pub fn clear_all_caches() -> Vec<String> {
+    let line = |step: &str, status: i32| if status == 0 { format!("ok {step}") } else { format!("failed {step} (0x{status:08X})") };
+    let prof = enable_privilege("SeProfileSingleProcessPrivilege");
+    let quota = enable_privilege("SeIncreaseQuotaPrivilege");
+    let mut out = vec![format!("ok process working sets ({} processes)", trim_working_sets())];
+    out.push(line("system working set", if prof { memory_list_command(2) } else { -1 }));
+    // SAFETY: -1/-1 asks Windows to flush the system file cache.
+    let fc = quota && unsafe { SetSystemFileCacheSize(-1, -1, 0) } != 0;
+    out.push(if fc { "ok system file cache".into() } else { format!("failed system file cache ({})", unsafe { GetLastError() }) });
+    out.push(line("modified page list", if prof { memory_list_command(3) } else { -1 }));
+    out.push(line("standby list", if prof { memory_list_command(4) } else { -1 }));
+    out.push(line("low-priority standby list", if prof { memory_list_command(5) } else { -1 }));
+    // MEMORY_COMBINE_INFORMATION_EX: handle, pages combined, flags
+    let mut combine = [0u64; 3];
+    let st = if prof { unsafe { NtSetSystemInformation(SYSTEM_COMBINE_PHYSICAL_MEMORY_INFORMATION, combine.as_mut_ptr().cast(), 24) } } else { -1 };
+    out.push(if st == 0 { format!("ok combined identical pages ({} pages)", combine[1]) } else { line("combine identical pages", st) });
+    // SAFETY: this class takes no buffer.
+    out.push(line("registry cache", unsafe { NtSetSystemInformation(SYSTEM_REGISTRY_RECONCILIATION_INFORMATION, std::ptr::null_mut(), 0) }));
+    out
+}
+// endregion
+
 const REG_BACKUP_KEYS: [&str; 7] = [
     r"HKLM\SOFTWARE\Policies",
     r"HKCU\SOFTWARE\Policies",
@@ -124,10 +202,17 @@ pub fn run(sys: &dyn System, tool: Tool, backups: &Path, log: &mut dyn FnMut(&st
         }
         Tool::FreeRam => {
             let before = available_ram();
-            let n = trim_working_sets();
+            for l in clear_all_caches() {
+                log(&format!("  {}{l}", if l.starts_with("ok ") { "" } else { "WARN " }));
+            }
             std::thread::sleep(std::time::Duration::from_secs(1));
-            let gained = available_ram().saturating_sub(before);
-            log(&format!("Trimmed {n} processes. Free RAM +{}. (Windows re-caches as you work; this mainly helps when memory is full.)", crate::model::format_size(Some(gained))));
+            let after = available_ram();
+            log(&format!(
+                "RAM caches cleared. Free RAM {} -> {} (+{}). Windows refills the file cache as you open files again.",
+                crate::model::format_size(Some(before)),
+                crate::model::format_size(Some(after)),
+                crate::model::format_size(Some(after.saturating_sub(before)))
+            ));
         }
         Tool::Trim => {
             let out = sys.run("defrag.exe", &["/C", "/L"]);
@@ -251,6 +336,16 @@ mod tests {
     fn only_read_only_tools_skip_confirmation() {
         let ro: Vec<_> = TOOLS.iter().filter(|t| !t.changes_system).map(|t| t.tool).collect();
         assert_eq!(ro, vec![Tool::RegBackup]);
+    }
+
+    #[test]
+    #[ignore = "empties this PC's memory caches; run as administrator"]
+    fn live_clear_all_caches_runs_every_step() {
+        let lines = clear_all_caches();
+        println!("{}", lines.join("
+"));
+        assert_eq!(lines.len(), 8);
+        assert!(lines.iter().all(|l| l.starts_with("ok ")), "{lines:?}");
     }
 
     #[test]

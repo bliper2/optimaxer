@@ -993,7 +993,7 @@ impl OptiUi {
                     }
                 }
                 if kit::secondary(ui, "Free RAM", self.busy.is_none()).clicked() && self.need_admin() {
-                    self.pending = Some(Pending { title: "Free RAM now".into(), intro: "Trims the working set of running processes. Windows re-caches as you work.".into(), lines: vec![], action: Action::RunTool(Tool::FreeRam), restore_option: false, ok_label: "Free RAM".into() });
+                    self.pending = Some(Pending { title: "Free RAM now".into(), intro: "Clears every RAM cache Windows allows: process and system working sets, the file cache, the modified and standby lists, identical pages and the registry cache. Windows refills the file cache as you open files again.".into(), lines: vec![], action: Action::RunTool(Tool::FreeRam), restore_option: false, ok_label: "Free RAM".into() });
                 }
                 if kit::secondary(ui, "Scan for junk", self.busy.is_none()).clicked() {
                     self.set_page(ctx, Page::Cleaner);
