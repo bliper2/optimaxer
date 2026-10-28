@@ -12,12 +12,45 @@ const SVC_ROOT: &str = r"HKLM:\SYSTEM\CurrentControlSet\Services";
 const CPU_SUB: &str = "54533251-82be-4824-96c1-47b60b740d00";
 const POWER_KEY: &str = r"HKLM:\SYSTEM\CurrentControlSet\Control\Power";
 const FS_KEY: &str = r"HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem";
+const AI_PAGE_KEY: &str = r"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer";
+const GAMEBAR_PROTOCOLS: [&str; 2] = ["ms-gamebar", "ms-gamebarservices"];
+const THISPC_FOLDER_KEY: &str = r"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace";
+const THISPC_FOLDER_IDS: [&str; 7] = [
+    "{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}",
+    "{d3162b92-9365-467a-956b-92703aca08af}",
+    "{088e3905-0323-4b02-9826-5d99428e115f}",
+    "{1CF1260C-4DD0-4ebb-811F-33C572699FDE}",
+    "{3dfdf296-dbec-4fb4-81d1-6a3438bcf4de}",
+    "{24ad3ad4-a569-4530-98e1-ab02f9417aa8}",
+    "{f86fa3ab-70d2-4fc7-9c99-fcbf05467f3a}",
+];
+const UPDATE_PAUSE_KEY: &str = r"HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings";
+const UPDATE_PAUSE_VALUES: [&str; 6] = [
+    "PauseFeatureUpdatesStartTime",
+    "PauseQualityUpdatesStartTime",
+    "PauseUpdatesStartTime",
+    "PauseFeatureUpdatesEndTime",
+    "PauseQualityUpdatesEndTime",
+    "PauseUpdatesExpiryTime",
+];
+
+fn ai_page_hidden(value: &str) -> bool {
+    value.to_ascii_lowercase().strip_prefix("hide:").is_some_and(|pages| {
+        pages.split(';').any(|page| page == "aicomponents")
+    })
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fs {
     LastAccess,
     Trim,
     Short8dot3,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum MmaFeature {
+    MemoryCompression,
+    AppPreLaunch,
 }
 
 #[derive(Debug)]
@@ -32,6 +65,10 @@ pub enum Special {
     Ultimate,
     Hibernate,
     Fsutil(Fs),
+    MemoryAgent(MmaFeature),
+    GameBarPop,
+    ThisPcFolders,
+    WindowsUpdatePause,
     PowerAc(&'static [AcItem]),
     BcdDynamicTick,
     BcdLegacyBootMenu,
@@ -39,6 +76,7 @@ pub enum Special {
     Nagle,
     SvcHostSplit,
     DropRegValue { path: &'static str, name: &'static str },
+    SettingsAiPage,
     CreateKey { create: &'static str, remove: &'static str },
     EventLogs(&'static [&'static str]),
     ReservedStorage,
@@ -122,6 +160,37 @@ const BCD_TIMER: [&str; 3] = ["disabledynamictick", "useplatformclock", "useplat
 fn checked(sys: &dyn System, exe: &str, args: &[&str]) -> Result<String, String> {
     let out = sys.run(exe, args);
     if out.code == 0 { Ok(out.text) } else { Err(format!("{exe} {} failed: {}", args.join(" "), out.text.trim())) }
+}
+
+fn mma_state(sys: &dyn System) -> Result<Value, String> {
+    const SCRIPT: &str = "$m=Get-MMAgent -ErrorAction Stop; [pscustomobject]@{MemoryCompression=[bool]$m.MemoryCompression;ApplicationPreLaunch=[bool]$m.ApplicationPreLaunch;PageCombining=[bool]$m.PageCombining} | ConvertTo-Json -Compress";
+    let output = checked(sys, "powershell.exe", &["-NoProfile", "-NonInteractive", "-Command", SCRIPT])?;
+    serde_json::from_str(&output).map_err(|e| format!("could not parse MMAgent state: {e}"))
+}
+
+fn mma_set(sys: &dyn System, feature: &str, enabled: bool) -> Result<(), String> {
+    let operation = if enabled { "Enable-MMAgent" } else { "Disable-MMAgent" };
+    let script = format!("{operation} -{feature} -ErrorAction Stop");
+    checked(sys, "powershell.exe", &["-NoProfile", "-NonInteractive", "-Command", &script]).map(|_| ())
+}
+
+fn mma_features(feature: MmaFeature) -> &'static [(&'static str, &'static str)] {
+    match feature {
+        MmaFeature::MemoryCompression => &[("MemoryCompression", "MemoryCompression")],
+        MmaFeature::AppPreLaunch => &[("ApplicationPreLaunch", "ApplicationPreLaunch"), ("PageCombining", "PageCombining")],
+    }
+}
+
+fn pause_time(seconds: u64) -> String {
+    let (year, month, day, hour, minute, second) = super::civil(seconds);
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
+}
+
+fn valid_pause_time(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 20
+        && [4, 7, 10, 13, 16, 19].iter().zip(['-', '-', 'T', ':', ':', 'Z']).all(|(i, ch)| bytes[*i] == ch as u8)
+        && bytes.iter().enumerate().all(|(i, byte)| [4, 7, 10, 13, 16, 19].contains(&i) || byte.is_ascii_digit())
 }
 
 /// The log's enabled flag from `wevtutil gl`, or None when this Windows has no such log.
@@ -216,6 +285,11 @@ impl Special {
             Special::Fsutil(Fs::LastAccess) => "fsutil behavior set disablelastaccess 1".into(),
             Special::Fsutil(Fs::Trim) => "fsutil behavior set DisableDeleteNotify 0 (TRIM on)".into(),
             Special::Fsutil(Fs::Short8dot3) => "fsutil 8dot3name set 1".into(),
+            Special::MemoryAgent(MmaFeature::MemoryCompression) => "Disable MMAgent memory compression and restore its captured state on undo".into(),
+            Special::MemoryAgent(MmaFeature::AppPreLaunch) => "Disable MMAgent app pre-launch and page combining, with exact state restoration".into(),
+            Special::GameBarPop => "Redirect Game Bar launch protocols to Windows notification handling, saving the prior registry values".into(),
+            Special::ThisPcFolders => "Show the standard user folders in This PC while saving and restoring their visibility values".into(),
+            Special::WindowsUpdatePause => "Pause updates for 35 days and restore all six prior pause values on undo".into(),
             Special::PowerAc(items) => format!("Set {} power-plan value(s) on AC power with powercfg", items.len()),
             Special::BcdDynamicTick => "bcdedit /set disabledynamictick yes (restart needed; the current boot values are saved first)".into(),
             Special::BcdLegacyBootMenu => "bcdedit /set {default} bootmenupolicy legacy".into(),
@@ -223,6 +297,7 @@ impl Special {
             Special::Nagle => "Set TcpAckFrequency=1 and TCPNoDelay=1 on every active network interface (old values saved first)".into(),
             Special::SvcHostSplit => "Set SvcHostSplitDisable=1 on every service key (Xbox services excluded)".into(),
             Special::DropRegValue { path, name } => format!("Remove {path}\\{name} (the old value is saved for undo)"),
+            Special::SettingsAiPage => "Hide the AI components Settings page while preserving the existing page visibility policy".into(),
             Special::CreateKey { create, .. } => format!("Create registry key {create}"),
             Special::EventLogs(logs) => format!("Turn off {} diagnostic event log(s) with wevtutil", logs.len()),
             Special::ReservedStorage => "DISM: disable Reserved Storage".into(),
@@ -246,6 +321,27 @@ impl Special {
             }
             Special::Fsutil(Fs::Trim) => Some(trim_enabled(&fs_query(sys, Fs::Trim).ok()?)),
             Special::Fsutil(Fs::Short8dot3) => Some(matches!(sys.reg_get(FS_KEY, "NtfsDisable8dot3NameCreation"), Some(RegData::Dword(1)))),
+            Special::MemoryAgent(feature) => {
+                let current = mma_state(sys).ok()?;
+                Some(mma_features(*feature).iter().all(|(name, _)| current.get(*name).and_then(Value::as_bool) == Some(false)))
+            }
+            Special::GameBarPop => Some(GAMEBAR_PROTOCOLS.iter().all(|proto| {
+                let root = format!(r"HKCU:\Software\Classes\{proto}");
+                let command = format!(r"{root}\shell\open\command");
+                sys.reg_get(&root, "").as_ref() == Some(&RegData::Str(format!("URL:{proto}")))
+                    && sys.reg_get(&root, "URL Protocol").as_ref() == Some(&RegData::Str(String::new()))
+                    && sys.reg_get(&root, "NoOpenWith").as_ref() == Some(&RegData::Str(String::new()))
+                    && sys.reg_get(&command, "").as_ref() == Some(&RegData::Str("%SystemRoot%/System32/systray.exe".into()))
+            })),
+            Special::ThisPcFolders => Some(THISPC_FOLDER_IDS.iter().all(|id| {
+                let path = format!(r"{THISPC_FOLDER_KEY}\{id}");
+                matches!(sys.reg_get(&path, "HiddenByDefault"), Some(RegData::Dword(0)))
+                    && sys.reg_get(&path, "HideIfEnabled").is_none()
+            })),
+            Special::WindowsUpdatePause => {
+                let Some(RegData::Str(expiry)) = sys.reg_get(UPDATE_PAUSE_KEY, "PauseUpdatesExpiryTime") else { return Some(false) };
+                Some(valid_pause_time(&expiry) && expiry > pause_time(super::now_secs()))
+            }
             Special::PowerAc(items) => Some(items.iter().all(|i| get_ac(sys, i.sub, i.setting) == Some(i.val))),
             Special::BcdDynamicTick => Some(has_pair(&sys.run("bcdedit", &["/enum", "{current}"]).text, "disabledynamictick", "yes")),
             Special::BcdLegacyBootMenu => Some(has_pair(&sys.run("bcdedit", &["/enum", "{current}"]).text, "bootmenupolicy", "legacy")),
@@ -254,6 +350,10 @@ impl Special {
                 Some(on("Dnscache") && on("Schedule"))
             }
             Special::CreateKey { create, .. } => Some(sys.reg_key_exists(create)),
+            Special::SettingsAiPage => {
+                let Some(RegData::Str(value)) = sys.reg_get(AI_PAGE_KEY, "SettingsPageVisibility") else { return Some(false) };
+                Some(ai_page_hidden(&value))
+            }
             Special::RemoveKeys { test, .. } => Some(test.iter().all(|k| !sys.reg_key_exists(k))),
             _ => None,
         }
@@ -286,6 +386,50 @@ impl Special {
                 }.ok_or("could not read the original filesystem setting")?;
                 Some(json!({ "Prev": prev }))
             }
+            Special::MemoryAgent(feature) => {
+                let current = mma_state(sys)?;
+                let mut saved = serde_json::Map::new();
+                for (name, _) in mma_features(*feature) {
+                    let value = current.get(*name).and_then(Value::as_bool).ok_or_else(|| format!("could not read MMAgent {name} state"))?;
+                    saved.insert((*name).into(), Value::Bool(value));
+                }
+                Some(Value::Object(saved))
+            }
+            Special::GameBarPop => {
+                let entries = GAMEBAR_PROTOCOLS.iter().map(|proto| {
+                    let root = format!(r"HKCU:\Software\Classes\{proto}");
+                    let command = format!(r"{root}\shell\open\command");
+                    json!({
+                        "Protocol": proto,
+                        "RootExisted": sys.reg_key_exists(&root),
+                        "CommandExisted": sys.reg_key_exists(&command),
+                        "RootDefault": reg_snapshot(sys, &root, ""),
+                        "UrlProtocol": reg_snapshot(sys, &root, "URL Protocol"),
+                        "NoOpenWith": reg_snapshot(sys, &root, "NoOpenWith"),
+                        "CommandDefault": reg_snapshot(sys, &command, ""),
+                    })
+                }).collect::<Vec<_>>();
+                Some(json!({ "Entries": entries }))
+            }
+            Special::ThisPcFolders => {
+                let entries = THISPC_FOLDER_IDS.iter().map(|id| {
+                    let path = format!(r"{THISPC_FOLDER_KEY}\{id}");
+                    json!({
+                        "Id": id,
+                        "KeyExisted": sys.reg_key_exists(&path),
+                        "HideIfEnabled": reg_snapshot(sys, &path, "HideIfEnabled"),
+                        "HiddenByDefault": reg_snapshot(sys, &path, "HiddenByDefault"),
+                    })
+                }).collect::<Vec<_>>();
+                Some(json!({ "Entries": entries }))
+            }
+            Special::WindowsUpdatePause => {
+                let mut saved = serde_json::Map::new();
+                for name in UPDATE_PAUSE_VALUES {
+                    saved.insert(name.into(), reg_snapshot(sys, UPDATE_PAUSE_KEY, name));
+                }
+                Some(Value::Object(saved))
+            }
             Special::PowerAc(items) => {
                 let scheme = active_scheme(sys).ok_or("could not read the active power plan")?;
                 let mut old = Vec::new();
@@ -300,6 +444,7 @@ impl Special {
                 snap["Existed"] = snap["Exists"].clone();
                 Some(snap)
             }
+            Special::SettingsAiPage => Some(reg_snapshot(sys, AI_PAGE_KEY, "SettingsPageVisibility")),
             Special::CreateKey { create, .. } => Some(json!({ "Existed": sys.reg_key_exists(create), "Default": reg_snapshot(sys, create, "") })),
             Special::Hibernate => {
                 let Some(RegData::Dword(value)) = sys.reg_get(POWER_KEY, "HibernateEnabled") else { return Err("could not read the original hibernation state".into()) };
@@ -387,6 +532,55 @@ impl Special {
                 }
                 checked(sys, "powercfg", &["-setactive", target]).map(|_| ())
             }
+            Special::MemoryAgent(feature) => {
+                for (_, argument) in mma_features(*feature) {
+                    mma_set(sys, argument, false)?;
+                }
+                Ok(())
+            }
+            Special::GameBarPop => {
+                let entries = snap.get("Entries").and_then(Value::as_array).ok_or("no saved Game Bar protocol state")?;
+                if entries.len() != GAMEBAR_PROTOCOLS.len() { return Err("saved Game Bar protocol state is incomplete".into()); }
+                for item in entries {
+                    let proto = item.get("Protocol").and_then(Value::as_str).ok_or("saved Game Bar protocol name is unreadable")?;
+                    if !GAMEBAR_PROTOCOLS.contains(&proto) { return Err("saved Game Bar protocol name is invalid".into()); }
+                    let root = format!(r"HKCU:\Software\Classes\{proto}");
+                    let command = format!(r"{root}\shell\open\command");
+                    sys.reg_create_key(&root)?;
+                    sys.reg_set(&root, "", &RegData::Str(format!("URL:{proto}")))?;
+                    sys.reg_set(&root, "URL Protocol", &RegData::Str(String::new()))?;
+                    sys.reg_set(&root, "NoOpenWith", &RegData::Str(String::new()))?;
+                    sys.reg_create_key(&command)?;
+                    sys.reg_set(&command, "", &RegData::Str("%SystemRoot%/System32/systray.exe".into()))?;
+                }
+                Ok(())
+            }
+            Special::ThisPcFolders => {
+                let entries = snap.get("Entries").and_then(Value::as_array).ok_or("no saved This PC folder state")?;
+                if entries.len() != THISPC_FOLDER_IDS.len() { return Err("saved This PC folder state is incomplete".into()); }
+                for item in entries {
+                    let id = item.get("Id").and_then(Value::as_str).ok_or("saved This PC folder ID is unreadable")?;
+                    if !THISPC_FOLDER_IDS.contains(&id) { return Err("saved This PC folder ID is invalid".into()); }
+                    let path = format!(r"{THISPC_FOLDER_KEY}\{id}");
+                    sys.reg_create_key(&path)?;
+                    sys.reg_delete_value(&path, "HideIfEnabled")?;
+                    sys.reg_set(&path, "HiddenByDefault", &RegData::Dword(0))?;
+                }
+                Ok(())
+            }
+            Special::WindowsUpdatePause => {
+                if UPDATE_PAUSE_VALUES.iter().any(|name| snap.get(*name).is_none()) {
+                    return Err("saved Windows Update pause values are incomplete".into());
+                }
+                let now = super::now_secs();
+                let start = pause_time(now);
+                let end = pause_time(now + 35 * 24 * 60 * 60);
+                for (index, name) in UPDATE_PAUSE_VALUES.iter().enumerate() {
+                    let value = if index < 3 { &start } else { &end };
+                    sys.reg_set(UPDATE_PAUSE_KEY, name, &RegData::Str(value.clone()))?;
+                }
+                Ok(())
+            }
             Special::Fsutil(kind) => fs_set(sys, *kind, if matches!(kind, Fs::Trim) { 0 } else { 1 }),
             Special::PowerAc(items) => {
                 let want: Vec<_> = items.iter().map(|i| (i.sub.to_string(), i.setting.to_string(), i.val)).collect();
@@ -433,6 +627,25 @@ impl Special {
                 }
                 Ok(())
             }
+            Special::SettingsAiPage => {
+                let current = match snap.get("Exists").and_then(Value::as_bool) {
+                    Some(true) => snap.get("Value").and_then(Value::as_str).ok_or("saved SettingsPageVisibility value is unreadable")?,
+                    Some(false) => "",
+                    None => return Err("saved SettingsPageVisibility state is unreadable".into()),
+                };
+                if current.to_ascii_lowercase().starts_with("showonly:") {
+                    return Err("Settings page visibility uses show-only mode; refusing to replace that policy".into());
+                }
+                if ai_page_hidden(current) {
+                    return Ok(());
+                }
+                let value = if current.to_ascii_lowercase().starts_with("hide:") {
+                    format!("{};aicomponents", current.trim_end_matches(';'))
+                } else {
+                    "hide:aicomponents".to_string()
+                };
+                sys.reg_set(AI_PAGE_KEY, "SettingsPageVisibility", &RegData::Str(value))
+            }
             other => other.apply(ctx, log).map(|_| ()),
         }
     }
@@ -458,6 +671,26 @@ impl Special {
                 };
                 fs_set(sys, *kind, target)?;
                 Ok(json!({ "Prev": prev }))
+            }
+            Special::MemoryAgent(_feature) => {
+                let snap = self.snapshot(ctx)?.ok_or("missing MMAgent snapshot")?;
+                self.apply_snapshot(ctx, &snap, log)?;
+                Ok(snap)
+            }
+            Special::GameBarPop => {
+                let snap = self.snapshot(ctx)?.ok_or("missing Game Bar protocol snapshot")?;
+                self.apply_snapshot(ctx, &snap, log)?;
+                Ok(snap)
+            }
+            Special::ThisPcFolders => {
+                let snap = self.snapshot(ctx)?.ok_or("missing This PC folder snapshot")?;
+                self.apply_snapshot(ctx, &snap, log)?;
+                Ok(snap)
+            }
+            Special::WindowsUpdatePause => {
+                let snap = self.snapshot(ctx)?.ok_or("missing Windows Update pause snapshot")?;
+                self.apply_snapshot(ctx, &snap, log)?;
+                Ok(snap)
             }
             Special::PowerAc(items) => {
                 let _ = items;
@@ -501,6 +734,11 @@ impl Special {
                     Some(d) => json!({ "Existed": true, "Value": d.to_json(), "Type": d.type_name() }),
                     None => json!({ "Existed": false }),
                 })
+            }
+            Special::SettingsAiPage => {
+                let snap = self.snapshot(ctx)?.ok_or("missing SettingsPageVisibility snapshot")?;
+                self.apply_snapshot(ctx, &snap, log)?;
+                Ok(snap)
             }
             Special::CreateKey { create, .. } => {
                 sys.reg_create_key(create)?;
@@ -555,6 +793,78 @@ impl Special {
             }
             Special::Hibernate => {
                 checked(sys, "powercfg", &["/hibernate", if data["Enabled"].as_bool() == Some(false) { "off" } else { "on" }])?;
+            }
+            Special::MemoryAgent(feature) => {
+                if !data.is_object() { return Err("no saved MMAgent state".into()); }
+                for (name, argument) in mma_features(*feature) {
+                    let enabled = data.get(*name).and_then(Value::as_bool).ok_or_else(|| format!("saved MMAgent {name} state is unreadable"))?;
+                    mma_set(sys, argument, enabled)?;
+                }
+            }
+            Special::GameBarPop => {
+                let entries = data.get("Entries").and_then(Value::as_array).ok_or("no saved Game Bar protocol state")?;
+                if entries.len() != GAMEBAR_PROTOCOLS.len() { return Err("saved Game Bar protocol state is incomplete".into()); }
+                let mut failed = Vec::new();
+                for item in entries {
+                    let proto = item.get("Protocol").and_then(Value::as_str).ok_or("saved Game Bar protocol name is unreadable")?;
+                    if !GAMEBAR_PROTOCOLS.contains(&proto) { return Err("saved Game Bar protocol name is invalid".into()); }
+                    let root = format!(r"HKCU:\Software\Classes\{proto}");
+                    let command = format!(r"{root}\shell\open\command");
+                    for (path, name, key) in [
+                        (&root, "", "RootDefault"),
+                        (&root, "URL Protocol", "UrlProtocol"),
+                        (&root, "NoOpenWith", "NoOpenWith"),
+                        (&command, "", "CommandDefault"),
+                    ] {
+                        match item.get(key) {
+                            Some(snap) => if let Err(e) = reg_restore(sys, path, name, snap) { failed.push(format!("{path}\\{name}: {e}")); },
+                            None => failed.push(format!("{path}\\{name}: saved value is missing")),
+                        }
+                    }
+                    if item.get("CommandExisted").and_then(Value::as_bool) == Some(false)
+                        && let Err(e) = sys.reg_delete_key(&command) {
+                        failed.push(format!("{command}: {e}"));
+                    }
+                    if item.get("RootExisted").and_then(Value::as_bool) == Some(false)
+                        && let Err(e) = sys.reg_delete_key(&root) {
+                        failed.push(format!("{root}: {e}"));
+                    }
+                }
+                if !failed.is_empty() { return Err(failed.join("; ")); }
+            }
+            Special::ThisPcFolders => {
+                let entries = data.get("Entries").and_then(Value::as_array).ok_or("no saved This PC folder state")?;
+                if entries.len() != THISPC_FOLDER_IDS.len() { return Err("saved This PC folder state is incomplete".into()); }
+                let mut failed = Vec::new();
+                for item in entries {
+                    let id = item.get("Id").and_then(Value::as_str).ok_or("saved This PC folder ID is unreadable")?;
+                    if !THISPC_FOLDER_IDS.contains(&id) { return Err("saved This PC folder ID is invalid".into()); }
+                    let path = format!(r"{THISPC_FOLDER_KEY}\{id}");
+                    if !sys.reg_key_exists(&path) && item.get("KeyExisted").and_then(Value::as_bool) == Some(false) { continue; }
+                    for name in ["HideIfEnabled", "HiddenByDefault"] {
+                        match item.get(name) {
+                            Some(snap) => if let Err(e) = reg_restore(sys, &path, name, snap) { failed.push(format!("{path}\\{name}: {e}")); },
+                            None => failed.push(format!("{path}\\{name}: saved value is missing")),
+                        }
+                    }
+                    if item.get("KeyExisted").and_then(Value::as_bool) == Some(false)
+                        && let Err(e) = sys.reg_delete_key(&path) {
+                        failed.push(format!("{path}: {e}"));
+                    }
+                }
+                if !failed.is_empty() { return Err(failed.join("; ")); }
+            }
+            Special::WindowsUpdatePause => {
+                if !data.is_object() || UPDATE_PAUSE_VALUES.iter().any(|name| data.get(*name).is_none()) {
+                    return Err("saved Windows Update pause values are incomplete".into());
+                }
+                let mut failed = Vec::new();
+                for name in UPDATE_PAUSE_VALUES {
+                    if let Err(e) = reg_restore(sys, UPDATE_PAUSE_KEY, name, &data[name]) {
+                        failed.push(format!("{UPDATE_PAUSE_KEY}\\{name}: {e}"));
+                    }
+                }
+                if !failed.is_empty() { return Err(failed.join("; ")); }
             }
             Special::Fsutil(kind) => {
                 let prev = data.get("Prev").and_then(Value::as_u64).unwrap_or(2) as u32;
@@ -659,6 +969,10 @@ impl Special {
                     sys.reg_delete_value(path, name)?;
                 }
             }
+            Special::SettingsAiPage => {
+                if data.get("Exists").is_none() { return Err("no saved SettingsPageVisibility value".into()); }
+                reg_restore(sys, AI_PAGE_KEY, "SettingsPageVisibility", data)?;
+            }
             Special::CreateKey { create, remove } => {
                 if let Some(existed) = data["Existed"].as_bool() {
                     if existed { reg_restore(sys, create, "", &data["Default"])?; }
@@ -740,6 +1054,11 @@ pub fn special_for(id: &str) -> Option<Special> {
         "perf-ntfs" => Special::Fsutil(Fs::LastAccess),
         "perf-trimon" => Special::Fsutil(Fs::Trim),
         "perf-8dot3" => Special::Fsutil(Fs::Short8dot3),
+        "perf-memcompress" => Special::MemoryAgent(MmaFeature::MemoryCompression),
+        "perf-mmagent" => Special::MemoryAgent(MmaFeature::AppPreLaunch),
+        "game-barpop" => Special::GameBarPop,
+        "ui-thispc-folders" => Special::ThisPcFolders,
+        "wu-pause" => Special::WindowsUpdatePause,
         "perf-cpupower" => Special::PowerAc(&CPU_AC),
         "perf-usbpcie" => Special::PowerAc(&USB_PCIE_AC),
         "perf-timer" => Special::BcdDynamicTick,
@@ -748,6 +1067,7 @@ pub fn special_for(id: &str) -> Option<Special> {
         "net-nagle" => Special::Nagle,
         "perf-svchostsplit" => Special::SvcHostSplit,
         "priv-feedback" => Special::DropRegValue { path: r"HKCU:\Software\Microsoft\Siuf\Rules", name: "PeriodInNanoSeconds" },
+        "ai-settingspage" => Special::SettingsAiPage,
         "ui-classicmenu" => Special::CreateKey {
             create: r"HKCU:\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32",
             remove: r"HKCU:\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}",
@@ -922,6 +1242,161 @@ mod tests {
         for id in ["perf-ultimate", "perf-timer", "ui-classicmenu", "net-nagle", "debloat-widgets"] {
             assert!(!special_for(id).unwrap().describe().is_empty());
         }
+    }
+
+    #[test]
+    fn ai_settings_page_policy_appends_and_restores_exact_visibility_value() {
+        let sys = FakeSystem::default();
+        sys.put(AI_PAGE_KEY, "SettingsPageVisibility", RegData::Str("hide:display;about".into()));
+        let c = ctx(&sys, Path::new(""));
+        let special = special_for("ai-settingspage").unwrap();
+        let snap = special.snapshot(&c).unwrap().unwrap();
+        special.apply_snapshot(&c, &snap, &mut |_| {}).unwrap();
+        assert_eq!(sys.reg_get(AI_PAGE_KEY, "SettingsPageVisibility"), Some(RegData::Str("hide:display;about;aicomponents".into())));
+        assert_eq!(special.test(&c), Some(true));
+        special.undo(&c, &snap, &mut |_| {}).unwrap();
+        assert_eq!(sys.reg_get(AI_PAGE_KEY, "SettingsPageVisibility"), Some(RegData::Str("hide:display;about".into())));
+    }
+
+    #[test]
+    fn ai_settings_page_policy_preserves_existing_hide_and_refuses_show_only() {
+        let sys = FakeSystem::default();
+        let c = ctx(&sys, Path::new(""));
+        let special = special_for("ai-settingspage").unwrap();
+        sys.put(AI_PAGE_KEY, "SettingsPageVisibility", RegData::Str("hide:AIComponents;display".into()));
+        let snap = special.snapshot(&c).unwrap().unwrap();
+        special.apply_snapshot(&c, &snap, &mut |_| {}).unwrap();
+        assert_eq!(sys.reg_get(AI_PAGE_KEY, "SettingsPageVisibility"), Some(RegData::Str("hide:AIComponents;display".into())));
+
+        sys.put(AI_PAGE_KEY, "SettingsPageVisibility", RegData::Str("showonly:display".into()));
+        let snap = special.snapshot(&c).unwrap().unwrap();
+        let error = special.apply_snapshot(&c, &snap, &mut |_| {}).unwrap_err();
+        assert!(error.contains("show-only mode"));
+        assert_eq!(sys.reg_get(AI_PAGE_KEY, "SettingsPageVisibility"), Some(RegData::Str("showonly:display".into())));
+    }
+
+    #[test]
+    fn ai_settings_page_restore_rejects_missing_snapshot() {
+        let sys = FakeSystem::default();
+        let c = ctx(&sys, Path::new(""));
+        assert!(special_for("ai-settingspage").unwrap().undo(&c, &Value::Null, &mut |_| {}).is_err());
+    }
+
+    #[test]
+    fn mmagent_tweaks_capture_and_restore_only_their_original_features() {
+        let sys = FakeSystem::default();
+        sys.answer(
+            "powershell.exe -NoProfile -NonInteractive -Command",
+            r#"{"MemoryCompression":true,"ApplicationPreLaunch":true,"PageCombining":false}"#,
+        );
+        let c = ctx(&sys, Path::new(""));
+        let compression = special_for("perf-memcompress").unwrap();
+        let snap = compression.snapshot(&c).unwrap().unwrap();
+        assert_eq!(snap, json!({"MemoryCompression": true}));
+        compression.apply_snapshot(&c, &snap, &mut |_| {}).unwrap();
+        assert!(sys.ran("Disable-MMAgent -MemoryCompression"));
+        compression.undo(&c, &snap, &mut |_| {}).unwrap();
+        assert!(sys.ran("Enable-MMAgent -MemoryCompression"));
+
+        sys.commands.borrow_mut().clear();
+        let prelaunch = special_for("perf-mmagent").unwrap();
+        let snap = prelaunch.snapshot(&c).unwrap().unwrap();
+        assert_eq!(snap, json!({"ApplicationPreLaunch": true, "PageCombining": false}));
+        prelaunch.apply_snapshot(&c, &snap, &mut |_| {}).unwrap();
+        assert!(sys.ran("Disable-MMAgent -ApplicationPreLaunch"));
+        assert!(sys.ran("Disable-MMAgent -PageCombining"));
+        sys.commands.borrow_mut().clear();
+        prelaunch.undo(&c, &snap, &mut |_| {}).unwrap();
+        assert!(sys.ran("Enable-MMAgent -ApplicationPreLaunch"));
+        assert!(sys.ran("Disable-MMAgent -PageCombining"));
+    }
+
+    #[test]
+    fn mmagent_read_failure_blocks_any_change() {
+        let sys = FakeSystem::default();
+        sys.fail.borrow_mut().insert("powershell.exe -NoProfile -NonInteractive -Command".into());
+        let c = ctx(&sys, Path::new(""));
+        let special = special_for("perf-memcompress").unwrap();
+        assert!(special.snapshot(&c).is_err());
+        assert_eq!(sys.commands.borrow().len(), 1);
+        assert!(!sys.ran("Disable-MMAgent"));
+    }
+
+    #[test]
+    fn gamebar_protocol_apply_and_undo_restore_registry_values_and_key_existence() {
+        let sys = FakeSystem::default();
+        let existing_root = r"HKCU:\Software\Classes\ms-gamebar";
+        let existing_command = r"HKCU:\Software\Classes\ms-gamebar\shell\open\command";
+        sys.put(existing_root, "", RegData::Str("URL:original".into()));
+        sys.put(existing_root, "OtherValue", RegData::Dword(7));
+        sys.put(existing_command, "", RegData::Str("C:\\old-handler.exe".into()));
+        let special = special_for("game-barpop").unwrap();
+        let c = ctx(&sys, Path::new(""));
+        let snap = special.snapshot(&c).unwrap().unwrap();
+        special.apply_snapshot(&c, &snap, &mut |_| {}).unwrap();
+        assert_eq!(special.test(&c), Some(true));
+        special.undo(&c, &snap, &mut |_| {}).unwrap();
+        assert_eq!(sys.reg_get(existing_root, ""), Some(RegData::Str("URL:original".into())));
+        assert_eq!(sys.reg_get(existing_root, "OtherValue"), Some(RegData::Dword(7)));
+        assert_eq!(sys.reg_get(existing_command, ""), Some(RegData::Str("C:\\old-handler.exe".into())));
+        assert!(!sys.reg_key_exists(r"HKCU:\Software\Classes\ms-gamebarservices"));
+    }
+
+    #[test]
+    fn thispc_folder_apply_restores_values_and_removes_new_keys() {
+        let sys = FakeSystem::default();
+        let first = format!(r"{THISPC_FOLDER_KEY}\{}", THISPC_FOLDER_IDS[0]);
+        sys.put(&first, "HideIfEnabled", RegData::Dword(1));
+        sys.put(&first, "HiddenByDefault", RegData::Str("original".into()));
+        sys.put(&first, "Keep", RegData::Dword(9));
+        let c = ctx(&sys, Path::new(""));
+        let special = special_for("ui-thispc-folders").unwrap();
+        let snap = special.snapshot(&c).unwrap().unwrap();
+        special.apply_snapshot(&c, &snap, &mut |_| {}).unwrap();
+        assert_eq!(special.test(&c), Some(true));
+        special.undo(&c, &snap, &mut |_| {}).unwrap();
+        assert_eq!(sys.reg_get(&first, "HideIfEnabled"), Some(RegData::Dword(1)));
+        assert_eq!(sys.reg_get(&first, "HiddenByDefault"), Some(RegData::Str("original".into())));
+        assert_eq!(sys.reg_get(&first, "Keep"), Some(RegData::Dword(9)));
+        for id in &THISPC_FOLDER_IDS[1..] {
+            assert!(!sys.reg_key_exists(&format!(r"{THISPC_FOLDER_KEY}\{id}")));
+        }
+    }
+
+    #[test]
+    fn windows_update_pause_saves_all_prior_values_and_types() {
+        let sys = FakeSystem::default();
+        sys.put(UPDATE_PAUSE_KEY, UPDATE_PAUSE_VALUES[0], RegData::Str("old-start".into()));
+        sys.put(UPDATE_PAUSE_KEY, UPDATE_PAUSE_VALUES[5], RegData::Dword(42));
+        let c = ctx(&sys, Path::new(""));
+        let special = special_for("wu-pause").unwrap();
+        let snap = special.snapshot(&c).unwrap().unwrap();
+        special.apply_snapshot(&c, &snap, &mut |_| {}).unwrap();
+        assert_eq!(special.test(&c), Some(true));
+        for name in UPDATE_PAUSE_VALUES {
+            assert!(matches!(sys.reg_get(UPDATE_PAUSE_KEY, name), Some(RegData::Str(_))), "{name}");
+        }
+        special.undo(&c, &snap, &mut |_| {}).unwrap();
+        assert_eq!(sys.reg_get(UPDATE_PAUSE_KEY, UPDATE_PAUSE_VALUES[0]), Some(RegData::Str("old-start".into())));
+        assert_eq!(sys.reg_get(UPDATE_PAUSE_KEY, UPDATE_PAUSE_VALUES[5]), Some(RegData::Dword(42)));
+        for name in &UPDATE_PAUSE_VALUES[1..5] {
+            assert_eq!(sys.reg_get(UPDATE_PAUSE_KEY, name), None, "{name} should be absent");
+        }
+    }
+
+    #[test]
+    fn windows_update_pause_refuses_partial_backup_and_keeps_state_on_restore_failure() {
+        let sys = FakeSystem::default();
+        let c = ctx(&sys, Path::new(""));
+        let special = special_for("wu-pause").unwrap();
+        let incomplete = json!({ UPDATE_PAUSE_VALUES[0]: {"Exists": false} });
+        assert!(special.apply_snapshot(&c, &incomplete, &mut |_| {}).is_err());
+
+        sys.put(UPDATE_PAUSE_KEY, UPDATE_PAUSE_VALUES[0], RegData::Str("prior value".into()));
+        let snap = special.snapshot(&c).unwrap().unwrap();
+        special.apply_snapshot(&c, &snap, &mut |_| {}).unwrap();
+        sys.deny_writes.borrow_mut().insert(UPDATE_PAUSE_KEY.to_ascii_lowercase());
+        assert!(special.undo(&c, &snap, &mut |_| {}).is_err());
     }
 
     #[test]
