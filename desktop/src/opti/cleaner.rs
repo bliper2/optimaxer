@@ -135,6 +135,9 @@ pub fn expand(pattern: &str) -> Vec<PathBuf> {
     for seg in segs {
         let mut next = Vec::new();
         for base in &current {
+            if fs::symlink_metadata(base).is_ok_and(|m| is_reparse(&m)) {
+                continue;
+            }
             if seg.contains('*') {
                 for e in fs::read_dir(base).into_iter().flatten().filter_map(Result::ok) {
                     if wild_match(seg, &e.file_name().to_string_lossy()) {
@@ -163,11 +166,14 @@ fn deep_enough(p: &Path) -> bool {
 }
 
 pub fn dir_size(dir: &Path) -> u64 {
+    if fs::symlink_metadata(dir).is_ok_and(|m| is_reparse(&m)) {
+        return 0;
+    }
     let mut total = 0u64;
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
         for e in fs::read_dir(&d).into_iter().flatten().filter_map(Result::ok) {
-            let Ok(m) = e.metadata() else { continue };
+            let Ok(m) = fs::symlink_metadata(e.path()) else { continue };
             if is_reparse(&m) {
                 continue;
             }
@@ -249,23 +255,41 @@ pub fn clean(sys: &dyn System, t: &Target, log: &mut dyn FnMut(&str)) -> u64 {
         Kind::Recycle => {
             let before = recycle_size();
             // SAFETY: null window and root; flags 7 = no confirmation, no progress UI, no sound.
-            unsafe { SHEmptyRecycleBinW(std::ptr::null_mut(), std::ptr::null(), 7) };
-            before
+            let result = unsafe { SHEmptyRecycleBinW(std::ptr::null_mut(), std::ptr::null(), 7) };
+            if result != 0 {
+                log(&format!("WARN Recycle Bin cleanup failed (0x{result:08X})"));
+            }
+            before.saturating_sub(recycle_size())
         }
         Kind::Component => {
-            sys.run("dism.exe", &["/Online", "/Cleanup-Image", "/StartComponentCleanup"]);
+            let out = sys.run("dism.exe", &["/Online", "/Cleanup-Image", "/StartComponentCleanup"]);
+            if out.code != 0 {
+                log(&format!("WARN Component cleanup failed: {}", out.text.trim()));
+            }
             0
         }
         Kind::EventLogs => {
             let before = scan(t).unwrap_or(0);
-            for l in sys.run("wevtutil.exe", &["el"]).text.lines().map(str::trim).filter(|l| !l.is_empty()) {
-                sys.run("wevtutil.exe", &["cl", l]);
+            let listed = sys.run("wevtutil.exe", &["el"]);
+            if listed.code != 0 {
+                log(&format!("WARN Could not list event logs: {}", listed.text.trim()));
+                return 0;
             }
-            before
+            for l in listed.text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+                let out = sys.run("wevtutil.exe", &["cl", l]);
+                if out.code != 0 {
+                    log(&format!("WARN Could not clear event log {l}: {}", out.text.trim()));
+                }
+            }
+            before.saturating_sub(scan(t).unwrap_or(before))
         }
         Kind::WinOld => {
             let Some(dir) = expand_template(t.paths[0]) else { return 0 };
             if !Path::new(&dir).exists() {
+                return 0;
+            }
+            if fs::symlink_metadata(&dir).is_ok_and(|m| is_reparse(&m)) {
+                log("WARN Windows.old is a reparse point; left untouched.");
                 return 0;
             }
             let before = dir_size(Path::new(&dir));
@@ -276,14 +300,24 @@ pub fn clean(sys: &dyn System, t: &Target, log: &mut dyn FnMut(&str)) -> u64 {
         }
         Kind::Paths => {
             let running: Vec<&str> = t.services.iter().copied().filter(|s| sys.run("sc.exe", &["query", s]).text.contains("RUNNING")).collect();
-            for s in t.services {
-                sys.run("net.exe", &["stop", s]);
+            let mut stopped = Vec::new();
+            let mut stop_failed = false;
+            for s in &running {
+                let out = sys.run("net.exe", &["stop", s]);
+                if out.code == 0 {
+                    stopped.push(*s);
+                } else {
+                    stop_failed = true;
+                    log(&format!("WARN Could not stop {s}; cleanup skipped: {}", out.text.trim()));
+                }
             }
-            let freed = concrete_paths(t).iter().map(|p| clear_item(p)).sum();
-            for s in running {
-                sys.run("net.exe", &["start", s]);
+            let freed = if stop_failed { 0 } else { concrete_paths(t).iter().map(|p| clear_item(p)).sum() };
+            for s in stopped {
+                let out = sys.run("net.exe", &["start", s]);
+                if out.code != 0 {
+                    log(&format!("WARN Could not restart {s}: {}", out.text.trim()));
+                }
             }
-            let _ = log;
             freed
         }
     }
@@ -359,6 +393,8 @@ mod tests {
         }
         assert_eq!(clear_item(&d), 0);
         assert!(victim.join("keep.txt").exists(), "the junction target must survive");
+        assert_eq!(dir_size(&link), 0);
+        assert!(expand(&format!(r"{}\*", link.display())).is_empty());
     }
 
     #[test]
@@ -386,5 +422,17 @@ mod tests {
         assert!(sys.ran("net.exe stop wuauserv"));
         assert!(sys.ran("net.exe start wuauserv"));
         assert!(!sys.ran("net.exe start bits"), "bits was not running before, so it stays stopped");
+    }
+
+    #[test]
+    fn failed_component_and_event_log_cleanup_report_errors() {
+        for (id, command) in [("component", "dism.exe"), ("eventlogs", "wevtutil.exe el")] {
+            let sys = FakeSystem::default();
+            sys.fail.borrow_mut().insert(command.into());
+            let mut lines = Vec::new();
+            let target = TARGETS.iter().find(|t| t.id == id).unwrap();
+            assert_eq!(clean(&sys, target, &mut |l| lines.push(l.to_string())), 0);
+            assert!(lines.iter().any(|l| l.contains("WARN")), "{lines:?}");
+        }
     }
 }

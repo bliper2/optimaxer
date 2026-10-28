@@ -133,10 +133,8 @@ impl<'a> Engine<'a> {
             }
         }
         for s in &t.svc {
-            if let Some(snap) = self.sys.svc_get(&s.name) {
-                if snap.start != s.start {
-                    out.push(Change::Svc { name: s.name.clone(), from: snap.start, to: s.start });
-                }
+            if let Some(snap) = self.sys.svc_get(&s.name) && snap.start != s.start {
+                out.push(Change::Svc { name: s.name.clone(), from: snap.start, to: s.start });
             }
         }
         for tk in &t.task {
@@ -144,10 +142,8 @@ impl<'a> Engine<'a> {
                 out.push(Change::Task { full: tk.clone() });
             }
         }
-        if let Some(sp) = &t.special {
-            if sp.test(&self.ctx()) != Some(true) {
-                out.push(Change::Note(sp.describe()));
-            }
+        if let Some(sp) = &t.special && sp.test(&self.ctx()) != Some(true) {
+            out.push(Change::Note(sp.describe()));
         }
         if t.partial {
             out.push(Change::Note("A PowerShell-only extra step of this tweak is not available here and is skipped.".into()));
@@ -167,14 +163,14 @@ impl<'a> Engine<'a> {
         // 1. read the originals
         let mut svc_now = Vec::new();
         for r in &t.reg {
-            if fresh {
+            if !rec.reg.iter().any(|old| old.p.eq_ignore_ascii_case(&r.p) && old.n.eq_ignore_ascii_case(&r.n)) {
                 let saved = find_shared_reg(state, &t.id, &r.p, &r.n).unwrap_or_else(|| snapshot_reg(self.sys, &r.p, &r.n));
                 rec.reg.push(saved);
             }
         }
         for s in &t.svc {
             let Some(snap) = self.sys.svc_get(&s.name) else { continue };
-            if fresh {
+            if !rec.svc.iter().any(|old| old.name.eq_ignore_ascii_case(&s.name)) {
                 let saved = find_shared_svc(state, &t.id, &s.name).unwrap_or(SvcRec { name: s.name.clone(), start: snap.start as i64, delayed: snap.delayed as i64 });
                 rec.svc.push(saved);
             }
@@ -183,26 +179,25 @@ impl<'a> Engine<'a> {
         let mut tasks_now = Vec::new();
         for tk in &t.task {
             let Some(enabled) = self.task_enabled(tk) else { continue };
-            if fresh {
+            if !rec.task.iter().any(|old| old.full.eq_ignore_ascii_case(tk)) {
                 let saved = find_shared_task(state, &t.id, tk).unwrap_or(TaskRec { full: tk.clone(), enabled: enabled as i64 });
                 rec.task.push(saved);
             }
             tasks_now.push(tk);
         }
         let snap = match &t.special {
+            Some(_) if !fresh && !rec.data.is_null() => Some(rec.data.clone()),
             Some(sp) => match sp.snapshot(&self.ctx()) {
                 Ok(s) => s,
                 Err(e) => {
                     log(&format!("  WARN could not read the current values, nothing changed: {e}"));
-                    return self.test(t, state);
+                    return false;
                 }
             },
             None => None,
         };
-        if fresh {
-            if let Some(s) = &snap {
-                rec.data = s.clone();
-            }
+        if fresh && let Some(s) = &snap {
+            rec.data = s.clone();
         }
 
         // 2. save the record before anything changes
@@ -212,23 +207,27 @@ impl<'a> Engine<'a> {
             if fresh {
                 state.records.remove(&t.id);
             }
-            return self.test(t, state);
+            return false;
         }
 
         // 3. change things
+        let mut succeeded = true;
         for r in &t.reg {
             if let Err(e) = self.sys.reg_set(&r.p, &r.n, &r.wanted()) {
+                succeeded = false;
                 let hint = if e.to_lowercase().contains("denied") { " (write-protected here, or run as administrator)" } else { "" };
                 log(&format!("  WARN registry {}\\{}: {e}{hint}", r.p, r.n));
             }
         }
         for (s, now) in svc_now {
             if now.start != s.start && !self.sys.svc_set(&s.name, s.start, false) {
+                succeeded = false;
                 log(&format!("  WARN service {}: could not change (protected?)", s.name));
             }
         }
         for tk in tasks_now {
             if let Err(e) = self.sys.task_set(tk, false) {
+                succeeded = false;
                 log(&format!("  WARN task {tk}: {e}"));
             }
             self.tasks.borrow_mut().remove(tk.as_str());
@@ -244,15 +243,19 @@ impl<'a> Engine<'a> {
                     rec.data = data;
                     state.records.insert(t.id.clone(), rec);
                     if let Err(e) = state.save() {
+                        succeeded = false;
                         log(&format!("  WARN could not save the undo record: {e}"));
                     }
                 }
                 Ok(_) => {}
-                Err(e) => log(&format!("  WARN {e}")),
+                Err(e) => {
+                    succeeded = false;
+                    log(&format!("  WARN {e}"));
+                }
             }
         }
         self.clear_cache();
-        self.test(t, state)
+        succeeded && self.test(t, state)
     }
 
     #[cfg(test)]
@@ -265,7 +268,16 @@ impl<'a> Engine<'a> {
     pub fn undo_checked(&self, t: &Tweak, state: &mut State, log: &mut dyn FnMut(&str)) -> (bool, Vec<String>) {
         log(&format!("Undo: {}", t.name));
         self.clear_cache();
+        if let Some(e) = state.load_error() {
+            log(&format!("  WARN {e}"));
+            return (self.test(t, state), vec![e.to_string()]);
+        }
         let rec = state.records.get(&t.id).cloned();
+        if rec.is_none() {
+            let error = "no saved original values for this tweak (was it applied by Optimaxer?)";
+            log(&format!("  WARN {error}"));
+            return (self.test(t, state), vec![error.into()]);
+        }
         let mut failed = Vec::new();
         match &rec {
             Some(rec) => {
@@ -289,11 +301,9 @@ impl<'a> Engine<'a> {
                     }
                 }
                 for tk in &rec.task {
-                    if tk.enabled != 0 && find_shared_task(state, &t.id, &tk.full).is_none() {
-                        if let Err(e) = self.sys.task_set(&tk.full, true) {
-                            log(&format!("  WARN task {}: {e}", tk.full));
-                            failed.push(format!("task {}", tk.full));
-                        }
+                    if find_shared_task(state, &t.id, &tk.full).is_none() && let Err(e) = self.sys.task_set(&tk.full, tk.enabled != 0) {
+                        log(&format!("  WARN task {}: {e}", tk.full));
+                        failed.push(format!("task {}", tk.full));
                     }
                 }
             }
@@ -302,16 +312,16 @@ impl<'a> Engine<'a> {
             }
             None => {}
         }
-        if let Some(sp) = &t.special {
-            if let Err(e) = sp.undo(&self.ctx(), rec.as_ref().map(|r| &r.data).unwrap_or(&serde_json::Value::Null), log) {
-                failed.push(e);
-            }
+        if let Some(sp) = &t.special && let Err(e) = sp.undo(&self.ctx(), rec.as_ref().map(|r| &r.data).unwrap_or(&serde_json::Value::Null), log) {
+            failed.push(e);
         }
         if failed.is_empty() {
-            if state.records.remove(&t.id).is_some() {
-                if let Err(e) = state.save() {
-                    log(&format!("  WARN could not save the undo record: {e}"));
+            if state.records.remove(&t.id).is_some() && let Err(e) = state.save() {
+                log(&format!("  WARN could not save the undo record: {e}"));
+                if let Some(rec) = rec {
+                    state.records.insert(t.id.clone(), rec);
                 }
+                failed.push(format!("could not save the undo record: {e}"));
             }
         } else {
             for f in &failed {
@@ -591,5 +601,83 @@ mod tests {
         let mut lines = Vec::new();
         e.undo(&reg_tweak("t", K, "A", 0), &mut st, &mut |l| lines.push(l.to_string()));
         assert!(lines.iter().any(|l| l.contains("no saved original")));
+    }
+
+    #[test]
+    fn corrupt_state_blocks_apply_and_missing_record_blocks_special_undo() {
+        let sys = FakeSystem::default();
+        sys.put(K, "A", RegData::Dword(5));
+        let mut st = state("corrupt");
+        std::fs::write(&st.path, "{ broken").unwrap();
+        st = State::load_from(st.path.clone(), None);
+        let e = Engine::new(&sys, PathBuf::new());
+        assert!(!e.apply(&reg_tweak("t", K, "A", 0), &mut st, &mut |_| {}));
+        assert_eq!(sys.reg_get(K, "A"), Some(RegData::Dword(5)));
+        let mut st = state("missing-special");
+        let t = Tweak { id: "hibernate".into(), special: Some(super::super::special::Special::Hibernate), ..Default::default() };
+        let (_, failed) = e.undo_checked(&t, &mut st, &mut |_| {});
+        assert!(!failed.is_empty());
+        assert!(sys.commands.borrow().is_empty());
+    }
+
+    #[test]
+    fn failed_undo_save_keeps_the_record_for_retry() {
+        let sys = FakeSystem::default();
+        sys.put(K, "A", RegData::Dword(5));
+        let mut st = state("undo-save");
+        let e = Engine::new(&sys, PathBuf::new());
+        let t = reg_tweak("t", K, "A", 0);
+        assert!(e.apply(&t, &mut st, &mut |_| {}));
+        // A directory in place of the staging file makes the save fail without requiring ACL changes.
+        std::fs::create_dir(st.path.with_extension("tmp")).unwrap();
+        let (_, failed) = e.undo_checked(&t, &mut st, &mut |_| {});
+        assert!(!failed.is_empty());
+        assert!(st.contains("t"));
+        assert!(State::load_from(st.path.clone(), None).contains("t"));
+        std::fs::remove_dir(st.path.with_extension("tmp")).unwrap();
+        assert!(e.undo_checked(&t, &mut st, &mut |_| {}).1.is_empty());
+        assert!(!st.contains("t"));
+    }
+
+    #[test]
+    fn retry_saves_new_services_and_tasks_but_does_not_expand_special_targets() {
+        let sys = FakeSystem::default();
+        let mut st = state("new-resources");
+        let e = Engine::new(&sys, PathBuf::new());
+        let t = Tweak { id: "t".into(), svc_tol: 1.0, svc: vec![SvcItem { name: "NewService".into(), start: 4 }], task: vec!["NewTask".into()], ..Default::default() };
+        e.apply(&t, &mut st, &mut |_| {});
+        sys.services.borrow_mut().insert("newservice".into(), SvcState { start: 2, delayed: true });
+        sys.tasks.borrow_mut().insert("newtask".into(), true);
+        assert!(e.apply(&t, &mut st, &mut |_| {}));
+        assert!(e.undo_checked(&t, &mut st, &mut |_| {}).1.is_empty());
+        assert_eq!(sys.svc_get("NewService"), Some(SvcState { start: 2, delayed: true }));
+        assert_eq!(sys.task_enabled("NewTask"), Some(true));
+
+        let base = r"HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces";
+        let a = format!(r"{base}\{{A}}");
+        let b = format!(r"{base}\{{B}}");
+        sys.put(&a, "DhcpIPAddress", RegData::Str("10.0.0.1".into()));
+        let t = crate::opti::catalog::Catalog::load().find("net-nagle").unwrap().clone();
+        assert!(e.apply(&t, &mut st, &mut |_| {}));
+        sys.put(&b, "DhcpIPAddress", RegData::Str("10.0.0.2".into()));
+        sys.put(&b, "TcpAckFrequency", RegData::Dword(7));
+        e.apply(&t, &mut st, &mut |_| {});
+        assert_eq!(sys.reg_get(&b, "TcpAckFrequency"), Some(RegData::Dword(7)));
+        assert!(e.undo_checked(&t, &mut st, &mut |_| {}).1.is_empty());
+        assert_eq!(sys.reg_get(&a, "TcpAckFrequency"), None);
+        assert_eq!(sys.reg_get(&b, "TcpAckFrequency"), Some(RegData::Dword(7)));
+    }
+
+    #[test]
+    fn undo_restores_an_originally_disabled_task_after_drift() {
+        let sys = FakeSystem::default();
+        sys.tasks.borrow_mut().insert("task".into(), false);
+        let mut st = state("disabled-task");
+        let e = Engine::new(&sys, PathBuf::new());
+        let t = Tweak { id: "t".into(), task: vec!["Task".into()], ..Default::default() };
+        assert!(e.apply(&t, &mut st, &mut |_| {}));
+        sys.tasks.borrow_mut().insert("task".into(), true);
+        assert!(e.undo_checked(&t, &mut st, &mut |_| {}).1.is_empty());
+        assert_eq!(sys.task_enabled("Task"), Some(false));
     }
 }

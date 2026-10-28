@@ -160,7 +160,13 @@ fn active_scheme(sys: &dyn System) -> Option<String> {
 }
 
 fn get_ac(sys: &dyn System, sub: &str, setting: &str) -> Option<u32> {
-    let out = sys.run("powercfg", &["/q", "SCHEME_CURRENT", sub, setting]).text;
+    get_ac_in_scheme(sys, "SCHEME_CURRENT", sub, setting)
+}
+
+fn get_ac_in_scheme(sys: &dyn System, scheme: &str, sub: &str, setting: &str) -> Option<u32> {
+    let result = sys.run("powercfg", &["/q", scheme, sub, setting]);
+    if result.code != 0 { return None; }
+    let out = result.text;
     let hex: Vec<u32> = out
         .split_whitespace()
         .filter_map(|w| w.strip_prefix("0x").filter(|h| h.len() == 8).and_then(|h| u32::from_str_radix(h, 16).ok()))
@@ -168,33 +174,33 @@ fn get_ac(sys: &dyn System, sub: &str, setting: &str) -> Option<u32> {
     (hex.len() >= 2).then(|| hex[hex.len() - 2])
 }
 
-fn set_ac(sys: &dyn System, items: &[(String, String, u32)]) -> Vec<Value> {
+fn set_ac(sys: &dyn System, scheme: &str, items: &[(String, String, u32)]) -> Result<Vec<Value>, String> {
     let mut old = Vec::new();
     for (sub, setting, val) in items {
-        if let Some(cur) = get_ac(sys, sub, setting) {
-            old.push(json!({ "Sub": sub, "Set": setting, "Val": cur }));
-        }
-        sys.run("powercfg", &["/setacvalueindex", "SCHEME_CURRENT", sub, setting, &val.to_string()]);
+        let cur = get_ac_in_scheme(sys, scheme, sub, setting).ok_or_else(|| format!("could not read power setting {sub}/{setting}"))?;
+        old.push(json!({ "Sub": sub, "Set": setting, "Val": cur }));
+        checked(sys, "powercfg", &["/setacvalueindex", scheme, sub, setting, &val.to_string()])?;
     }
-    sys.run("powercfg", &["/setactive", "SCHEME_CURRENT"]);
-    old
+    let active = active_scheme(sys).ok_or("could not read the active power plan")?;
+    checked(sys, "powercfg", &["/setactive", &active])?;
+    Ok(old)
 }
 
-fn fs_query(sys: &dyn System, kind: Fs) -> String {
+fn fs_query(sys: &dyn System, kind: Fs) -> Result<String, String> {
     match kind {
-        Fs::LastAccess => sys.run("fsutil", &["behavior", "query", "disablelastaccess"]).text,
-        Fs::Trim => sys.run("fsutil", &["behavior", "query", "DisableDeleteNotify"]).text,
-        Fs::Short8dot3 => sys.run("fsutil", &["8dot3name", "query"]).text,
+        Fs::LastAccess => checked(sys, "fsutil", &["behavior", "query", "disablelastaccess"]),
+        Fs::Trim => checked(sys, "fsutil", &["behavior", "query", "DisableDeleteNotify"]),
+        Fs::Short8dot3 => checked(sys, "fsutil", &["8dot3name", "query"]),
     }
 }
 
-fn fs_set(sys: &dyn System, kind: Fs, v: u32) {
+fn fs_set(sys: &dyn System, kind: Fs, v: u32) -> Result<(), String> {
     let v = v.to_string();
     match kind {
-        Fs::LastAccess => sys.run("fsutil", &["behavior", "set", "disablelastaccess", &v]),
-        Fs::Trim => sys.run("fsutil", &["behavior", "set", "DisableDeleteNotify", &v]),
-        Fs::Short8dot3 => sys.run("fsutil", &["8dot3name", "set", &v]),
-    };
+        Fs::LastAccess => checked(sys, "fsutil", &["behavior", "set", "disablelastaccess", &v]),
+        Fs::Trim => checked(sys, "fsutil", &["behavior", "set", "DisableDeleteNotify", "NTFS", &v]),
+        Fs::Short8dot3 => checked(sys, "fsutil", &["8dot3name", "set", &v]),
+    }.map(|_| ())
 }
 
 fn trim_enabled(query: &str) -> bool {
@@ -235,10 +241,10 @@ impl Special {
             }
             Special::Hibernate => Some(matches!(sys.reg_get(POWER_KEY, "HibernateEnabled"), Some(RegData::Dword(0)))),
             Special::Fsutil(Fs::LastAccess) => {
-                let q = fs_query(sys, Fs::LastAccess);
+                let q = fs_query(sys, Fs::LastAccess).ok()?;
                 Some(matches!(first_digit_after(&q, "="), Some(1 | 3)))
             }
-            Special::Fsutil(Fs::Trim) => Some(trim_enabled(&fs_query(sys, Fs::Trim))),
+            Special::Fsutil(Fs::Trim) => Some(trim_enabled(&fs_query(sys, Fs::Trim).ok()?)),
             Special::Fsutil(Fs::Short8dot3) => Some(matches!(sys.reg_get(FS_KEY, "NtfsDisable8dot3NameCreation"), Some(RegData::Dword(1)))),
             Special::PowerAc(items) => Some(items.iter().all(|i| get_ac(sys, i.sub, i.setting) == Some(i.val))),
             Special::BcdDynamicTick => Some(has_pair(&sys.run("bcdedit", &["/enum", "{current}"]).text, "disabledynamictick", "yes")),
@@ -255,9 +261,83 @@ impl Special {
 
     /// Reads the originals of a port that changes many values, without changing anything. `None` for ports whose
     /// `apply` returns its own undo data.
+    /// Registry-key snapshots also write their export files before the engine saves the undo record.
     pub fn snapshot(&self, ctx: &Ctx) -> Result<Option<Value>, String> {
         let sys = ctx.sys;
         Ok(match self {
+            Special::Ultimate => {
+                let previous = active_scheme(sys).ok_or("could not read the active power plan")?;
+                let list = checked(sys, "powercfg", &["/list"])?;
+                let existing = list.lines().find(|l| l.to_lowercase().contains("ultimate")).and_then(find_guid);
+                let created = existing.is_none();
+                let target = existing.unwrap_or_else(|| {
+                    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+                    let h = format!("{:032x}", stamp ^ ((std::process::id() as u128) << 64));
+                    format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
+                });
+                Some(json!({ "Prev": previous, "Target": target, "Created": if created { Some(target.clone()) } else { None } }))
+            }
+            Special::Fsutil(kind) => {
+                let q = fs_query(sys, *kind)?;
+                let prev = match kind {
+                    Fs::LastAccess => first_digit_after(&q, "="),
+                    Fs::Trim => q.lines().find(|l| l.trim_start().starts_with("NTFS")).and_then(|l| first_digit_after(l, "=")),
+                    Fs::Short8dot3 => first_digit_after(&q, "state").or_else(|| first_digit_after(&q, "value")),
+                }.ok_or("could not read the original filesystem setting")?;
+                Some(json!({ "Prev": prev }))
+            }
+            Special::PowerAc(items) => {
+                let scheme = active_scheme(sys).ok_or("could not read the active power plan")?;
+                let mut old = Vec::new();
+                for item in *items {
+                    let value = get_ac_in_scheme(sys, &scheme, item.sub, item.setting).ok_or_else(|| format!("could not read power setting {}/{}", item.sub, item.setting))?;
+                    old.push(json!({ "Sub": item.sub, "Set": item.setting, "Val": value }));
+                }
+                Some(json!({ "Scheme": scheme, "Values": old }))
+            }
+            Special::DropRegValue { path, name } => {
+                let mut snap = reg_snapshot(sys, path, name);
+                snap["Existed"] = snap["Exists"].clone();
+                Some(snap)
+            }
+            Special::CreateKey { create, .. } => Some(json!({ "Existed": sys.reg_key_exists(create), "Default": reg_snapshot(sys, create, "") })),
+            Special::Hibernate => {
+                let Some(RegData::Dword(value)) = sys.reg_get(POWER_KEY, "HibernateEnabled") else { return Err("could not read the original hibernation state".into()) };
+                Some(json!({ "Enabled": value != 0 }))
+            }
+            Special::BcdLegacyBootMenu => {
+                let text = checked(sys, "bcdedit", &["/enum", "{default}"])?;
+                Some(json!({ "Previous": bcd_value(&text, "bootmenupolicy") }))
+            }
+            Special::ReservedStorage => {
+                let text = checked(sys, "dism.exe", &["/Online", "/English", "/Get-ReservedStorageState"])?;
+                let state = text.lines().find_map(|l| l.split_once(':').filter(|(key, _)| key.trim().eq_ignore_ascii_case("Reserved storage state")).map(|(_, value)| value.trim().to_string())).ok_or("could not read reserved storage state")?;
+                if !["Enabled", "Disabled"].iter().any(|s| state.eq_ignore_ascii_case(s)) { return Err("unrecognized reserved storage state".into()); }
+                Some(json!({ "Previous": state }))
+            }
+            Special::Teredo => {
+                let text = checked(sys, "netsh", &["interface", "teredo", "dump"])?;
+                let line = text.lines().map(str::trim).find(|l| l.starts_with("set state ")).ok_or("could not read the original Teredo configuration")?;
+                Some(json!({ "Command": line.split_whitespace().collect::<Vec<_>>() }))
+            }
+            Special::SvcHostSplit => {
+                let names: Vec<_> = sys.reg_subkeys(SVC_ROOT).into_iter().filter(|k| !k.contains("Xbl") && !k.contains("Xbox")).filter(|k| {
+                    let p = format!(r"{SVC_ROOT}\{k}");
+                    sys.reg_get(&p, "Start").is_some() && sys.reg_get(&p, "SvcHostSplitDisable").is_none()
+                }).collect();
+                Some(json!(names))
+            }
+            Special::RemoveKeys { keys, tag, .. } => {
+                let mut saved = Vec::new();
+                for (i, key) in keys.iter().enumerate() {
+                    if !sys.reg_key_exists(key) { continue; }
+                    let file = ctx.backups.join(format!("{tag}-{}-{i}.reg", super::now_stamp())).to_string_lossy().to_string();
+                    checked(sys, "reg.exe", &["export", key, &file, "/y"])?;
+                    if !sys.file_exists(&file) { return Err(format!("could not back up {key}")); }
+                    saved.push(json!({ "Key": key, "File": file }));
+                }
+                Some(json!(saved))
+            }
             Special::Nagle => {
                 let base = format!(r"{SVC_ROOT}\Tcpip\Parameters\Interfaces");
                 let mut out = Vec::new();
@@ -297,6 +377,36 @@ impl Special {
     pub fn apply_snapshot(&self, ctx: &Ctx, snap: &Value, log: &mut dyn FnMut(&str)) -> Result<(), String> {
         let sys = ctx.sys;
         match self {
+            Special::Ultimate => {
+                let target = snap["Target"].as_str().ok_or("This saved power-plan backup uses an older format. Undo this tweak before applying it again; its original backup was kept.")?;
+                if snap["Created"].is_string() {
+                    let list = checked(sys, "powercfg", &["/list"])?;
+                    if !list.to_lowercase().contains(&target.to_lowercase()) {
+                        checked(sys, "powercfg", &["-duplicatescheme", "e9a42b02-d5df-448d-aa00-03f14749eb61", target])?;
+                    }
+                }
+                checked(sys, "powercfg", &["-setactive", target]).map(|_| ())
+            }
+            Special::Fsutil(kind) => fs_set(sys, *kind, if matches!(kind, Fs::Trim) { 0 } else { 1 }),
+            Special::PowerAc(items) => {
+                let want: Vec<_> = items.iter().map(|i| (i.sub.to_string(), i.setting.to_string(), i.val)).collect();
+                set_ac(sys, snap["Scheme"].as_str().unwrap_or("SCHEME_CURRENT"), &want).map(|_| ())
+            }
+            Special::SvcHostSplit => {
+                for key in snap.as_array().into_iter().flatten().filter_map(Value::as_str) {
+                    sys.reg_set(&format!(r"{SVC_ROOT}\{key}"), "SvcHostSplitDisable", &RegData::Dword(1))?;
+                }
+                Ok(())
+            }
+            Special::RemoveKeys { .. } => {
+                for item in snap.as_array().into_iter().flatten() {
+                    let key = item["Key"].as_str().ok_or("This saved registry backup uses an older format. Undo this tweak before applying it again; its original backup was kept.")?;
+                    let file = item["File"].as_str().ok_or("missing registry backup path")?;
+                    if !sys.file_exists(file) { return Err(format!("registry backup is missing: {file}")); }
+                    sys.reg_delete_key(key)?;
+                }
+                Ok(())
+            }
             Special::Nagle => {
                 let base = format!(r"{SVC_ROOT}\Tcpip\Parameters\Interfaces");
                 let mut n = 0;
@@ -331,39 +441,29 @@ impl Special {
         let sys = ctx.sys;
         match self {
             Special::Ultimate => {
-                let prev = active_scheme(sys);
-                let list = sys.run("powercfg", &["/list"]).text;
-                let existing = list.lines().find(|l| l.to_lowercase().contains("ultimate")).and_then(find_guid);
-                let mut created = None;
-                let guid = match existing {
-                    Some(g) => Some(g),
-                    None => {
-                        let g = find_guid(&sys.run("powercfg", &["-duplicatescheme", "e9a42b02-d5df-448d-aa00-03f14749eb61"]).text);
-                        created = g.clone();
-                        g
-                    }
-                };
-                let guid = guid.ok_or("could not create the Ultimate Performance plan on this Windows edition")?;
-                sys.run("powercfg", &["-setactive", &guid]);
-                Ok(json!({ "Prev": prev, "Created": created }))
+                let snap = self.snapshot(ctx)?.ok_or("missing power-plan snapshot")?;
+                self.apply_snapshot(ctx, &snap, log)?;
+                Ok(snap)
             }
             Special::Hibernate => {
-                sys.run("powercfg", &["/hibernate", "off"]);
+                checked(sys, "powercfg", &["/hibernate", "off"])?;
                 Ok(Value::Null)
             }
             Special::Fsutil(kind) => {
-                let q = fs_query(sys, *kind);
+                let q = fs_query(sys, *kind)?;
                 let (prev, target) = match kind {
                     Fs::LastAccess => (first_digit_after(&q, "=").unwrap_or(2), 1),
                     Fs::Trim => (if trim_enabled(&q) { 0 } else { 1 }, 0),
                     Fs::Short8dot3 => (first_digit_after(&q, "state").or_else(|| first_digit_after(&q, "value")).unwrap_or(2), 1),
                 };
-                fs_set(sys, *kind, target);
+                fs_set(sys, *kind, target)?;
                 Ok(json!({ "Prev": prev }))
             }
             Special::PowerAc(items) => {
-                let want: Vec<_> = items.iter().map(|i| (i.sub.to_string(), i.setting.to_string(), i.val)).collect();
-                Ok(Value::Array(set_ac(sys, &want)))
+                let _ = items;
+                let snap = self.snapshot(ctx)?.ok_or("missing power-setting snapshot")?;
+                self.apply_snapshot(ctx, &snap, log)?;
+                Ok(snap)
             }
             Special::BcdDynamicTick | Special::Nagle | Special::EventLogs(_) => {
                 let snap = self.snapshot(ctx)?.unwrap_or(Value::Null);
@@ -371,11 +471,11 @@ impl Special {
                 Ok(snap)
             }
             Special::BcdLegacyBootMenu => {
-                sys.run("bcdedit", &["/set", "{default}", "bootmenupolicy", "legacy"]);
+                checked(sys, "bcdedit", &["/set", "{default}", "bootmenupolicy", "legacy"])?;
                 Ok(Value::Null)
             }
             Special::Teredo => {
-                sys.run("netsh", &["interface", "teredo", "set", "state", "disabled"]);
+                checked(sys, "netsh", &["interface", "teredo", "set", "state", "disabled"])?;
                 Ok(Value::Null)
             }
             Special::SvcHostSplit => {
@@ -409,7 +509,7 @@ impl Special {
                 Ok(Value::Null)
             }
             Special::ReservedStorage => {
-                sys.run("dism.exe", &["/Online", "/Set-ReservedStorageState", "/State:Disabled"]);
+                checked(sys, "dism.exe", &["/Online", "/Set-ReservedStorageState", "/State:Disabled"])?;
                 Ok(Value::Null)
             }
             Special::RemoveKeys { keys, tag, .. } => {
@@ -421,7 +521,7 @@ impl Special {
                     }
                     let file = ctx.backups.join(format!("{tag}-{stamp}-{}.reg", i + 1));
                     let f = file.to_string_lossy().to_string();
-                    sys.run("reg.exe", &["export", k, &f, "/y"]);
+                    checked(sys, "reg.exe", &["export", k, &f, "/y"])?;
                     if sys.file_exists(&f) {
                         sys.reg_delete_key(k)?;
                         files.push(f);
@@ -446,33 +546,27 @@ impl Special {
         match self {
             Special::Ultimate => {
                 if let Some(p) = data.get("Prev").and_then(Value::as_str) {
-                    sys.run("powercfg", &["-setactive", p]);
+                    checked(sys, "powercfg", &["-setactive", p])?;
                 }
                 if let Some(c) = data.get("Created").and_then(Value::as_str) {
-                    sys.run("powercfg", &["-delete", c]);
+                    let list = checked(sys, "powercfg", &["/list"])?;
+                    if list.to_lowercase().contains(&c.to_lowercase()) { checked(sys, "powercfg", &["-delete", c])?; }
                 }
             }
             Special::Hibernate => {
-                sys.run("powercfg", &["/hibernate", "on"]);
+                checked(sys, "powercfg", &["/hibernate", if data["Enabled"].as_bool() == Some(false) { "off" } else { "on" }])?;
             }
             Special::Fsutil(kind) => {
                 let prev = data.get("Prev").and_then(Value::as_u64).unwrap_or(2) as u32;
-                match kind {
-                    Fs::Trim => {
-                        if prev == 1 {
-                            fs_set(sys, Fs::Trim, 1);
-                        }
-                    }
-                    k => fs_set(sys, *k, prev),
-                }
+                fs_set(sys, *kind, prev)?;
             }
             Special::PowerAc(_) => {
-                let old: Vec<(String, String, u32)> = data
+                let old: Vec<(String, String, u32)> = data.get("Values").unwrap_or(data)
                     .as_array()
                     .map(|a| a.iter().filter_map(|o| Some((o.get("Sub")?.as_str()?.to_string(), o.get("Set")?.as_str()?.to_string(), o.get("Val")?.as_u64()? as u32))).collect())
                     .unwrap_or_default();
                 if !old.is_empty() {
-                    set_ac(sys, &old);
+                    set_ac(sys, data["Scheme"].as_str().unwrap_or("SCHEME_CURRENT"), &old)?;
                 }
             }
             Special::BcdDynamicTick => {
@@ -502,10 +596,27 @@ impl Special {
                 }
             }
             Special::BcdLegacyBootMenu => {
-                sys.run("bcdedit", &["/set", "{default}", "bootmenupolicy", "standard"]);
+                if let Some(old) = data.get("Previous") {
+                    match old.as_str() {
+                        Some(value) => { checked(sys, "bcdedit", &["/set", "{default}", "bootmenupolicy", value])?; }
+                        None => {
+                            let now = checked(sys, "bcdedit", &["/enum", "{default}"])?;
+                            if bcd_value(&now, "bootmenupolicy").is_some() { checked(sys, "bcdedit", &["/deletevalue", "{default}", "bootmenupolicy"])?; }
+                        }
+                    }
+                } else {
+                    checked(sys, "bcdedit", &["/set", "{default}", "bootmenupolicy", "standard"])?;
+                }
             }
             Special::Teredo => {
-                sys.run("netsh", &["interface", "teredo", "set", "state", "default"]);
+                if let Some(command) = data["Command"].as_array() {
+                    let mut args = vec!["interface", "teredo"];
+                    for arg in command { args.push(arg.as_str().ok_or("invalid saved Teredo command")?); }
+                    if args.get(2..4) != Some(&["set", "state"][..]) { return Err("invalid saved Teredo command".into()); }
+                    checked(sys, "netsh", &args)?;
+                } else {
+                    checked(sys, "netsh", &["interface", "teredo", "set", "state", "default"])?;
+                }
             }
             Special::Nagle => {
                 let base = format!(r"{SVC_ROOT}\Tcpip\Parameters\Interfaces");
@@ -514,17 +625,15 @@ impl Special {
                     if let Some(k) = i.as_str() {
                         // record from v2.13.5 or older: only the interface name was kept, and both values were deleted
                         let p = format!(r"{base}\{k}");
-                        let _ = sys.reg_delete_value(&p, "TcpAckFrequency");
-                        let _ = sys.reg_delete_value(&p, "TCPNoDelay");
+                        sys.reg_delete_value(&p, "TcpAckFrequency")?;
+                        sys.reg_delete_value(&p, "TCPNoDelay")?;
                         continue;
                     }
                     let Some(k) = i.get("If").and_then(Value::as_str) else { continue };
                     let p = format!(r"{base}\{k}");
                     for n in ["TcpAckFrequency", "TCPNoDelay"] {
-                        if let Some(snap) = i.get(n) {
-                            if let Err(e) = reg_restore(sys, &p, n, snap) {
-                                bad.push(format!("{p}\\{n}: {e}"));
-                            }
+                        if let Some(snap) = i.get(n) && let Err(e) = reg_restore(sys, &p, n, snap) {
+                            bad.push(format!("{p}\\{n}: {e}"));
                         }
                     }
                 }
@@ -534,10 +643,11 @@ impl Special {
             }
             Special::SvcHostSplit => {
                 for n in data.as_array().into_iter().flatten().filter_map(Value::as_str) {
-                    let _ = sys.reg_delete_value(&format!(r"{SVC_ROOT}\{n}"), "SvcHostSplitDisable");
+                    sys.reg_delete_value(&format!(r"{SVC_ROOT}\{n}"), "SvcHostSplitDisable")?;
                 }
             }
             Special::DropRegValue { path, name } => {
+                if data.get("Existed").is_none() { return Err("no saved registry value".into()); }
                 if data.get("Existed").and_then(Value::as_bool).unwrap_or(false) {
                     let ty = data.get("Type").and_then(Value::as_str).unwrap_or("String");
                     let d = data.get("Value").and_then(|v| RegData::from_json(v, ty)).ok_or_else(|| format!("{path}\\{name}: saved value is unreadable"))?;
@@ -545,10 +655,17 @@ impl Special {
                         log(&format!("  restore failed {path}\\{name}: {e}"));
                         return Err(e);
                     }
+                } else {
+                    sys.reg_delete_value(path, name)?;
                 }
             }
-            Special::CreateKey { remove, .. } => {
-                sys.reg_delete_key(remove)?;
+            Special::CreateKey { create, remove } => {
+                if let Some(existed) = data["Existed"].as_bool() {
+                    if existed { reg_restore(sys, create, "", &data["Default"])?; }
+                    else { sys.reg_delete_key(create)?; }
+                } else {
+                    sys.reg_delete_key(remove)?;
+                }
             }
             Special::EventLogs(logs) => {
                 let mut bad = Vec::new();
@@ -567,12 +684,17 @@ impl Special {
                 }
             }
             Special::ReservedStorage => {
-                sys.run("dism.exe", &["/Online", "/Set-ReservedStorageState", "/State:Enabled"]);
+                let previous = data["Previous"].as_str().unwrap_or("Enabled");
+                if !["Enabled", "Disabled"].iter().any(|s| previous.eq_ignore_ascii_case(s)) { return Err("invalid saved reserved storage state".into()); }
+                checked(sys, "dism.exe", &["/Online", "/Set-ReservedStorageState", &format!("/State:{previous}")])?;
             }
             Special::RemoveKeys { .. } => {
-                for f in data.as_array().into_iter().flatten().filter_map(Value::as_str) {
+                for item in data.as_array().into_iter().flatten() {
+                    let f = item.as_str().or_else(|| item["File"].as_str()).ok_or("invalid registry backup record")?;
                     if sys.file_exists(f) {
-                        sys.run("reg.exe", &["import", f]);
+                        checked(sys, "reg.exe", &["import", f])?;
+                    } else {
+                        return Err(format!("registry backup is missing: {f}"));
                     }
                 }
             }
@@ -673,11 +795,13 @@ mod tests {
         let dir = PathBuf::new();
         let c = ctx(&sys, &dir);
         let data = Special::Ultimate.apply(&c, &mut |_| {}).unwrap();
-        assert!(sys.ran("powercfg -setactive 11111111-2222-3333-4444-555555555555"));
+        let target = data["Target"].as_str().unwrap();
+        assert!(sys.ran(&format!("powercfg -setactive {target}")));
         assert_eq!(data["Prev"], "381b4222-f694-41f0-9685-ff5bb260df2e");
+        sys.answer("powercfg /list", &format!("GUID: {target} (Ultimate Performance)"));
         Special::Ultimate.undo(&c, &data, &mut |_| {}).unwrap();
         assert!(sys.ran("powercfg -setactive 381b4222-f694-41f0-9685-ff5bb260df2e"));
-        assert!(sys.ran("powercfg -delete 11111111-2222-3333-4444-555555555555"));
+        assert!(sys.ran(&format!("powercfg -delete {target}")));
     }
 
     #[test]
@@ -798,5 +922,91 @@ mod tests {
         for id in ["perf-ultimate", "perf-timer", "ui-classicmenu", "net-nagle", "debloat-widgets"] {
             assert!(!special_for(id).unwrap().describe().is_empty());
         }
+    }
+
+    #[test]
+    fn failed_special_commands_and_unreadable_originals_are_errors() {
+        let sys = FakeSystem::default();
+        let dir = PathBuf::new();
+        let c = ctx(&sys, &dir);
+        assert!(Special::Fsutil(Fs::LastAccess).snapshot(&c).is_err());
+        assert!(Special::PowerAc(&CPU_AC).snapshot(&c).is_err());
+        assert!(Special::Ultimate.snapshot(&c).is_err());
+        sys.fail.borrow_mut().insert("powercfg /hibernate".into());
+        assert!(Special::Hibernate.apply(&c, &mut |_| {}).is_err());
+        assert!(Special::Hibernate.undo(&c, &json!({"Enabled": true}), &mut |_| {}).is_err());
+    }
+
+    #[test]
+    fn trim_undo_restores_zero_and_changes_only_ntfs() {
+        let sys = FakeSystem::default();
+        sys.answer("fsutil behavior query DisableDeleteNotify", "NTFS DisableDeleteNotify = 0\nReFS DisableDeleteNotify = 1");
+        let dir = PathBuf::new();
+        let c = ctx(&sys, &dir);
+        let special = Special::Fsutil(Fs::Trim);
+        let snap = special.snapshot(&c).unwrap().unwrap();
+        special.apply_snapshot(&c, &snap, &mut |_| {}).unwrap();
+        special.undo(&c, &snap, &mut |_| {}).unwrap();
+        assert_eq!(sys.commands.borrow().iter().filter(|cmd| cmd.as_str() == "fsutil behavior set DisableDeleteNotify NTFS 0").count(), 2);
+        assert!(!sys.ran("DisableDeleteNotify ReFS"));
+    }
+
+    #[test]
+    fn existing_classic_menu_key_and_default_survive_undo() {
+        let sys = FakeSystem::default();
+        let special = special_for("ui-classicmenu").unwrap();
+        let Special::CreateKey { create, .. } = special else { panic!("expected CreateKey") };
+        sys.put(create, "", RegData::Str("original handler".into()));
+        sys.put(create, "Other", RegData::Dword(7));
+        let dir = PathBuf::new();
+        let c = ctx(&sys, &dir);
+        let snap = special.snapshot(&c).unwrap().unwrap();
+        special.apply_snapshot(&c, &snap, &mut |_| {}).unwrap();
+        special.undo(&c, &snap, &mut |_| {}).unwrap();
+        assert_eq!(sys.reg_get(create, ""), Some(RegData::Str("original handler".into())));
+        assert_eq!(sys.reg_get(create, "Other"), Some(RegData::Dword(7)));
+    }
+
+    #[test]
+    fn teredo_undo_restores_saved_configuration_instead_of_default() {
+        let sys = FakeSystem::default();
+        sys.answer("netsh interface teredo dump", "pushd interface teredo\nset state type=enterpriseclient servername=example.test\npopd");
+        let dir = PathBuf::new();
+        let c = ctx(&sys, &dir);
+        let snap = Special::Teredo.snapshot(&c).unwrap().unwrap();
+        Special::Teredo.undo(&c, &snap, &mut |_| {}).unwrap();
+        assert!(sys.ran("netsh interface teredo set state type=enterpriseclient servername=example.test"));
+    }
+
+    #[test]
+    fn power_setting_undo_targets_the_captured_plan() {
+        let sys = FakeSystem::default();
+        let first = "381b4222-f694-41f0-9685-ff5bb260df2e";
+        let second = "11111111-2222-3333-4444-555555555555";
+        sys.answer("powercfg /getactivescheme", first);
+        sys.answer("powercfg /q", "AC 0x00000005\nDC 0x00000000");
+        let special = Special::PowerAc(&CPU_AC);
+        let dir = PathBuf::new();
+        let c = ctx(&sys, &dir);
+        let snap = special.snapshot(&c).unwrap().unwrap();
+        sys.answer("powercfg /getactivescheme", second);
+        special.undo(&c, &snap, &mut |_| {}).unwrap();
+        assert!(sys.ran(&format!("powercfg /setacvalueindex {first}")));
+        assert!(sys.ran(&format!("powercfg /setactive {second}")));
+        assert!(!sys.ran(&format!("powercfg /setacvalueindex {second}")));
+    }
+
+    #[test]
+    fn legacy_backups_require_undo_before_reapply_without_changing_the_system() {
+        let sys = FakeSystem::default();
+        let dir = PathBuf::new();
+        let c = ctx(&sys, &dir);
+        let legacy = json!({ "Prev": "381b4222-f694-41f0-9685-ff5bb260df2e", "Created": null });
+        let error = Special::Ultimate.apply_snapshot(&c, &legacy, &mut |_| {}).unwrap_err();
+        assert!(error.contains("Undo this tweak before applying it again"));
+        let special = special_for("ui-ctx-share").unwrap();
+        let error = special.apply_snapshot(&c, &json!(["backup.reg"]), &mut |_| {}).unwrap_err();
+        assert!(error.contains("Undo this tweak before applying it again"));
+        assert!(sys.commands.borrow().is_empty());
     }
 }

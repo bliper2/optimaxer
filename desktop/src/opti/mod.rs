@@ -37,8 +37,9 @@ fn now_secs() -> u64 {
 
 /// `20261023-003711`, for backup file names.
 pub fn now_stamp() -> String {
-    let (y, mo, d, h, mi, s) = civil(now_secs());
-    format!("{y:04}{mo:02}{d:02}-{h:02}{mi:02}{s:02}")
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let (y, mo, d, h, mi, s) = civil(now.as_secs());
+    format!("{y:04}{mo:02}{d:02}-{h:02}{mi:02}{s:02}-{:09}-{}", now.subsec_nanos(), std::process::id())
 }
 
 /// `2026-10-23T00:37:11`, for undo records.

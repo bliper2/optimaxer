@@ -4,6 +4,7 @@ use serde_json::Value;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::os::windows::ffi::OsStrExt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -177,12 +178,11 @@ fn percent_decode(s: &str) -> String {
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() {
-            if let Some(v) = s.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok()) {
-                out.push(v);
-                i += 3;
-                continue;
-            }
+        if b[i] == b'%' && i + 2 < b.len()
+            && let Some(v) = s.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok()) {
+            out.push(v);
+            i += 3;
+            continue;
         }
         out.push(b[i]);
         i += 1;
@@ -193,7 +193,7 @@ fn percent_decode(s: &str) -> String {
 /// Strip anything Windows rejects or that could escape the download folder.
 pub fn safe_file_name(raw: &str) -> String {
     let name: String = raw.chars().filter(|c| !c.is_control() && !"<>:\"/\\|?*".contains(*c)).collect();
-    let name = name.trim().trim_matches('.').trim().to_string();
+    let name = name.trim_matches(|c: char| c.is_whitespace() || c == '.').to_string();
     let stem = name.split('.').next().unwrap_or("").to_uppercase();
     const RESERVED: [&str; 22] =
         ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
@@ -208,16 +208,42 @@ pub fn file_name_for(url: &str, hint: &str) -> String {
     safe_file_name(&percent_decode(path.rsplit('/').next().unwrap_or("")))
 }
 
-fn unique_path(dir: &Path, name: &str) -> PathBuf {
-    let p = dir.join(name);
-    if !p.exists() {
-        return p;
-    }
+fn reserve_download(dir: &Path, name: &str) -> Result<(PathBuf, PathBuf, fs::File), String> {
+    let name = safe_file_name(name);
     let (stem, ext) = match name.rsplit_once('.') {
         Some((s, e)) => (s.to_string(), format!(".{e}")),
         None => (name.to_string(), String::new()),
     };
-    (1..).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).unwrap()
+    for n in 0u64.. {
+        let candidate = if n == 0 { name.clone() } else { format!("{stem} ({n}){ext}") };
+        let target = dir.join(&candidate);
+        if target.exists() {
+            continue;
+        }
+        let part = dir.join(format!("{candidate}.part"));
+        // Reserve the partial file atomically. Another app instance or an interrupted download may own it.
+        match fs::OpenOptions::new().write(true).create_new(true).open(&part) {
+            Ok(file) => return Ok((target, part, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("Cannot create download: {e}")),
+        }
+    }
+    Err("No available download filename".into())
+}
+
+fn finish_download(part: &Path, target: &Path) -> Result<(), String> {
+    // std::fs creates extended-length Windows paths. Keep that support when calling Win32 directly.
+    let source = fs::canonicalize(part).map_err(|e| e.to_string())?;
+    let parent = target.parent().ok_or("Download has no destination folder")?;
+    let name = target.file_name().ok_or("Download has no filename")?;
+    let destination = fs::canonicalize(parent).map_err(|e| e.to_string())?.join(name);
+    let from: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let to: Vec<u16> = destination.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: both paths are owned, NUL-terminated buffers. MoveFileW refuses to replace an existing target.
+    if unsafe { windows_sys::Win32::Storage::FileSystem::MoveFileW(from.as_ptr(), to.as_ptr()) } == 0 {
+        return Err(format!("Cannot finish download: {}", std::io::Error::last_os_error()));
+    }
+    Ok(())
 }
 
 pub fn start_download(url: String, file: String, dir: PathBuf, on_change: impl Fn() + Send + 'static) -> Arc<Download> {
@@ -249,8 +275,6 @@ fn run_download(job: &Download, url: &str, dir: &Path, on_change: &dyn Fn()) -> 
         return Err("Unsupported link".into());
     }
     fs::create_dir_all(dir).map_err(|e| format!("Cannot create folder: {e}"))?;
-    let target = unique_path(dir, &job.file);
-    let part = dir.join(format!("{}.part", target.file_name().unwrap_or_default().to_string_lossy()));
     let mut resp = ureq::Agent::config_builder()
         .timeout_connect(Some(Duration::from_secs(10)))
         .timeout_recv_response(Some(Duration::from_secs(30)))
@@ -263,7 +287,7 @@ fn run_download(job: &Download, url: &str, dir: &Path, on_change: &dyn Fn()) -> 
         job.total.store(t, Ordering::Relaxed);
     }
     let mut reader = resp.body_mut().with_config().limit(u64::MAX).reader();
-    let mut out = fs::File::create(&part).map_err(|e| e.to_string())?;
+    let (target, part, mut out) = reserve_download(dir, &job.file)?;
     let mut buf = vec![0u8; 64 * 1024];
     let mut last_ping = std::time::Instant::now();
     let res = (|| loop {
@@ -272,6 +296,7 @@ fn run_download(job: &Download, url: &str, dir: &Path, on_change: &dyn Fn()) -> 
         }
         let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
         if n == 0 {
+            out.sync_all().map_err(|e| e.to_string())?;
             return Ok(());
         }
         out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
@@ -282,11 +307,8 @@ fn run_download(job: &Download, url: &str, dir: &Path, on_change: &dyn Fn()) -> 
         }
     })();
     drop(out);
-    match res {
-        Ok(()) => {
-            fs::rename(&part, &target).map_err(|e| e.to_string())?;
-            Ok(target)
-        }
+    match res.and_then(|_| finish_download(&part, &target)) {
+        Ok(()) => Ok(target),
         Err(e) => {
             let _ = fs::remove_file(&part);
             Err(e)
@@ -298,6 +320,45 @@ fn run_download(job: &Download, url: &str, dir: &Path, on_change: &dyn Fn()) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn response_url(response: &'static [u8]) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut request = [0; 4096];
+            let received = stream.read(&mut request).unwrap();
+            assert!(received > 0);
+            stream.write_all(response).unwrap();
+        });
+        format!("http://{address}/setup.exe")
+    }
+
+    fn download_job() -> Download {
+        Download { file: "setup.exe".into(), done: AtomicU64::new(0), total: AtomicU64::new(0),
+            cancel: AtomicBool::new(false), status: Mutex::new(DlStatus::Running) }
+    }
+
+    #[test]
+    fn http_download_saves_complete_bytes_and_cleans_failed_partials() {
+        let root = std::env::temp_dir().join(format!("orion-download-http-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let good = response_url(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\ndownload");
+        let job = download_job();
+        let target = run_download(&job, &good, &root, &|| {}).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"download");
+        assert_eq!(job.done.load(Ordering::Relaxed), 8);
+        let short = response_url(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nshort");
+        assert!(run_download(&download_job(), &short, &root, &|| {}).is_err());
+        let cancelled = download_job();
+        cancelled.cancel.store(true, Ordering::Relaxed);
+        let url = response_url(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\ndownload");
+        assert_eq!(run_download(&cancelled, &url, &root, &|| {}).unwrap_err(), "cancelled");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        assert_eq!(fs::read(target).unwrap(), b"download");
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn embedded_catalog_loads() {
@@ -312,6 +373,51 @@ mod tests {
         assert_eq!(safe_file_name(r"..\..\evil.exe"), "evil.exe");
         assert_eq!(safe_file_name("CON.txt"), "download.bin");
         assert_eq!(file_name_for("https://x.io/", ""), "download.bin");
+        assert_eq!(safe_file_name(" . setup.exe. . "), "setup.exe");
+    }
+
+    #[test]
+    fn downloads_reserve_distinct_files_and_keep_existing_partials() {
+        let dir = std::env::temp_dir().join(format!("orion-download-reserve-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("setup.exe.part"), b"unfinished").unwrap();
+        let (target_a, part_a, file_a) = reserve_download(&dir, "setup.exe").unwrap();
+        let (target_b, part_b, file_b) = reserve_download(&dir, "setup.exe").unwrap();
+        assert_ne!(target_a, target_b);
+        assert_ne!(part_a, part_b);
+        assert_eq!(fs::read(dir.join("setup.exe.part")).unwrap(), b"unfinished");
+        drop((file_a, file_b));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn completing_download_never_replaces_an_existing_file() {
+        let dir = std::env::temp_dir().join(format!("orion-download-finish-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let (target, part, mut file) = reserve_download(&dir, "setup.exe").unwrap();
+        file.write_all(b"download").unwrap();
+        drop(file);
+        fs::write(&target, b"existing").unwrap();
+        assert!(finish_download(&part, &target).is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"existing");
+        fs::remove_file(&target).unwrap();
+        finish_download(&part, &target).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"download");
+        assert!(!part.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn downloads_finish_in_long_windows_paths() {
+        let root = std::env::temp_dir().join(format!("orion-download-long-{}", std::process::id()));
+        let dir = root.join("nested-folder-".repeat(12)).join("nested-folder-".repeat(12));
+        fs::create_dir_all(&dir).unwrap();
+        let (target, part, mut file) = reserve_download(&dir, "setup.exe").unwrap();
+        file.write_all(b"download").unwrap();
+        drop(file);
+        finish_download(&part, &target).unwrap();
+        assert_eq!(fs::read(target).unwrap(), b"download");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

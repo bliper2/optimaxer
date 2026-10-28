@@ -485,8 +485,8 @@ impl OrionApp {
     }
 }
 
-fn reveal(path: &std::path::Path) {
-    let _ = std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).spawn();
+fn reveal(path: &std::path::Path) -> Result<(), std::io::Error> {
+    std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).spawn().map(|_| ())
 }
 
 fn icon(ui: &mut Ui, app: &AppItem, size: f32) {
@@ -678,6 +678,7 @@ impl OrionApp {
         let ctx = &ctx;
         let t = tokens(ctx);
         egui::Panel::top("top").show_separator_line(false).frame(egui::Frame::new().fill(t.rail).inner_margin(Margin::symmetric(S5 as i8, S3 as i8))).show(root, |ui| {
+            let compact = ui.available_width() < 1000.0;
             ui.horizontal(|ui| {
                 // the bar is the window's drag handle now that the system title bar is gone; widgets added after it sit on top
                 let drag = ui.interact(ui.max_rect(), ui.scope_id().with("titlebar"), Sense::click_and_drag());
@@ -695,7 +696,7 @@ impl OrionApp {
                     self.set_section(ctx, if idx == 1 { Section::Optimaxer } else { Section::Store });
                 }
                 ui.add_space(S4);
-                if self.section == Section::Store {
+                if self.section == Section::Store && !compact {
                     let w = (ui.available_width() - 330.0).clamp(180.0, 480.0);
                     let resp = ui.add_sized([w, 34.0], egui::TextEdit::singleline(&mut self.query).id(self.search_id).hint_text("Search apps, authors, tags  (Ctrl+F)").margin(Margin::symmetric(S3 as i8, 8)));
                     if resp.changed() {
@@ -726,7 +727,7 @@ impl OrionApp {
                     if dl.clicked() {
                         self.show_downloads = !self.show_downloads;
                     }
-                    if self.section == Section::Store {
+                    if self.section == Section::Store && !compact {
                         let label = if self.loading { "Refreshing" } else { "Refresh" };
                         if kit::ghost(ui, label, !self.loading).clicked() {
                             self.loading = true;
@@ -735,6 +736,22 @@ impl OrionApp {
                     }
                 });
             });
+            if self.section == Section::Store && compact {
+                ui.add_space(S2);
+                ui.horizontal(|ui| {
+                    let width = (ui.available_width() - 105.0).max(120.0);
+                    let search = ui.add_sized([width, 34.0], egui::TextEdit::singleline(&mut self.query).id(self.search_id).hint_text("Search apps, authors, tags  (Ctrl+F)").margin(Margin::symmetric(S3 as i8, 8)));
+                    if search.changed() {
+                        self.dirty = true;
+                        self.detail = None;
+                        self.bump(ctx);
+                    }
+                    if kit::ghost(ui, if self.loading { "Refreshing" } else { "Refresh" }, !self.loading).clicked() {
+                        self.loading = true;
+                        self.rx = spawn_refresh(ctx);
+                    }
+                });
+            }
         });
     }
 
@@ -763,7 +780,9 @@ impl OrionApp {
         let t = tokens(ctx);
         egui::Panel::left("side").resizable(false).show_separator_line(false).exact_size(212.0).frame(egui::Frame::new().fill(t.rail).inner_margin(Margin::symmetric(S3 as i8, S2 as i8))).show(root, |ui| {
             if self.section == Section::Optimaxer {
-                self.opti.side_panel(ui, ctx);
+                egui::ScrollArea::vertical().id_salt("optimaxer-navigation").auto_shrink([false, false]).show(ui, |ui| {
+                    self.opti.side_panel(ui, ctx);
+                });
                 return;
             }
             side_title(ui, "Platform");
@@ -1021,9 +1040,9 @@ impl OrionApp {
                     if kit::ghost(ui, "Clear finished", true).clicked() {
                         self.downloads.retain(|d| matches!(d.status(), DlStatus::Running));
                     }
-                    if kit::ghost(ui, "Open folder", true).clicked() {
-                        let _ = std::fs::create_dir_all(&self.settings.download_dir);
-                        let _ = open::that(&self.settings.download_dir);
+                    if kit::ghost(ui, "Open folder", true).clicked()
+                        && let Err(error) = std::fs::create_dir_all(&self.settings.download_dir).and_then(|_| open::that(&self.settings.download_dir)) {
+                        note = Some(format!("Could not open the download folder: {error}"));
                     }
                 });
             });
@@ -1054,8 +1073,9 @@ impl OrionApp {
                                     if kit::secondary(ui, "Open", true).clicked() && open::that(&path).is_err() {
                                         note = Some("Could not open the file.".into());
                                     }
-                                    if kit::ghost(ui, "Show in folder", true).clicked() {
-                                        reveal(&path);
+                                    if kit::ghost(ui, "Show in folder", true).clicked()
+                                        && let Err(error) = reveal(&path) {
+                                        note = Some(format!("Could not show the downloaded file: {error}"));
                                     }
                                     if is_installer(&path) && kit::ghost(ui, "Restore point, then open", true).on_hover_text("Optimaxer creates a System Restore point, then opens the installer").clicked() {
                                         run_installer = Some(path.clone());

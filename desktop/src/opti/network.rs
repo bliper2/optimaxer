@@ -123,9 +123,15 @@ pub fn apply_dns(sys: &dyn System, adapters: &[String], p: &DnsProvider, log: &m
         }
     }
     for c in doh_commands(p) {
-        netsh(sys, &c);
+        let out = netsh(sys, &c);
+        if out.code != 0 {
+            log(&format!("  WARN DNS-over-HTTPS registration failed: {}", out.text.trim()));
+        }
     }
-    sys.run("ipconfig.exe", &["/flushdns"]);
+    let out = sys.run("ipconfig.exe", &["/flushdns"]);
+    if out.code != 0 {
+        log(&format!("  WARN DNS cache flush failed: {}", out.text.trim()));
+    }
 }
 
 pub fn show_dns(sys: &dyn System, log: &mut dyn FnMut(&str)) {
@@ -136,10 +142,15 @@ pub fn show_dns(sys: &dyn System, log: &mut dyn FnMut(&str)) {
 }
 
 pub fn reset_stack(sys: &dyn System, log: &mut dyn FnMut(&str)) {
-    sys.run("netsh.exe", &["winsock", "reset"]);
-    sys.run("netsh.exe", &["int", "ip", "reset"]);
-    sys.run("ipconfig.exe", &["/flushdns"]);
-    log("Network stack reset. Restart Windows to finish.");
+    let mut succeeded = true;
+    for (exe, args) in [("netsh.exe", &["winsock", "reset"][..]), ("netsh.exe", &["int", "ip", "reset"][..]), ("ipconfig.exe", &["/flushdns"][..])] {
+        let out = sys.run(exe, args);
+        if out.code != 0 {
+            succeeded = false;
+            log(&format!("  WARN {exe} {} failed: {}", args.join(" "), out.text.trim()));
+        }
+    }
+    log(if succeeded { "Network stack reset. Restart Windows to finish." } else { "Network reset incomplete. Review the failed steps and restart Windows after resolving them." });
 }
 
 /// Average TCP connect time to port 53 over `samples` tries, in milliseconds.
@@ -217,5 +228,19 @@ mod tests {
         let sys = FakeSystem::default();
         apply_dns(&sys, &[], &provider("Google"), &mut |_| {});
         assert!(sys.commands.borrow().is_empty());
+    }
+
+    #[test]
+    fn failed_network_commands_are_reported_without_success() {
+        let sys = FakeSystem::default();
+        sys.fail.borrow_mut().insert("netsh.exe".into());
+        let mut lines = Vec::new();
+        reset_stack(&sys, &mut |l| lines.push(l.to_string()));
+        assert!(lines.iter().any(|l| l.contains("incomplete")));
+        assert!(!lines.iter().any(|l| l.starts_with("Network stack reset.")));
+        lines.clear();
+        apply_dns(&sys, &["Ethernet".into()], &provider("Cloudflare"), &mut |l| lines.push(l.to_string()));
+        assert!(lines.iter().any(|l| l.contains("DNS-over-HTTPS registration failed")));
+        assert!(!lines.iter().any(|l| l.contains("DNS on Ethernet: Cloudflare")));
     }
 }

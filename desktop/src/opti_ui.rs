@@ -300,9 +300,9 @@ struct Batch {
 
 /// Applies or undoes a list of tweaks. With a requested restore point that fails, nothing is changed and
 /// `restore_failed` is set, so the window can ask before going on without one.
-fn run_batch(sys: &dyn System, eng: &Engine, cat: &Catalog, ids: &[String], apply: bool, restore_point: bool, st: &mut State, log: &mut dyn FnMut(&str)) -> Batch {
+fn run_batch(eng: &Engine, cat: &Catalog, ids: &[String], apply: bool, restore_point: bool, st: &mut State, log: &mut dyn FnMut(&str)) -> Batch {
     let mut b = Batch { restore_failed: false, ok: 0, restart: false, explorer: false, now: HashMap::new() };
-    if apply && restore_point && !tools::create_restore_point(sys, "Optimaxer - before tweaks", log) {
+    if apply && restore_point && !tools::create_restore_point(eng.sys, "Optimaxer - before tweaks", log) {
         log("WARN No restore point, so nothing was changed.");
         b.restore_failed = true;
         return b;
@@ -315,8 +315,9 @@ fn run_batch(sys: &dyn System, eng: &Engine, cat: &Catalog, ids: &[String], appl
         if on == apply && failed.is_empty() {
             b.ok += 1;
         }
-        b.now.insert(id.clone(), on);
     }
+    // A changed value can also change the status of another tweak that uses it.
+    b.now = eng.status_all(&cat.tweaks, st);
     b
 }
 
@@ -488,7 +489,11 @@ impl OptiUi {
             let st = State::load();
             let eng = Engine::new(&sys, backup_dir());
             w.send(Msg::Status(eng.status_all(&cat.tweaks, &st)));
-            w.log("Optimaxer ready.");
+            if let Some(error) = st.load_error() {
+                w.log(&format!("WARN Undo state could not be loaded: {error}. Tweak changes are blocked until the saved state is recovered."));
+            } else {
+                w.log("Optimaxer ready.");
+            }
         });
     }
 
@@ -602,6 +607,8 @@ impl OptiUi {
                             } else {
                                 bad.push(format!("{id} ({})", failed.join("; ")));
                             }
+                        } else {
+                            bad.push(format!("{id} (unsupported here; restore with the PowerShell edition)"));
                         }
                     }
                     if bad.is_empty() {
@@ -688,7 +695,7 @@ impl OptiUi {
             let sys = WinSystem;
             let mut st = State::load();
             let eng = Engine::new(&sys, backup_dir());
-            let b = run_batch(&sys, &eng, &cat, &ids, apply, restore_point, &mut st, &mut |l| w.log(l));
+            let b = run_batch(&eng, &cat, &ids, apply, restore_point, &mut st, &mut |l| w.log(l));
             if b.restore_failed {
                 w.send(Msg::Plan(Pending {
                     title: "No restore point".into(),
@@ -769,7 +776,7 @@ impl OptiUi {
 
     pub fn log_panel(&mut self, root: &mut Ui) {
         let t = tokens(root.ctx());
-        egui::Panel::bottom("opti-log").resizable(true).default_size(96.0).show_separator_line(false).frame(egui::Frame::new().fill(t.surface1).inner_margin(Margin::symmetric(S5 as i8, S3 as i8))).show(root, |ui| {
+        egui::Panel::bottom("opti-log").resizable(true).default_size(96.0).max_size((root.available_height() * 0.25).max(80.0)).show_separator_line(false).frame(egui::Frame::new().fill(t.surface1).inner_margin(Margin::symmetric(S5 as i8, S3 as i8))).show(root, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Activity").font(FontId::new(T_HEADING, semibold())).color(t.text));
                 if self.busy.is_some() {
@@ -836,14 +843,16 @@ impl OptiUi {
         }
         let started = self.page_started;
         kit::enter(ui, started, |ui| {
-            ui.add_enabled_ui(self.pending.is_none(), |ui| match self.page {
-                Page::Overview => self.overview_page(ui, ctx),
-                Page::Tweaks => self.tweaks_page(ui, ctx),
-                Page::Services => self.services_page(ui, ctx),
-                Page::Startup => self.startup_page(ui, ctx),
-                Page::Cleaner => self.cleaner_page(ui, ctx),
-                Page::Network => self.network_page(ui, ctx),
-                Page::Tools => self.tools_page(ui, ctx, suggestions),
+            ui.add_enabled_ui(self.pending.is_none(), |ui| {
+                egui::ScrollArea::vertical().id_salt(("optimaxer-page", self.page.label())).auto_shrink([false, false]).show(ui, |ui| match self.page {
+                    Page::Overview => self.overview_page(ui, ctx),
+                    Page::Tweaks => self.tweaks_page(ui, ctx),
+                    Page::Services => self.services_page(ui, ctx),
+                    Page::Startup => self.startup_page(ui, ctx),
+                    Page::Cleaner => self.cleaner_page(ui, ctx),
+                    Page::Network => self.network_page(ui, ctx),
+                    Page::Tools => self.tools_page(ui, ctx, suggestions),
+                });
             });
         });
     }
@@ -904,12 +913,10 @@ impl OptiUi {
             decision = Some(false);
         }
         self.restore_first = restore;
-        if let Some(ok) = decision {
-            if let Some(p) = self.pending.take() {
-                if ok {
-                    self.confirm(ctx, p, restore);
-                }
-            }
+        if let Some(ok) = decision
+            && let Some(p) = self.pending.take()
+            && ok {
+            self.confirm(ctx, p, restore);
         }
     }
 
@@ -1042,7 +1049,7 @@ impl OptiUi {
                 }
             }
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let mut q = std::mem::take(&mut self.tw_search);
             self.toolbar_search(ui, &mut q, "Search tweaks");
             self.tw_search = q;
@@ -1050,19 +1057,17 @@ impl OptiUi {
             if n > 0 {
                 ui.label(RichText::new(format!("{n} selected")).size(T_SMALL).color(t.muted));
             }
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let idle = self.busy.is_none();
-                let label = if n > 0 { format!("Apply {n} tweak{}", if n == 1 { "" } else { "s" }) } else { "Apply tweaks".to_string() };
-                if kit::primary(ui, &label, idle && n > 0).clicked() {
-                    self.preview_apply(ctx);
-                }
-                if kit::secondary(ui, "Undo selected", idle && n > 0).clicked() {
-                    self.preview_undo();
-                }
-                if kit::ghost(ui, "Refresh", idle).clicked() {
-                    self.refresh_status(ctx);
-                }
-            });
+            let idle = self.busy.is_none();
+            let label = if n > 0 { format!("Apply {n} tweak{}", if n == 1 { "" } else { "s" }) } else { "Apply tweaks".to_string() };
+            if kit::primary(ui, &label, idle && n > 0).clicked() {
+                self.preview_apply(ctx);
+            }
+            if kit::secondary(ui, "Undo selected", idle && n > 0).clicked() {
+                self.preview_undo();
+            }
+            if kit::ghost(ui, "Refresh", idle).clicked() {
+                self.refresh_status(ctx);
+            }
         });
         ui.add_space(S2);
         ui.horizontal(|ui| {
@@ -1075,11 +1080,9 @@ impl OptiUi {
                     ui.selectable_value(&mut self.tw_group, i, *g);
                 }
             });
-            if self.tw_risk != 0 || self.tw_group != 0 {
-                if kit::ghost(ui, "Reset filters", true).clicked() {
-                    self.tw_risk = 0;
-                    self.tw_group = 0;
-                }
+            if (self.tw_risk != 0 || self.tw_group != 0) && kit::ghost(ui, "Reset filters", true).clicked() {
+                self.tw_risk = 0;
+                self.tw_group = 0;
             }
         });
         ui.add_space(S2);
@@ -1446,8 +1449,12 @@ impl OptiUi {
             }
             if kit::secondary(ui, "Flush DNS cache", idle).clicked() {
                 self.spawn(ctx, "Flush DNS", |w| {
-                    WinSystem.run("ipconfig.exe", &["/flushdns"]);
-                    w.log("DNS cache flushed.");
+                    let result = WinSystem.run("ipconfig.exe", &["/flushdns"]);
+                    if result.code == 0 {
+                        w.log("DNS cache flushed.");
+                    } else {
+                        w.log(&format!("WARN DNS cache flush failed: {}", result.text.trim()));
+                    }
                 });
             }
             if kit::secondary(ui, "Benchmark servers", idle).clicked() {
@@ -1512,8 +1519,9 @@ impl OptiUi {
                         }
                     }
                 }
-                if kit::tile(ui, size, "Open System Restore", "Roll your PC back to a restore point.", None, true, false).clicked() {
-                    let _ = std::process::Command::new("rstrui.exe").spawn();
+                if kit::tile(ui, size, "Open System Restore", "Roll your PC back to a restore point.", None, true, false).clicked()
+                    && let Err(error) = std::process::Command::new("rstrui.exe").spawn() {
+                    self.events.push(OptiEvent::Toast(format!("Could not open System Restore: {error}")));
                 }
                 let vendor = self.traits.as_ref().map(|tr| tr.vendor.clone()).unwrap_or_default();
                 let url = hw::vendor_url(&vendor);
@@ -1521,10 +1529,10 @@ impl OptiUi {
                     Some(_) => ("Vendor driver page".to_string(), format!("Opens the official {vendor} support page in your browser. Optimaxer downloads and installs nothing.")),
                     None => ("Vendor driver page".to_string(), "No MSI, Acer or Gigabyte board detected. Open your PC maker's support site instead.".to_string()),
                 };
-                if kit::tile(ui, size, &title, &desc, None, url.is_some(), false).clicked() {
-                    if let Some(u) = url {
-                        let _ = open::that(u);
-                    }
+                if kit::tile(ui, size, &title, &desc, None, url.is_some(), false).clicked()
+                    && let Some(u) = url
+                    && let Err(error) = open::that(u) {
+                    self.events.push(OptiEvent::Toast(format!("Could not open the driver support page: {error}")));
                 }
                 if kit::tile(ui, size, "Undo all Optimaxer tweaks", "Restores every setting Optimaxer changed to its original value.", None, idle, true).clicked() && self.need_admin() {
                     self.pending = Some(Pending { title: "Undo all tweaks".into(), intro: "Restore every setting changed by Optimaxer to its original value?".into(), lines: vec![], action: Action::UndoAll, restore_option: false, ok_label: "Undo all tweaks".into() });
@@ -1553,6 +1561,24 @@ impl OptiUi {
         });
     }
     // endregion
+}
+
+/// Everything the confirmation window shows, as plain text for the clipboard.
+fn confirm_text(p: &Pending) -> String {
+    let mut out = format!("{}
+{}
+", p.title, p.intro);
+    for l in &p.lines {
+        if l.head {
+            out.push_str(&format!("
+{}
+", l.text));
+        } else {
+            out.push_str(&format!("  {}
+", l.text));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -1596,6 +1622,29 @@ mod tests {
     }
 
     #[test]
+    fn batch_refreshes_other_tweaks_that_share_a_setting() {
+        use crate::opti::catalog::{RegItem, RegVal};
+        let path = r"HKCU:\Software\OptimaxerBatchTest";
+        let first = Tweak { id: "first".into(), name: "First".into(), reg: vec![RegItem {
+            p: path.into(), n: "Choice".into(), v: RegVal::Num(1), t: "DWord".into(),
+        }], ..Default::default() };
+        let mut second = first.clone();
+        second.id = "second".into();
+        second.reg[0].v = RegVal::Num(2);
+        let cat = Catalog { tweaks: vec![first, second], ..Default::default() };
+        let sys = FakeSystem::default();
+        sys.put(path, "Choice", RegData::Dword(2));
+        let dir = std::env::temp_dir().join(format!("opti-batch-status-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut state = State::load_from(dir.join("state.json"), None);
+        let eng = Engine::new(&sys, PathBuf::new());
+        let batch = run_batch(&eng, &cat, &["first".into()], true, false, &mut state, &mut |_| {});
+        assert_eq!(batch.now.get("first"), Some(&true));
+        assert_eq!(batch.now.get("second"), Some(&false));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn failed_restore_point_applies_nothing() {
         use crate::opti::backend::fake::FakeSystem;
         let sys = FakeSystem::default();
@@ -1607,12 +1656,12 @@ mod tests {
         let mut st = State::load_from(d.join("state.json"), None);
         let eng = Engine::new(&sys, PathBuf::new());
         let ids = vec!["ui-ext".to_string(), "game-mode".to_string()];
-        let b = run_batch(&sys, &eng, &cat, &ids, true, true, &mut st, &mut |_| {});
+        let b = run_batch(&eng, &cat, &ids, true, true, &mut st, &mut |_| {});
         assert!(b.restore_failed && b.now.is_empty());
         assert!(st.records.is_empty(), "a tweak was applied after the restore point failed");
         assert!(sys.values.borrow().is_empty(), "the registry was written");
-        let b = run_batch(&sys, &eng, &cat, &ids, true, false, &mut st, &mut |_| {});
-        assert!(!b.restore_failed && b.now.len() == 2, "without a restore point the batch runs");
+        let b = run_batch(&eng, &cat, &ids, true, false, &mut st, &mut |_| {});
+        assert!(!b.restore_failed && ids.iter().all(|id| b.now.contains_key(id)), "without a restore point the batch runs");
     }
 
     #[test]
@@ -1630,9 +1679,9 @@ mod tests {
     fn group_filter_matches_tags_and_applied_state() {
         let cat = Catalog::load();
         let all = cat.tweaks.len();
-        for g in 0..6 {
+        for (g, name) in TWEAK_GROUPS.iter().enumerate().take(6) {
             let n = cat.tweaks.iter().filter(|t| in_group(t, g, false)).count();
-            assert!(n > 0 && n <= all, "group {} is empty", TWEAK_GROUPS[g]);
+            assert!(n > 0 && n <= all, "group {name} is empty");
         }
         let t = &cat.tweaks[0];
         assert!(in_group(t, 6, true) && !in_group(t, 6, false) && in_group(t, 7, false));
@@ -1653,22 +1702,4 @@ mod tests {
         assert_eq!(risk_tone(""), risk_tone("Safe"));
         assert_eq!(risk_tone("Moderate"), Tone::Warn);
     }
-}
-
-/// Everything the confirmation window shows, as plain text for the clipboard.
-fn confirm_text(p: &Pending) -> String {
-    let mut out = format!("{}
-{}
-", p.title, p.intro);
-    for l in &p.lines {
-        if l.head {
-            out.push_str(&format!("
-{}
-", l.text));
-        } else {
-            out.push_str(&format!("  {}
-", l.text));
-        }
-    }
-    out
 }

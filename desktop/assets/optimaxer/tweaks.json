@@ -11227,8 +11227,8 @@
     },
     {
         "id":  "perf-trimon",
-        "name":  "Make sure TRIM is enabled (SSD)",
-        "desc":  "Windows normally enables TRIM on SSDs; this turns it back on if a tool or driver switched it off. Keeps write speed up over time.",
+        "name":  "Make sure NTFS TRIM is enabled (SSD)",
+        "desc":  "Windows normally enables TRIM on NTFS SSDs; this turns it back on if a tool or driver switched it off. Keeps write speed up over time.",
         "cat":  "Performance",
         "risk":  "Safe",
         "tags":  [
@@ -11260,8 +11260,8 @@
                        "apply":  true,
                        "undo":  true,
                        "test":  true,
-                       "snapshot":  false
+                       "snapshot":  true
                    },
-        "apply_text":  " $o = Invoke-Native fsutil @(\u0027behavior\u0027, \u0027query\u0027, \u0027DisableDeleteNotify\u0027); $prev = if ($o -match \u0027NTFS\\s+DisableDeleteNotify\\s*=\\s*(\\d)\u0027) { [int]$Matches[1] } else { 0 }; fsutil behavior set DisableDeleteNotify 0 | Out-Null; @{ Prev = $prev } "
+        "apply_text":  "\r\n      param($d)\r\n      $o = Invoke-Native fsutil.exe @(\u0027behavior\u0027, \u0027set\u0027, \u0027DisableDeleteNotify\u0027, \u0027NTFS\u0027, \u00270\u0027)\r\n      if ($global:OptiExit -ne 0) { throw \"Could not enable NTFS TRIM: $o\" }\r\n  "
     }
 ]
