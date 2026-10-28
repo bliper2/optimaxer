@@ -511,7 +511,8 @@ function Invoke-TweakApply {
     Write-Log "Apply: $($T.Name)"
     Clear-TaskCache
     $state = Get-OptiState
-    $fresh = -not ($state.ContainsKey($T.Id) -and (Test-Tweak $T))
+    # A failed apply or later setting drift must not replace the first saved originals on retry.
+    $fresh = -not $state.ContainsKey($T.Id)
     $rec = if ($fresh) { @{ Reg = @(); Svc = @(); Task = @(); Data = $null; Time = (Get-Date).ToString('s') } } else { $state[$T.Id] }
 
     # 1. read the originals (no writes)

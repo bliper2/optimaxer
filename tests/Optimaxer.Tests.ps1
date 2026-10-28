@@ -141,6 +141,36 @@ It 'presets tick at most one tweak per conflict group' {
 }
 
 Write-Host 'engine'
+It 'retry after partial apply preserves the original registry and script values' {
+    New-Item -Path $TestKey -Force | Out-Null
+    Set-ItemProperty -LiteralPath $TestKey -Name V -Value 7 -Type DWord
+    $saved = Save-Functions @('Set-RegEntry')
+    $t = New-FakeTweak @{ Id = 'test-retry'; Reg = @(
+        @{ P = $TestKey; N = 'V'; V = 1; T = 'DWord' },
+        @{ P = $TestKey; N = 'New'; V = 1; T = 'DWord' })
+        Snapshot = { @{ Previous = (Get-ItemProperty -LiteralPath $TestKey).V } }
+        Apply = { param($d) }
+        Undo = { param($d) Assert ($d.Previous -eq 7) 'script original was replaced' } }
+    try {
+        function global:Set-RegEntry {
+            param($P, $N, $V, $T)
+            if ($N -eq 'New') { throw 'simulated write failure' }
+            Set-ItemProperty -LiteralPath $P -Name $N -Value $V -Type $T
+        }
+        Assert (-not (Invoke-TweakApply $t)) 'partial apply reported success'
+        Assert ((Get-ItemProperty -LiteralPath $TestKey).V -eq 1) 'first write did not run'
+        Restore-Functions $saved
+        Assert (Invoke-TweakApply $t) 'retry did not apply'
+        $rec = (Get-OptiState)[$t.Id]
+        Assert ($rec.Reg[0].Value -eq 7) 'registry original was replaced'
+        Assert (-not $rec.Reg[1].Exists) 'absent original was replaced'
+        Assert ($rec.Data.Previous -eq 7) 'script original was replaced'
+        [void](Invoke-TweakUndo $t)
+        Assert (-not $global:OptiUndoFailed.ContainsKey($t.Id)) 'undo failed'
+        Assert ((Get-ItemProperty -LiteralPath $TestKey).V -eq 7) 'undo did not restore 7'
+        Assert ($null -eq (Get-ItemProperty -LiteralPath $TestKey).New) 'undo did not remove new value'
+    } finally { Restore-Functions $saved; Remove-FakeTweaks }
+}
 It 'record is on disk before the first change' {
     New-Item -Path $TestKey -Force | Out-Null
     Set-ItemProperty -LiteralPath $TestKey -Name V -Value 7 -Type DWord

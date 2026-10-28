@@ -160,7 +160,8 @@ impl<'a> Engine<'a> {
     pub fn apply(&self, t: &Tweak, state: &mut State, log: &mut dyn FnMut(&str)) -> bool {
         log(&format!("Apply: {}", t.name));
         self.clear_cache();
-        let fresh = !(state.contains(&t.id) && self.test(t, state));
+        // A failed apply or later setting drift must not replace the first saved originals on retry.
+        let fresh = !state.contains(&t.id);
         let mut rec = if fresh { Record { time: super::now_iso(), ..Default::default() } } else { state.records.get(&t.id).cloned().unwrap_or_default() };
 
         // 1. read the originals
@@ -444,6 +445,31 @@ mod tests {
             e.undo(y, &mut st, &mut |_| {});
             assert_eq!(sys.reg_get(K, "Shared"), Some(RegData::Dword(9)), "undo order a-first={first_a}");
         }
+    }
+
+    #[test]
+    fn retry_after_partial_apply_preserves_originals() {
+        let sys = FakeSystem::default();
+        let blocked = format!(r"{K}\Blocked");
+        sys.put(K, "A", RegData::Dword(5));
+        sys.put(&blocked, "B", RegData::Dword(7));
+        let mut t = reg_tweak("t", K, "A", 0);
+        t.reg.push(RegItem { p: blocked.clone(), n: "B".into(), v: RegVal::Num(0), t: "DWord".into() });
+        let mut st = state("retry");
+        let e = Engine::new(&sys, PathBuf::new());
+        sys.deny_writes.borrow_mut().insert(blocked.to_lowercase());
+        assert!(!e.apply(&t, &mut st, &mut |_| {}));
+        assert_eq!(sys.reg_get(K, "A"), Some(RegData::Dword(0)));
+        let original = st.records["t"].clone();
+        let mut st = State::load_from(st.path.clone(), None);
+        sys.deny_writes.borrow_mut().clear();
+        assert!(e.apply(&t, &mut st, &mut |_| {}));
+        assert_eq!(st.records["t"], original);
+        let mut st = State::load_from(st.path.clone(), None);
+        let (_, failed) = e.undo_checked(&t, &mut st, &mut |_| {});
+        assert!(failed.is_empty(), "{failed:?}");
+        assert_eq!(sys.reg_get(K, "A"), Some(RegData::Dword(5)));
+        assert_eq!(sys.reg_get(&blocked, "B"), Some(RegData::Dword(7)));
     }
 
     #[test]

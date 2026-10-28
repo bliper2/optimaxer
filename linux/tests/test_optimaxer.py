@@ -113,6 +113,28 @@ class Base(unittest.TestCase):
 
 
 class TweakFiles(Base):
+    def test_retry_after_failed_verification_and_drift_preserves_originals(self):
+        self.put("/etc/first.conf", "original\n")
+        t = ox.Tweak("test-retry", "Retry", "", "Test",
+                     files={"/etc/first.conf": "changed\n", "/etc/new.conf": "new\n"},
+                     test_cmd=["check-retry"])
+        runner = ox.CTX.runner
+
+        def fail_verification(cmd, user, write, input):
+            return (1, "") if cmd == ["check-retry"] else runner(cmd, user, write, input)
+
+        ox.CTX.runner = fail_verification
+        self.assertFalse(t.apply())
+        self.assertEqual(self.get("/etc/first.conf"), "changed\n")
+        original = ox.load_state()[t.id]
+        ox.remove_file("/etc/new.conf")
+        ox.CTX.runner = runner
+        self.assertTrue(t.apply())
+        self.assertEqual(ox.load_state()[t.id], original)
+        self.assertTrue(t.undo())
+        self.assertEqual(self.get("/etc/first.conf"), "original\n")
+        self.assertIsNone(self.get("/etc/new.conf"))
+
     def test_apply_undo_files(self):
         t = ox.tweak_by_id("perf-vm")
         self.assertFalse(t.is_applied())

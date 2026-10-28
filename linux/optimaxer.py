@@ -457,7 +457,8 @@ class Tweak:
 
     def apply(self) -> bool:
         state = load_state()
-        already = self.id in state and self.is_applied()
+        # A failed apply or later setting drift must not replace the first saved originals on retry.
+        already = self.id in state
         snap = {"files": [], "edits": [], "units": [], "pkgs_added": [], "time": time.strftime("%Y-%m-%dT%H:%M:%S")}
         if already:
             snap = state[self.id]
