@@ -11,7 +11,7 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -22,6 +22,12 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\Optimaxer.Tests.ps1
       - name: Linux simulated-system and Tk tests on Windows
         run: python -B -m unittest discover -s linux/tests
+
+  desktop:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
       - name: Select stable Rust
         run: rustup default stable
       - name: Desktop tests
