@@ -1,0 +1,47 @@
+name: Verify application
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - name: PowerShell engine and catalog tests
+        shell: powershell
+        run: .\tests\Optimaxer.Tests.ps1
+      - name: Linux simulated-system and Tk tests on Windows
+        run: python -B -m unittest discover -s linux/tests
+      - name: Select stable Rust
+        run: rustup default stable
+      - name: Desktop tests
+        working-directory: desktop
+        run: cargo test --locked
+      - name: Desktop lint
+        working-directory: desktop
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Desktop release build
+        working-directory: desktop
+        run: cargo build --release --locked
+
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install test display and Tk
+        run: sudo apt-get update && sudo apt-get install -y xvfb python3-tk
+      - name: Installer syntax
+        run: bash -n linux/install.sh
+      - name: Simulated-system and Tk tests on Linux
+        run: xvfb-run -a python3 -B -m unittest discover -s linux/tests

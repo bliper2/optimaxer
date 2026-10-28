@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Optimaxer</title>
-<meta name="description" content="Free, open-source tweaking, debloat and app-install tool for Windows 10/11 and Manjaro/Arch Linux.">
+<meta name="description" content="Open-source tweaking, cleanup and app tools for Windows 10/11, Arch-based Linux and Fedora.">
 <link rel="icon" href="favicon.ico">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -16,7 +16,7 @@
 </header>
 
 <h1>Optimaxer</h1>
-<p>Optimaxer is a free tool that tweaks, debloats and cleans Windows 10/11, and installs apps. There is also a command-line edition for Manjaro and other Arch-based Linux. It is open source (MIT). The Windows version is a WPF window written in PowerShell, laid out like Chris Titus Tech's WinUtil; the Linux version is one Python file.</p>
+<p>Optimaxer is a free tool that tweaks, debloats and cleans Windows 10/11, and installs apps. The PowerShell edition uses WPF. A separate Rust desktop app combines Optimaxer with the Orion Store. The Python edition supports Manjaro, other Arch-based distributions and Fedora, with a Tk window and a command-line interface. PowerShell and Linux sources use the MIT license; the Orion-derived desktop app uses GPL-3.0.</p>
 <p>Every tweak saves the value it replaces, so a single tweak, or all of them, can be undone later. It has no telemetry and no account.</p>
 
 <h2>Windows</h2>
@@ -26,20 +26,23 @@
 <p>What is in it:</p>
 <ul>
 <li>Install: 260+ apps through WinGet, with a check after each install.</li>
-<li>Tweaks: 170+, covering performance, gaming, network, privacy, Copilot/AI removal and browser debloat. Presets are available.</li>
+<li>Tweaks covering performance, gaming, network, privacy, Copilot/AI removal and browser debloat, with hardware-aware presets.</li>
 <li>Services, startup entries (including scheduled tasks), cleaner, Appx debloat, DNS, Windows features, tools.</li>
 <li>Config export/import and an unattended mode for scripts.</li>
 </ul>
 
-<h2>Linux (Manjaro / Arch)</h2>
+<h2>Linux (Manjaro / Arch / Fedora)</h2>
 <pre><code>curl -fsSL https://raw.githubusercontent.com/bliper2/optimaxer/main/linux/install.sh | bash
 optimaxer --dry-run</code></pre>
-<p>Needs only Python 3 (and Tk for the optional window, <code>optimaxer gui</code>). Covers 97 apps (official repos, AUR, Flatpak), 23 tweaks with undo including browser debloat for Firefox, Chromium, Chrome, Brave and Edge, the cleaner, services, autostart entries, debloat, DNS and some maintenance tools. So far it has been tested against a simulated system, not real hardware, which is why the example above starts with <code>--dry-run</code>.</p>
+<p>Needs Python 3 and Tk for the optional window (<code>optimaxer gui</code>). Apps come from pacman, the AUR, dnf or Flatpak, depending on the distribution. Includes tweaks with undo, browser debloat, cleaner, services, autostart entries, package removal, DNS and maintenance tools. Automated tests use a simulated system; real Arch and Fedora integration remains a separate check.</p>
+
+<h2>Desktop app</h2>
+<p>The Rust desktop build includes the Orion app catalog and Optimaxer's supported Windows tuning tools. Some PowerShell features are not ported; the <a href="https://github.com/bliper2/optimaxer/blob/main/desktop/README.md">desktop documentation</a> lists them. Download the desktop ZIP from <a href="https://github.com/bliper2/optimaxer/releases/latest">Releases</a>.</p>
 
 <h2>Before you use it</h2>
 <p>It changes system settings and needs administrator rights. Make a restore point or snapshot first, and read the <a href="terms.html">terms</a>. What it sends over the network is listed in the <a href="privacy.html">privacy policy</a>. Bugs and requests go to the <a href="https://github.com/bliper2/optimaxer/issues">issue tracker</a>.</p>
 
-<footer>Optimaxer is MIT licensed. App names and icons belong to their owners.</footer>
+<footer>PowerShell and Linux: MIT. Orion-derived desktop app: GPL-3.0. App names and icons belong to their owners.</footer>
 </div>
 </body>
 </html>
