@@ -179,17 +179,26 @@ pub fn restore_latest(sys: &dyn System, backups: &Path, log: &mut dyn FnMut(&str
     };
     let bytes = std::fs::read(&file).unwrap_or_default();
     let text = String::from_utf8_lossy(bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes)).into_owned();
-    let Ok(list) = serde_json::from_str::<Vec<serde_json::Value>>(&text) else {
+    let Ok(list) = serde_json::from_str::<Vec<super::state::SvcRec>>(&text) else {
         log("The service backup is unreadable.");
         return false;
     };
-    for b in list {
-        let (Some(name), Some(start)) = (b["Name"].as_str(), b["Start"].as_u64()) else { continue };
-        sys.svc_set(name, start as u32, b["Delayed"].as_u64().unwrap_or(0) != 0);
-        log(&format!("  restored {name}"));
+    let data = Data::load();
+    if list.is_empty() || list.iter().any(|b| b.name.is_empty() || !(2..=4).contains(&b.start) || is_protected(&data, &b.name)) {
+        log("The service backup contains no restorable services or invalid/protected entries; nothing was changed.");
+        return false;
     }
-    log(&format!("Restored from {}", file.display()));
-    true
+    let mut succeeded = true;
+    for b in list {
+        if sys.svc_set(&b.name, b.start as u32, b.delayed != 0) {
+            log(&format!("  restored {}", b.name));
+        } else {
+            succeeded = false;
+            log(&format!("  WARN could not restore {}", b.name));
+        }
+    }
+    log(&format!("{} from {}", if succeeded { "Restored" } else { "Restore incomplete" }, file.display()));
+    succeeded
 }
 
 #[cfg(test)]
@@ -259,5 +268,23 @@ mod tests {
         let n = set_start(&sys, &data, &["Fax".into()], 4, Path::new(r"Z:\definitely\missing"), &mut |_| {});
         assert_eq!(n, 0);
         assert_eq!(sys.svc_get("Fax").unwrap().start, 3);
+    }
+
+    #[test]
+    fn restore_reports_refused_and_invalid_entries() {
+        let sys = FakeSystem::default();
+        let dir = std::env::temp_dir().join(format!("opti-svc-invalid-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("services-test.json");
+        std::fs::write(&file, r#"[{"Name":"Missing","Start":3,"Delayed":0}]"#).unwrap();
+        let mut lines = Vec::new();
+        assert!(!restore_latest(&sys, &dir, &mut |l| lines.push(l.to_string())));
+        assert!(!lines.iter().any(|l| l.contains("restored Missing")));
+        sys.services.borrow_mut().insert("rpcss".into(), SvcState { start: 2, delayed: false });
+        std::fs::write(&file, r#"[{"Name":"RpcSs","Start":4,"Delayed":0}]"#).unwrap();
+        assert!(!restore_latest(&sys, &dir, &mut |_| {}));
+        assert_eq!(sys.svc_get("RpcSs").unwrap().start, 2);
+        std::fs::write(&file, r#"[{"Start":3}]"#).unwrap();
+        assert!(!restore_latest(&sys, &dir, &mut |_| {}));
     }
 }

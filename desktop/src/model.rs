@@ -143,7 +143,7 @@ pub fn sanitize_app(raw: &Value) -> Option<AppItem> {
         download_url: safe_url(&s(raw, "downloadUrl")),
         variants: Vec::new(),
         versions: Vec::new(),
-        repo_url: opt(raw, "repoUrl"),
+        repo_url: opt(raw, "repoUrl").map(|u| safe_url(&u)).filter(|u| !u.is_empty()),
         github_repo: opt(raw, "githubRepo"),
         gitlab_repo: opt(raw, "gitlabRepo"),
         gitlab_domain: opt(raw, "gitlabDomain"),
@@ -170,12 +170,20 @@ pub fn format_size(bytes: Option<u64>) -> String {
 }
 
 pub fn parse_size(sz: &str) -> f64 {
-    let l = sz.to_lowercase();
-    if l.contains("varies") {
-        return 0.0;
+    let text = sz.trim().to_lowercase();
+    let unit_at = text.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(text.len());
+    let (number, unit) = text.split_at(unit_at);
+    let Ok(n) = number.trim().replace(',', "").parse::<f64>() else { return 0.0 };
+    if !n.is_finite() || n < 0.0 { return 0.0; }
+    // Compare every catalog size in MB, including small files and multi-terabyte packages.
+    match unit.trim() {
+        "b" | "bytes" => n / (1024.0 * 1024.0),
+        "kb" | "kib" => n / 1024.0,
+        "" | "mb" | "mib" => n,
+        "gb" | "gib" => n * 1024.0,
+        "tb" | "tib" => n * 1024.0 * 1024.0,
+        _ => 0.0,
     }
-    let n: f64 = l.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect::<String>().parse().unwrap_or(0.0);
-    if l.contains("gb") { n * 1024.0 } else if l.contains("kb") { n / 1024.0 } else { n }
 }
 
 pub fn determine_arch(name: &str) -> &'static str {
@@ -341,7 +349,7 @@ pub fn process_item(mut app: AppItem, mirror: &HashMap<String, Vec<Release>>) ->
     let platform = app.platform.clone();
     let mut versions: Vec<(VersionOption, String)> = Vec::new();
     for r in releases {
-        let cands: Vec<_> = r.assets.iter().filter(|(n, u, _)| asset_matches(&platform, n, u)).collect();
+        let cands: Vec<_> = r.assets.iter().filter(|(n, u, _)| !safe_url(u).is_empty() && asset_matches(&platform, n, u)).collect();
         let assets: Vec<_> = match &kw {
             None => cands,
             Some(k) => {
@@ -407,7 +415,7 @@ pub fn search(q: &str, category: &str, platform: Option<&str>, sort: Sort, apps:
                 (sc > 0).then_some((sc, a))
             })
             .collect();
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_by_key(|a| std::cmp::Reverse(a.0));
         scored.into_iter().map(|(_, a)| a.clone()).collect()
     };
     if let Some(p) = platform {
@@ -425,4 +433,34 @@ pub fn search(q: &str, category: &str, platform: Option<&str>, sort: Sort, apps:
         _ => {}
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn size_sort_compares_bytes_through_terabytes() {
+        let sizes = ["900 B", "1 KB", "1 MB", "2 GB", "1 TB"];
+        let apps: Vec<_> = sizes.iter().rev().map(|s| AppItem { size: (*s).into(), ..Default::default() }).collect();
+        let sorted = search("", "All", None, Sort::SizeAsc, &apps);
+        assert_eq!(sorted.iter().map(|a| a.size.as_str()).collect::<Vec<_>>(), sizes);
+        assert_eq!(parse_size("1,024 MiB"), 1024.0);
+        assert_eq!(parse_size("Varies"), 0.0);
+        assert_eq!(parse_size("-5 GB"), 0.0);
+    }
+
+    #[test]
+    fn catalog_does_not_expose_local_or_executable_links() {
+        let raw = json!([{"name": "App", "platform": "PC", "repoUrl": "file:///C:/Windows", "githubRepo": "owner/app"}]);
+        let mirror = json!({"owner/app": {"tag_name": "v1.0", "assets": [
+            {"name": "bad.exe", "browser_download_url": "file:///C:/bad.exe"},
+            {"name": "setup.exe", "browser_download_url": "https://example.com/setup.exe"}
+        ]}});
+        let apps = process(&raw, &mirror);
+        assert!(apps[0].repo_url.is_none());
+        assert_eq!(apps[0].variants.len(), 1);
+        assert_eq!(apps[0].download_url, "https://example.com/setup.exe");
+    }
 }

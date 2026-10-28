@@ -116,7 +116,7 @@ impl RegData {
 
     fn from_raw(v: &RegValue) -> RegData {
         fn units(b: &[u8]) -> Vec<u16> {
-            b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect()
+            b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect()
         }
         let b: &[u8] = &v.bytes;
         match v.vtype {
@@ -208,7 +208,11 @@ impl System for WinSystem {
 
     fn reg_delete_value(&self, path: &str, name: &str) -> Result<(), String> {
         let (hive, sub) = split_path(path).ok_or_else(|| format!("unsupported registry path {path}"))?;
-        let Ok(key) = RegKey::predef(hive).open_subkey_with_flags(&sub, KEY_WRITE) else { return Ok(()) };
+        let key = match RegKey::predef(hive).open_subkey_with_flags(&sub, KEY_WRITE) {
+            Ok(key) => key,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e.to_string()),
+        };
         match key.delete_value(name) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -266,7 +270,10 @@ impl System for WinSystem {
             if self.reg_set(&key, "Start", &RegData::Dword(start)).is_err() {
                 return false;
             }
-            let _ = if start == 2 && delayed { self.reg_set(&key, "DelayedAutostart", &RegData::Dword(1)) } else { self.reg_delete_value(&key, "DelayedAutostart") };
+            let delayed_result = if start == 2 && delayed { self.reg_set(&key, "DelayedAutostart", &RegData::Dword(1)) } else { self.reg_delete_value(&key, "DelayedAutostart") };
+            if delayed_result.is_err() {
+                return false;
+            }
         }
         if start == 4 {
             let _ = self.run("sc.exe", &["stop", name]);
@@ -308,7 +315,7 @@ impl System for WinSystem {
 pub fn decode_output(bytes: &[u8]) -> String {
     let zeros = bytes.iter().filter(|b| **b == 0).count();
     if bytes.len() >= 4 && zeros * 3 >= bytes.len() {
-        let u: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let u: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
         return String::from_utf16_lossy(&u).replace('\0', "");
     }
     String::from_utf8_lossy(bytes).replace('\0', "")

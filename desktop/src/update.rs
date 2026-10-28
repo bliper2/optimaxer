@@ -123,6 +123,7 @@ pub fn download(rel: &Release, progress: &dyn Fn(u64, u64), cancel: &dyn Fn() ->
     let (mut buf, mut done, mut last) = (vec![0u8; 64 * 1024], 0u64, Instant::now());
     loop {
         if cancel() {
+            drop(out);
             let _ = fs::remove_file(&part);
             return Err("cancelled".into());
         }
@@ -147,6 +148,7 @@ pub fn download(rel: &Release, progress: &dyn Fn(u64, u64), cancel: &dyn Fn() ->
 pub fn verify(zip: &Path, digest: &str) -> Result<(), String> {
     let want = digest_hex(digest).ok_or("this release has no published checksum, so it was not installed")?;
     let out = Command::new("certutil.exe").args(["-hashfile"]).arg(zip).arg("SHA256").creation_flags(CREATE_NO_WINDOW).output().map_err(|e| format!("could not run certutil ({e})"))?;
+    if !out.status.success() { return Err(format!("certutil could not verify the download: {}", String::from_utf8_lossy(&out.stderr).trim())); }
     let got = parse_certutil(&String::from_utf8_lossy(&out.stdout)).ok_or("could not read the checksum of the download")?;
     if got == want { Ok(()) } else { Err(format!("the download does not match its published checksum (expected {want}, got {got})")) }
 }
@@ -176,12 +178,32 @@ pub fn looks_like_exe(p: &Path) -> Result<(), String> {
 /// Puts `new` in place of `current`. The running exe is renamed to `<current>.old` first; if copying fails it is
 /// renamed back. Returns the path of the old file.
 pub fn swap_exe(current: &Path, new: &Path) -> Result<PathBuf, String> {
-    let old = current.with_extension("exe.old");
-    let _ = fs::remove_file(&old);
-    fs::rename(current, &old).map_err(|e| format!("could not replace the program (is it installed somewhere that needs administrator rights?): {e}"))?;
-    if let Err(e) = fs::copy(new, current) {
-        let _ = fs::rename(&old, current);
+    // Finish the copy beside the destination before moving the working program out of the way.
+    let staged = current.with_extension(format!("exe.new-{}", std::process::id()));
+    let mut source = fs::File::open(new).map_err(|e| format!("could not write the new version: {e}"))?;
+    let mut dest = fs::OpenOptions::new().write(true).create_new(true).open(&staged).map_err(|e| format!("could not stage the new version: {e}"))?;
+    let copied = std::io::copy(&mut source, &mut dest).and_then(|_| dest.sync_all());
+    drop(dest);
+    if let Err(e) = copied {
+        let _ = fs::remove_file(&staged);
         return Err(format!("could not write the new version: {e}"));
+    }
+    let old = current.with_extension("exe.old");
+    if let Err(e) = fs::remove_file(&old) && e.kind() != std::io::ErrorKind::NotFound {
+        let _ = fs::remove_file(&staged);
+        return Err(format!("could not remove the previous update backup: {e}"));
+    }
+    if let Err(e) = fs::rename(current, &old) {
+        let _ = fs::remove_file(&staged);
+        return Err(format!("could not replace the program (is it installed somewhere that needs administrator rights?): {e}"));
+    }
+    if let Err(e) = fs::rename(&staged, current) {
+        let rollback = fs::rename(&old, current);
+        let _ = fs::remove_file(&staged);
+        return Err(match rollback {
+            Ok(()) => format!("could not write the new version: {e}; the previous program was restored"),
+            Err(r) => format!("could not write the new version: {e}; could not restore the previous program ({r}); recover {}", old.display()),
+        });
     }
     Ok(old)
 }
@@ -325,6 +347,20 @@ mod tests {
         let err = swap_exe(&cur, &d.join("missing.exe")).unwrap_err();
         assert!(err.contains("could not write"), "{err}");
         assert_eq!(fs::read(&cur).unwrap(), b"old version", "the working program must survive a failed update");
+    }
+
+    #[test]
+    fn a_staging_collision_does_not_replace_any_file() {
+        let d = temp("stage-collision");
+        let cur = d.join("app.exe");
+        let new = d.join("new.exe");
+        let staged = cur.with_extension(format!("exe.new-{}", std::process::id()));
+        fs::write(&cur, b"working version").unwrap();
+        fs::write(&new, b"new version").unwrap();
+        fs::write(&staged, b"existing file").unwrap();
+        assert!(swap_exe(&cur, &new).is_err());
+        assert_eq!(fs::read(&cur).unwrap(), b"working version");
+        assert_eq!(fs::read(&staged).unwrap(), b"existing file");
     }
 
     #[test]

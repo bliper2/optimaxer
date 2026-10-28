@@ -50,20 +50,33 @@ fn tail(out: &str, n: usize, skip: impl Fn(&str) -> bool) -> Vec<String> {
     lines[lines.len().saturating_sub(n)..].iter().map(|l| l.to_string()).collect()
 }
 
+fn command_ok(sys: &dyn System, exe: &str, args: &[&str], log: &mut dyn FnMut(&str)) -> bool {
+    let out = sys.run(exe, args);
+    if out.code != 0 {
+        log(&format!("WARN {exe} {} failed ({}): {}", args.join(" "), out.code, out.text.trim()));
+        false
+    } else {
+        true
+    }
+}
+
 /// System Restore point via Checkpoint-Computer (one PowerShell call; there is no console tool for it). The 24-hour
 /// limit is lifted for the call and put back afterwards.
 pub fn create_restore_point(sys: &dyn System, description: &str, log: &mut dyn FnMut(&str)) -> bool {
     let old = sys.reg_get(RESTORE_KEY, "SystemRestorePointCreationFrequency");
-    let _ = sys.reg_set(RESTORE_KEY, "SystemRestorePointCreationFrequency", &RegData::Dword(0));
+    if let Err(e) = sys.reg_set(RESTORE_KEY, "SystemRestorePointCreationFrequency", &RegData::Dword(0)) {
+        log(&format!("WARN Could not set the restore-point frequency: {e}"));
+        return false;
+    }
     let script = format!("Enable-ComputerRestore -Drive \"$env:SystemDrive\\\" -ErrorAction SilentlyContinue; Checkpoint-Computer -Description '{}' -RestorePointType MODIFY_SETTINGS -ErrorAction Stop", description.replace('\'', ""));
     let out = sys.run("powershell.exe", &["-NoProfile", "-NonInteractive", "-Command", &script]);
-    match old {
-        Some(v) => {
-            let _ = sys.reg_set(RESTORE_KEY, "SystemRestorePointCreationFrequency", &v);
-        }
-        None => {
-            let _ = sys.reg_delete_value(RESTORE_KEY, "SystemRestorePointCreationFrequency");
-        }
+    let restored = match old {
+        Some(v) => sys.reg_set(RESTORE_KEY, "SystemRestorePointCreationFrequency", &v),
+        None => sys.reg_delete_value(RESTORE_KEY, "SystemRestorePointCreationFrequency"),
+    };
+    if let Err(e) = restored {
+        log(&format!("WARN Could not restore the restore-point frequency: {e}"));
+        return false;
     }
     if out.code == 0 {
         log(&format!("Restore point created: {description}"));
@@ -202,13 +215,16 @@ pub fn run(sys: &dyn System, tool: Tool, backups: &Path, log: &mut dyn FnMut(&st
         }
         Tool::FreeRam => {
             let before = available_ram();
-            for l in clear_all_caches() {
+            let results = clear_all_caches();
+            let succeeded = results.iter().all(|l| l.starts_with("ok "));
+            for l in results {
                 log(&format!("  {}{l}", if l.starts_with("ok ") { "" } else { "WARN " }));
             }
             std::thread::sleep(std::time::Duration::from_secs(1));
             let after = available_ram();
             log(&format!(
-                "RAM caches cleared. Free RAM {} -> {} (+{}). Windows refills the file cache as you open files again.",
+                "RAM cache cleanup {}. Free RAM {} -> {} (+{}). Windows refills the file cache as you open files again.",
+                if succeeded { "completed" } else { "incomplete; review the failed steps" },
                 crate::model::format_size(Some(before)),
                 crate::model::format_size(Some(after)),
                 crate::model::format_size(Some(after.saturating_sub(before)))
@@ -219,63 +235,81 @@ pub fn run(sys: &dyn System, tool: Tool, backups: &Path, log: &mut dyn FnMut(&st
             for l in tail(&out.text, 6, |_| false) {
                 log(&format!("  {l}"));
             }
-            log("TRIM finished (hard disks are skipped by /L).");
+            if out.code == 0 { log("TRIM finished (hard disks are skipped by /L)."); }
+            else { log(&format!("WARN TRIM failed (exit {})", out.code)); }
         }
         Tool::Sfc => {
             let out = sys.run("sfc.exe", &["/scannow"]);
             for l in tail(&out.text, 6, |l| l.contains('%')) {
                 log(&format!("  {l}"));
             }
+            if out.code != 0 { log(&format!("WARN SFC exited with code {}; review its output", out.code)); }
         }
         Tool::Dism => {
             let out = sys.run("Dism.exe", &["/Online", "/Cleanup-Image", "/RestoreHealth"]);
             for l in tail(&out.text, 5, |l| l.starts_with('[')) {
                 log(&format!("  {l}"));
             }
+            if out.code != 0 { log(&format!("WARN DISM exited with code {}; review its output", out.code)); }
         }
         Tool::ResetUpdate => {
             let svcs = ["wuauserv", "bits", "cryptsvc", "msiserver"];
+            let mut stopped = Vec::new();
+            let mut succeeded = true;
             for s in svcs {
-                sys.run("net.exe", &["stop", s]);
+                let status = sys.run("sc.exe", &["query", s]);
+                if status.code != 0 {
+                    log(&format!("WARN Could not read service {s}; reset skipped"));
+                    succeeded = false;
+                } else if status.text.contains("RUNNING") {
+                    if command_ok(sys, "net.exe", &["stop", s], log) { stopped.push(s); }
+                    else { succeeded = false; }
+                }
             }
             let win = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into());
-            for d in [format!(r"{win}\SoftwareDistribution"), format!(r"{win}\System32\catroot2")] {
-                let bak = format!("{d}.bak");
-                if Path::new(&bak).exists() {
-                    let _ = std::fs::remove_dir_all(&bak);
-                }
-                if Path::new(&d).exists() {
-                    let _ = std::fs::rename(&d, &bak);
-                }
-            }
-            for s in svcs {
-                sys.run("net.exe", &["start", s]);
-            }
-            log("Windows Update components reset. Check for updates again.");
-        }
-        Tool::IconCache => {
-            sys.run("taskkill.exe", &["/F", "/IM", "explorer.exe"]);
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            if let Ok(local) = std::env::var("LOCALAPPDATA") {
-                let _ = std::fs::remove_file(format!(r"{local}\IconCache.db"));
-                for pat in ["iconcache_*.db", "thumbcache_*.db"] {
-                    for f in super::cleaner::expand(&format!(r"{local}\Microsoft\Windows\Explorer\{pat}")) {
-                        let _ = std::fs::remove_file(f);
+            if succeeded {
+                for d in [format!(r"{win}\SoftwareDistribution"), format!(r"{win}\System32\catroot2")] {
+                    let bak = format!("{d}.{}.bak", super::now_stamp());
+                    if Path::new(&d).exists() && let Err(e) = std::fs::rename(&d, &bak) {
+                        succeeded = false;
+                        log(&format!("WARN Could not back up {d}: {e}"));
                     }
                 }
             }
-            sys.run("cmd.exe", &["/c", "start", "", "explorer.exe"]);
-            log("Icon cache rebuilt.");
+            for s in stopped {
+                succeeded &= command_ok(sys, "net.exe", &["start", s], log);
+            }
+            log(if succeeded { "Windows Update components reset. Check for updates again." } else { "Windows Update reset incomplete. Review the failed steps." });
+        }
+        Tool::IconCache => {
+            if !command_ok(sys, "taskkill.exe", &["/F", "/IM", "explorer.exe"], log) { return; }
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            let mut succeeded = true;
+            if let Ok(local) = std::env::var("LOCALAPPDATA") {
+                let mut files = vec![std::path::PathBuf::from(format!(r"{local}\IconCache.db"))];
+                for pat in ["iconcache_*.db", "thumbcache_*.db"] {
+                    files.extend(super::cleaner::expand(&format!(r"{local}\Microsoft\Windows\Explorer\{pat}")));
+                }
+                for f in files {
+                    if let Err(e) = std::fs::remove_file(&f) && e.kind() != std::io::ErrorKind::NotFound {
+                        succeeded = false;
+                        log(&format!("WARN Could not delete {}: {e}", f.display()));
+                    }
+                }
+            } else {
+                succeeded = false;
+                log("WARN LOCALAPPDATA is unavailable; cache files were not removed.");
+            }
+            succeeded &= command_ok(sys, "cmd.exe", &["/c", "start", "", "explorer.exe"], log);
+            log(if succeeded { "Icon cache rebuilt." } else { "Icon cache rebuild incomplete. Review the failed steps." });
         }
         Tool::StoreCache => {
-            sys.run("wsreset.exe", &[]);
-            log("Store cache reset.");
+            if command_ok(sys, "wsreset.exe", &[], log) { log("Store cache reset."); }
         }
         Tool::PerfCounters => {
-            sys.run("lodctr.exe", &["/r"]);
-            sys.run("lodctr.exe", &["/r"]);
-            sys.run("winmgmt.exe", &["/resyncperf"]);
-            log("Performance counters rebuilt. Restart apps that read them (Task Manager, monitoring tools).");
+            let mut succeeded = command_ok(sys, "lodctr.exe", &["/r"], log);
+            succeeded &= command_ok(sys, "winmgmt.exe", &["/resyncperf"], log);
+            if succeeded { log("Performance counters rebuilt. Restart apps that read them (Task Manager, monitoring tools)."); }
         }
         Tool::RegBackup => {
             let dir = backups.join(format!("registry-{}", super::now_stamp()));
@@ -283,12 +317,14 @@ pub fn run(sys: &dyn System, tool: Tool, backups: &Path, log: &mut dyn FnMut(&st
                 log(&format!("WARN could not create {}: {e}", dir.display()));
                 return;
             }
+            let mut succeeded = true;
             for k in REG_BACKUP_KEYS {
                 let file = dir.join(format!("{}.reg", k.replace(['\\', ' '], "_")));
-                sys.run("reg.exe", &["export", k, &file.to_string_lossy(), "/y"]);
-                log(&format!("  exported {k}"));
+                if command_ok(sys, "reg.exe", &["export", k, &file.to_string_lossy(), "/y"], log) {
+                    log(&format!("  exported {k}"));
+                } else { succeeded = false; }
             }
-            log(&format!("Registry backup saved to {}", dir.display()));
+            log(&format!("Registry backup {}: {}", if succeeded { "saved" } else { "incomplete" }, dir.display()));
         }
     }
 }
@@ -352,5 +388,35 @@ mod tests {
     fn tail_keeps_the_last_lines_and_filters_progress() {
         let out = "a\nVerification 40%\nb\nc\n";
         assert_eq!(tail(out, 2, |l| l.contains('%')), vec!["b", "c"]);
+    }
+
+    #[test]
+    fn failed_tools_report_errors_without_success_messages() {
+        let dir = std::env::temp_dir().join(format!("opti-tools-failure-{}", std::process::id()));
+        for (tool, command, success) in [
+            (Tool::Trim, "defrag.exe", "TRIM finished"),
+            (Tool::StoreCache, "wsreset.exe", "Store cache reset."),
+            (Tool::PerfCounters, "lodctr.exe", "Performance counters rebuilt."),
+            (Tool::RegBackup, "reg.exe export", "Registry backup saved"),
+            (Tool::IconCache, "taskkill.exe", "Icon cache rebuilt."),
+        ] {
+            let sys = FakeSystem::default();
+            sys.fail.borrow_mut().insert(command.into());
+            let mut lines = Vec::new();
+            run(&sys, tool, &dir, &mut |l| lines.push(l.to_string()));
+            assert!(lines.iter().any(|l| l.contains("WARN")), "{tool:?}: {lines:?}");
+            assert!(!lines.iter().any(|l| l.starts_with(success)), "{tool:?}: {lines:?}");
+        }
+    }
+
+    #[test]
+    fn failed_update_service_stop_skips_reset_and_keeps_original_service_state() {
+        let sys = FakeSystem::default();
+        sys.answer("sc.exe query wuauserv", "STATE : 4 RUNNING");
+        sys.fail.borrow_mut().insert("net.exe stop wuauserv".into());
+        let mut lines = Vec::new();
+        run(&sys, Tool::ResetUpdate, Path::new(""), &mut |l| lines.push(l.to_string()));
+        assert!(lines.iter().any(|l| l.contains("reset incomplete")));
+        assert!(!sys.ran("net.exe start"), "no service was stopped, so no service should be started");
     }
 }

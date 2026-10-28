@@ -406,6 +406,28 @@ pub fn sparkline(ui: &mut Ui, size: egui::Vec2, data: &std::collections::VecDequ
 }
 // endregion
 
+/// A window caption button (minimize, maximize, restore, close): a Segoe Fluent glyph, or a plain character when
+/// that font is missing. `danger` tints the hover red like the Windows close button.
+pub fn caption_button(ui: &mut Ui, glyph: char, fallback: &str, danger: bool, label: &str) -> Response {
+    let t = tokens(ui.ctx());
+    let (rect, resp) = ui.allocate_exact_size(vec2(46.0, 32.0), Sense::click());
+    resp.widget_info(|| WidgetInfo::labeled(Role::Button, true, label));
+    let hover = ui.ctx().animate_bool_with_time(resp.id, resp.hovered(), motion(ui.ctx()).fast());
+    let (bg, fg) = if danger {
+        (Color32::from_rgb(0xC4, 0x2B, 0x1C).gamma_multiply(hover), mix(t.text, Color32::WHITE, hover))
+    } else {
+        (t.surface3.gamma_multiply(hover), t.text)
+    };
+    let p = ui.painter();
+    p.rect_filled(rect, 0.0, bg);
+    if theme::icons_available() {
+        p.text(rect.center(), Align2::CENTER_CENTER, glyph, FontId::new(10.0, theme::icons()), fg);
+    } else {
+        p.text(rect.center(), Align2::CENTER_CENTER, fallback, FontId::proportional(T_BODY), fg);
+    }
+    resp
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -432,26 +454,4 @@ mod tests {
         assert_eq!(load_color(&t, 80.0), t.warn);
         assert_eq!(load_color(&t, 95.0), t.bad);
     }
-}
-
-/// A window caption button (minimize, maximize, restore, close): a Segoe Fluent glyph, or a plain character when
-/// that font is missing. `danger` tints the hover red like the Windows close button.
-pub fn caption_button(ui: &mut Ui, glyph: char, fallback: &str, danger: bool, label: &str) -> Response {
-    let t = tokens(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(vec2(46.0, 32.0), Sense::click());
-    resp.widget_info(|| WidgetInfo::labeled(Role::Button, true, label));
-    let hover = ui.ctx().animate_bool_with_time(resp.id, resp.hovered(), motion(ui.ctx()).fast());
-    let (bg, fg) = if danger {
-        (Color32::from_rgb(0xC4, 0x2B, 0x1C).gamma_multiply(hover), mix(t.text, Color32::WHITE, hover))
-    } else {
-        (t.surface3.gamma_multiply(hover), t.text)
-    };
-    let p = ui.painter();
-    p.rect_filled(rect, 0.0, bg);
-    if theme::icons_available() {
-        p.text(rect.center(), Align2::CENTER_CENTER, glyph, FontId::new(10.0, theme::icons()), fg);
-    } else {
-        p.text(rect.center(), Align2::CENTER_CENTER, fallback, FontId::proportional(T_BODY), fg);
-    }
-    resp
 }

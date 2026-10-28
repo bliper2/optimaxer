@@ -8,7 +8,7 @@ $global:OptiLogQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueue
 $global:Jobs    = New-Object System.Collections.ArrayList
 $global:Busy    = $false
 $global:Loaded  = @{}
-$global:Sys     = @{ Laptop = $false; SSD = $true; Vendor = '' }
+$global:Sys     = @{ Laptop = $null; SSD = $null; Vendor = '' }
 $global:OptiFilters = @{}
 
 # ================================================================ window
@@ -266,13 +266,12 @@ function Update-Live {
 
 function Set-Score {
     param([int]$Pct, [int]$On, [int]$Total)
-    $col = if ($Pct -ge 80) { 'Good' } elseif ($Pct -ge 45) { 'Text' } else { 'Bad' }
     $UI.ScoreText.Text = "$Pct%"
-    Set-Res $UI.ScoreText ([Windows.Controls.TextBlock]::ForegroundProperty) $col
+    Set-Res $UI.ScoreText ([Windows.Controls.TextBlock]::ForegroundProperty) 'Text'
     Set-Bar $UI.ScoreBar $Pct
-    Set-Res $UI.ScoreBar ([Windows.Controls.Primitives.RangeBase]::ForegroundProperty) $(if ($Pct -ge 80) { 'Good' } elseif ($Pct -ge 45) { 'Accent' } else { 'Bad' })
-    $UI.ScoreHead.Text = if ($Pct -ge 80) { 'Well tuned' } elseif ($Pct -ge 45) { 'Partially optimized' } else { 'Not optimized yet' }
-    $UI.ScoreSub.Text = "$On of $Total recommended tweaks are active. Every change is recorded and can be undone."
+    Set-Res $UI.ScoreBar ([Windows.Controls.Primitives.RangeBase]::ForegroundProperty) 'Accent'
+    $UI.ScoreHead.Text = 'Recommended tweaks active'
+    $UI.ScoreSub.Text = "$On of $Total recommended tweaks are active. This count does not measure system performance."
 }
 
 function Update-Score {
@@ -316,10 +315,10 @@ function Initialize-Dashboard {
         param($res)
         $i = $res | Select-Object -First 1
         if ($i) {
-            $global:Sys = @{ Laptop = [bool]$i.Traits.Laptop; SSD = [bool]$i.Traits.SSD; Vendor = [string]$i.Traits.Vendor; RamGB = [double]$i.Traits.RamGB
+            $global:Sys = @{ Laptop = $i.Traits.Laptop; SSD = $i.Traits.SSD; Vendor = [string]$i.Traits.Vendor; RamGB = [double]$i.Traits.RamGB
                              Threads = [int]$i.Traits.Threads; Build = [int]$i.Traits.Build; Tags = @($i.Traits.Tags | ForEach-Object { [string]$_ }) }
             $pairs = New-Object System.Collections.ArrayList
-            [void]$pairs.Add(@('Computer', "$($i.Machine) ($(if ($i.Laptop) { 'laptop' } else { 'desktop' }))"))
+            [void]$pairs.Add(@('Computer', "$($i.Machine) ($(if ($null -eq $i.Laptop) { 'type unknown' } elseif ($i.Laptop) { 'laptop' } else { 'desktop' }))"))
             [void]$pairs.Add(@('Windows', $i.OS))
             [void]$pairs.Add(@('Processor', $i.CPU))
             [void]$pairs.Add(@('Graphics', $i.GPU))
@@ -403,7 +402,9 @@ $UI.TwSearch.Add_TextChanged({
     $global:OptiFilters['tw'] = $UI.TwSearch.Text
     foreach ($v in $global:TwViews) { $v.Refresh() }
 })
-$retiredSaved = Get-OptiState
+$retiredSaved = @{}
+try { $retiredSaved = Get-OptiState }
+catch { Write-Log $_.Exception.Message 'ERROR' }
 foreach ($t in $global:OptiCatalog) {
     # a retired tweak is listed only while it has a saved record, so it can still be undone
     if ($t.Retired -and -not $retiredSaved.ContainsKey($t.Id)) { continue }
@@ -877,13 +878,7 @@ function Set-ServiceStartJob {
     if (-not (Confirm-Action "Set $($names.Count) service(s) to ${Label}?`nA backup is saved first so you can restore.")) { return }
     [void](Start-OptiJob "Services to $Label" -ArgList @($names, $Start) -Script {
         param($names, $start)
-        $backup = @(); foreach ($n in $names) { $s = Get-SvcSnapshot $n; if ($s) { $backup += $s } }
-        $file = Join-Path $OptiBackupDir ('services-{0}.json' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
-        $backup | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $file -Encoding UTF8
-        Write-Log "Backup saved: $file"
-        foreach ($b in $backup) {
-            if (Set-SvcStart $b.Name $start) { Write-Log "  $($b.Name) updated" } else { Write-Log "  $($b.Name): refused (protected by Windows)" 'WARN' }
-        }
+        Set-OptiServices -Names $names -Start $start
     } -OnDone { Update-Services })
 }
 
@@ -1148,12 +1143,26 @@ $toolJobs = @{
     }
     wu = {
         $svcs = 'wuauserv', 'bits', 'cryptsvc', 'msiserver'
-        foreach ($s in $svcs) { Stop-Service $s -Force -ErrorAction SilentlyContinue }
-        foreach ($d in "$env:WINDIR\SoftwareDistribution", "$env:WINDIR\System32\catroot2") {
-            if (Test-Path "$d.bak") { Remove-Item "$d.bak" -Recurse -Force -ErrorAction SilentlyContinue }
-            if (Test-Path $d) { Rename-Item $d "$(Split-Path $d -Leaf).bak" -ErrorAction SilentlyContinue }
+        $running = @()
+        $restartFailed = $false
+        try {
+            foreach ($s in $svcs) {
+                if ((Get-Service -Name $s -ErrorAction Stop).Status -eq 'Running') {
+                    $running += $s
+                    Stop-Service -Name $s -Force -ErrorAction Stop
+                }
+            }
+            $stamp = (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N')
+            foreach ($d in "$env:WINDIR\SoftwareDistribution", "$env:WINDIR\System32\catroot2") {
+                if (Test-Path -LiteralPath $d) { Rename-Item -LiteralPath $d -NewName "$(Split-Path $d -Leaf).$stamp.bak" -ErrorAction Stop }
+            }
+        } finally {
+            foreach ($s in $running) {
+                try { Start-Service -Name $s -ErrorAction Stop }
+                catch { $restartFailed = $true; Write-Log "  could not restart ${s}: $($_.Exception.Message)" 'WARN' }
+            }
         }
-        foreach ($s in $svcs) { Start-Service $s -ErrorAction SilentlyContinue }
+        if ($restartFailed) { throw 'Windows Update reset needs attention: one or more previously running services could not restart.' }
         Write-Log 'Windows Update components reset. Check for updates again.' 'OK'
     }
     icons = {
@@ -1189,9 +1198,8 @@ $toolJobs = @{
         Write-Log ("Health check finished: {0} item(s) need attention." -f $global:issues) $(if ($global:issues) { 'WARN' } else { 'OK' })
     }
     perfctr = {
-        lodctr.exe /r 2>&1 | Out-Null
-        lodctr.exe /r 2>&1 | Out-Null
-        winmgmt.exe /resyncperf 2>&1 | Out-Null
+        Invoke-Native lodctr.exe @('/r') -CheckExit | Out-Null
+        Invoke-Native winmgmt.exe @('/resyncperf') -CheckExit | Out-Null
         Write-Log 'Performance counters rebuilt. Restart apps that read them (Task Manager, monitoring tools).' 'OK'
     }
     regbackup = {
@@ -1199,10 +1207,19 @@ $toolJobs = @{
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
         $keys = 'HKLM\SOFTWARE\Policies', 'HKCU\SOFTWARE\Policies', 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer', 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager',
                 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management', 'HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl', 'HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters'
-        foreach ($k in $keys) { $f = Join-Path $dir (($k -replace '[\\ ]', '_') + '.reg'); reg.exe export $k $f /y 2>&1 | Out-Null; Write-Log "  exported $k" }
-        Write-Log "Registry backup saved to $dir" 'OK'
+        $failed = 0
+        foreach ($k in $keys) {
+            $f = Join-Path $dir (($k -replace '[\\ ]', '_') + '.reg')
+            try { Invoke-Native reg.exe @('export', $k, $f, '/y') -CheckExit | Out-Null; Write-Log "  exported $k" }
+            catch { $failed++; Write-Log "  could not export ${k}: $($_.Exception.Message)" 'WARN' }
+        }
+        Write-Log "Registry backup: $($keys.Count - $failed) of $($keys.Count) keys saved to $dir" $(if ($failed) { 'WARN' } else { 'OK' })
     }
-    store = { Start-Process wsreset.exe -Wait; Write-Log 'Store cache reset.' 'OK' }
+    store = {
+        $p = Start-Process wsreset.exe -Wait -PassThru -ErrorAction Stop
+        if ($p.ExitCode -ne 0) { throw "Store cache reset failed (exit $($p.ExitCode))." }
+        Write-Log 'Store cache reset.' 'OK'
+    }
     revert = {
         $r = Invoke-UndoAll
         foreach ($id in $r.Failed.Keys) { Write-Log "  NOT undone: $id ($($r.Failed[$id] -join '; '))" 'WARN' }
@@ -1428,7 +1445,7 @@ $UI.BtnSvRestore.Add_Click({
     if (-not (Confirm-Action "Restore services from backup $($f.Name)?")) { return }
     [void](Start-OptiJob 'Restoring services' -ArgList $f.FullName -Script {
         param($file)
-        foreach ($b in @(Get-Content -LiteralPath $file -Raw | ConvertFrom-Json)) { [void](Set-SvcStart $b.Name $b.Start $b.Delayed); Write-Log "  restored $($b.Name)" }
+        [void](Restore-OptiServices -File $file)
     } -OnDone { Update-Services })
 })
 
@@ -1445,13 +1462,15 @@ $UI.BtnFtEnable.Add_Click({ Set-FeatureJob $true })
 $UI.BtnFtDisable.Add_Click({ Set-FeatureJob $false })
 $UI.BtnFtRefresh.Add_Click({ Update-Features })
 
-$UI.BtnFlushDns.Add_Click({ [void](Start-OptiJob 'Flush DNS' -Script { Clear-DnsClientCache; Write-Log 'DNS cache flushed.' 'OK' }) })
+$UI.BtnFlushDns.Add_Click({ [void](Start-OptiJob 'Flush DNS' -Script { Clear-DnsClientCache -ErrorAction Stop; Write-Log 'DNS cache flushed.' 'OK' }) })
 $UI.BtnDnsShow.Add_Click({ Show-CurrentDns })
 $UI.BtnResetNet.Add_Click({
     if (-not (Test-Elevated)) { return }
     if (-not (Confirm-Action "Reset Winsock and the IP stack?`nYou may briefly lose connection and need to restart.")) { return }
     [void](Start-OptiJob 'Reset network stack' -Script {
-        netsh winsock reset | Out-Null; netsh int ip reset | Out-Null; ipconfig /flushdns | Out-Null
+        Invoke-Native netsh.exe @('winsock', 'reset') -CheckExit | Out-Null
+        Invoke-Native netsh.exe @('int', 'ip', 'reset') -CheckExit | Out-Null
+        Invoke-Native ipconfig.exe @('/flushdns') -CheckExit | Out-Null
         Write-Log 'Network stack reset. Restart Windows to finish.' 'OK'
     })
 })

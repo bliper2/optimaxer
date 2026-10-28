@@ -14,6 +14,8 @@ New-Item -ItemType Directory -Path $tmp -Force | Out-Null
 $global:OptiStatePath = Join-Path $tmp 'state.json'
 $global:OptiLogPath = Join-Path $tmp 'test.log'
 $global:OptiFeaturesPath = Join-Path $tmp 'features.json'
+$global:OptiBackupDir = Join-Path $tmp 'backups'
+New-Item -ItemType Directory -Path $global:OptiBackupDir -Force | Out-Null
 $TestKey = 'HKCU:\Software\OptimaxerTest'
 
 $script:pass = 0; $script:fail = @()
@@ -352,6 +354,317 @@ It 'measurement comparison reports direction per metric' {
 It 'Appx removal checks provisioned copies' {
     Assert ((Get-Command Test-AppxGone).ScriptBlock.ToString() -match 'Get-AppxProvisionedPackage') 'Test-AppxGone ignores provisioning'
     Assert ((Get-TweakById 'ai-remove-apps').Test.ToString() -match 'Test-AppxGone') 'ai-remove-apps test'
+}
+
+Write-Host 'safety and failure paths'
+It 'failed hardware probes do not invent SSD or desktop traits' {
+    function global:Get-CimInstance { param($ClassName, $ErrorAction) throw 'probe unavailable' }
+    function global:Get-Partition { param($DriveLetter, $ErrorAction) throw 'probe unavailable' }
+    try {
+        $traits = Get-SystemTraits
+        Assert ($null -eq $traits.SSD -and $null -eq $traits.Laptop) 'unknown hardware converted to a known type'
+        Assert (@($traits.Tags | Where-Object { $_ -in 'ssd', 'hdd', 'laptop', 'desktop', 'win10', 'win11' }).Count -eq 0) 'unknown probes invented hardware tags'
+        $plan = Get-SmartPlan $traits @{}
+        foreach ($id in 'perf-trimon', 'perf-powerthrottle', 'perf-usbpcie', 'perf-globaltimer') { Assert ($plan.Ids -notcontains $id) "$id auto-selected without hardware evidence" }
+        Assert ($plan.Skipped['perf-trimon'] -match 'could not be detected') 'unknown SSD reason missing'
+        Assert ([bool]($plan.Notes -match 'type unknown')) 'unknown hardware note missing'
+        $t = New-FakeTweak @{ Id = 'test-ram'; MinRamGB = 16 }
+        Assert (-not (Test-TweakFits $t $traits)) 'unknown RAM passed a minimum-memory gate'
+    } finally {
+        Remove-Item -LiteralPath 'Function:\Get-CimInstance', 'Function:\Get-Partition'
+        Remove-FakeTweaks
+    }
+}
+It 'script failures cannot be reported successful by a positive status test' {
+    $t = New-FakeTweak @{ Id = 'test-failure'; Test = { $true }; Apply = { throw 'apply refused' }; Undo = { param($d) $global:LASTEXITCODE = 9 } }
+    try {
+        Assert (-not (Invoke-TweakApply $t)) 'failed apply reported success'
+        [void](Invoke-TweakUndo $t)
+        Assert ($global:OptiUndoFailed.ContainsKey($t.Id)) 'native undo failure ignored'
+        Assert ((Get-OptiState).ContainsKey($t.Id)) 'undo record discarded after failure'
+    } finally { Remove-FakeTweaks }
+}
+It 'undo without a saved record does not run a default-changing script' {
+    $global:UnsavedUndoRan = $false
+    $t = New-FakeTweak @{ Id = 'test-unsaved'; Undo = { $global:UnsavedUndoRan = $true } }
+    try {
+        [void](Invoke-TweakUndo $t)
+        Assert (-not $global:UnsavedUndoRan) 'undo guessed defaults without a backup'
+        Assert ($global:OptiUndoFailed.ContainsKey($t.Id)) 'missing backup not reported'
+    } finally { Remove-FakeTweaks }
+}
+It 'retry captures newly appearing services and tasks before changing them' {
+    $saved = Save-Functions 'Get-SvcSnapshot', 'Set-SvcStart', 'Get-TaskSnapshot', 'Set-TaskEnabled'
+    $global:LatePresent = $false; $global:LateStart = 3; $global:LateDelayed = 1; $global:LateEnabled = $true
+    function global:Get-SvcSnapshot { param($Name) if ($global:LatePresent) { @{ Name = $Name; Start = $global:LateStart; Delayed = $global:LateDelayed } } }
+    function global:Set-SvcStart { param($Name, $Start, $Delayed = 0) $global:LateStart = $Start; $global:LateDelayed = $Delayed; return $true }
+    function global:Get-TaskSnapshot {
+        param($Full)
+        if (-not $global:LatePresent) { return $null }
+        if (-not $global:TaskCache.ContainsKey($Full)) { $global:TaskCache[$Full] = [int]$global:LateEnabled }
+        return @{ Full = $Full; Enabled = $global:TaskCache[$Full] }
+    }
+    function global:Set-TaskEnabled { param($Full, $Enabled) $global:LateEnabled = [bool]$Enabled; return $true }
+    New-Item -Path $TestKey -Force | Out-Null
+    Set-ItemProperty -LiteralPath $TestKey -Name V -Value 7 -Type DWord
+    $t = New-FakeTweak @{ Id = 'test-later'; Reg = @(@{ P = $TestKey; N = 'V'; V = 1; T = 'DWord' }); Svc = @(@{ Name = 'LateSvc'; Start = 4 }); Task = @('\Vendor\LateTask') }
+    try {
+        Assert (Invoke-TweakApply $t) 'initial registry apply failed'
+        $global:LatePresent = $true
+        Assert (Invoke-TweakApply $t) 'new task status was not refreshed after apply'
+        $rec = (Get-OptiState)[$t.Id]
+        Assert ($rec.Reg[0].Value -eq 7 -and $rec.Svc[0].Start -eq 3 -and $rec.Task[0].Enabled -eq 1) 'retry lost old or new originals'
+        [void](Invoke-TweakUndo $t)
+        Assert ($global:LateStart -eq 3 -and $global:LateDelayed -eq 1 -and $global:LateEnabled) 'new resources did not restore'
+        $global:LateEnabled = $false
+        Assert (Invoke-TweakApply $t) 'apply with originally disabled task failed'
+        $global:LateEnabled = $true
+        [void](Invoke-TweakUndo $t)
+        Assert (-not $global:LateEnabled) 'originally disabled task was not restored after drift'
+    } finally { Restore-Functions $saved; Remove-FakeTweaks }
+}
+It 'TRIM saves before writing, changes NTFS only and restores zero as well as one' {
+    $saved = Save-Functions 'Invoke-Native'
+    $global:FakeTrim = 1; $global:TrimWrites = @()
+    function global:Invoke-Native {
+        param($Exe, $Arguments)
+        $global:OptiExit = 0; $global:LASTEXITCODE = 0
+        if ($Arguments[1] -eq 'query') { return "NTFS DisableDeleteNotify = $global:FakeTrim`nReFS DisableDeleteNotify = 1" }
+        Assert ($Arguments[3] -eq 'NTFS') 'TRIM modified filesystems without captured originals'
+        $record = (Get-OptiState)['perf-trimon']
+        Assert ($record -and $null -ne $record.Data.Prev) 'TRIM changed before its original was saved'
+        $global:FakeTrim = [int]$Arguments[4]; $global:TrimWrites += ($Arguments -join ' ')
+        return ''
+    }
+    try {
+        $t = Get-TweakById 'perf-trimon'
+        Assert (Invoke-TweakApply $t) 'TRIM apply failed'
+        [void](Invoke-TweakUndo $t)
+        Assert ($global:FakeTrim -eq 1) 'TRIM did not restore disabled original'
+        $global:FakeTrim = 0
+        Assert (Invoke-TweakApply $t) 'TRIM apply with enabled original failed'
+        $global:FakeTrim = 1
+        [void](Invoke-TweakUndo $t)
+        Assert ($global:FakeTrim -eq 0) 'TRIM did not restore enabled original after drift'
+    } finally { Restore-Functions $saved }
+}
+It 'missing registry export keeps the tweak undo record for retry' {
+    $t = New-FakeTweak @{ Id = 'test-regfile'; Apply = { , @((Join-Path $tmp 'missing.reg')) }; Undo = { param($d) Restore-RegFiles $d } }
+    try {
+        [void](Invoke-TweakApply $t)
+        [void](Invoke-TweakUndo $t)
+        Assert ($global:OptiUndoFailed.ContainsKey($t.Id)) 'missing export was ignored'
+        Assert ((Get-OptiState).ContainsKey($t.Id)) 'missing export lost undo metadata'
+    } finally { Remove-FakeTweaks }
+}
+It 'native launch failure never reuses a prior successful exit code' {
+    $global:LASTEXITCODE = 0
+    $out = Invoke-Native 'optimaxer-no-such-command-9ab248.exe'
+    Assert ($global:OptiExit -ne 0) 'missing command reported success'
+    Assert (-not [string]::IsNullOrWhiteSpace($out)) 'missing command omitted error text'
+    $threw = $false
+    try { [void](Invoke-Native 'optimaxer-no-such-command-9ab248.exe' -CheckExit) } catch { $threw = $true }
+    Assert $threw 'checked command failure did not stop its caller'
+}
+It 'corrupt undo state blocks applying tweaks and preserves the unreadable file' {
+    New-Item -Path $TestKey -Force | Out-Null
+    Set-ItemProperty -LiteralPath $TestKey -Name V -Value 7 -Type DWord
+    $t = New-FakeTweak @{ Id = 'test-state'; Reg = @(@{ P = $TestKey; N = 'V'; V = 1; T = 'DWord' }) }
+    try {
+        foreach ($bad in '{ invalid', '[]', 'null', '', '{"t":null}', '{"t":{"Reg":false,"Svc":[],"Task":[]}}') {
+            Set-Content -LiteralPath $global:OptiStatePath -Value $bad -Encoding UTF8
+            $before = [IO.File]::ReadAllText($global:OptiStatePath)
+            $threw = $false
+            try { [void](Invoke-TweakApply $t) } catch { $threw = $true }
+            Assert $threw "unreadable state did not stop apply: [$bad]"
+            Assert ((Get-ItemProperty -LiteralPath $TestKey).V -eq 7) 'registry changed without readable originals'
+            Assert ([IO.File]::ReadAllText($global:OptiStatePath) -eq $before) 'unreadable state was overwritten'
+        }
+    } finally { Remove-FakeTweaks }
+}
+It 'corrupt feature backups block new profiles' {
+    foreach ($bad in '{ invalid', '[]', '{"GameProfiles":false}', '{"GameProfiles":{"game.exe":{"Gpu":{},"Layers":{}}}}', '{"Wake":null}') {
+        Set-Content -LiteralPath $global:OptiFeaturesPath -Value $bad -Encoding UTF8
+        $threw = $false
+        try { Add-GameProfile @((Join-Path $tmp 'game.exe')) } catch { $threw = $true }
+        Assert $threw "corrupt feature backups were ignored: $bad"
+        Assert ((Get-Content -LiteralPath $global:OptiFeaturesPath -Raw).Trim() -eq $bad) 'feature backups were overwritten'
+    }
+}
+It 'registry verification compares all QWord bits and MultiString boundaries' {
+    Assert (-not (Compare-RegValue 4294967297L 1L 'QWord')) 'QWord high bits ignored'
+    Assert (Compare-RegValue 4294967297L 4294967297L 'QWord') 'equal QWords differ'
+    Assert (Compare-RegValue -1 4294967295L 'DWord') 'unsigned DWord compatibility lost'
+    Assert (-not (Compare-RegValue @('a b', 'c') @('a', 'b c') 'MultiString')) 'MultiString boundaries ignored'
+    Assert (Compare-RegValue @('a', 'b') @('a', 'b') 'MultiString') 'equal MultiStrings differ'
+}
+It 'cleaner skips junctions and counts only deleted files' {
+    $root = Join-Path $tmp 'clean'
+    $outside = Join-Path $tmp 'outside'
+    New-Item -ItemType Directory -Path "$root\nested", $outside -Force | Out-Null
+    [IO.File]::WriteAllText("$root\nested\delete.txt", '12345')
+    [IO.File]::WriteAllText("$outside\keep.txt", 'outside')
+    $link = Join-Path $root 'nested\link'
+    New-Item -ItemType Junction -Path $link -Target $outside -ErrorAction Stop | Out-Null
+    try {
+        Assert ((Get-PathSize $root) -eq 5) 'scan followed junction or miscounted files'
+        Assert ((Clear-PathContents $root) -eq 5) 'cleaner did not count exact bytes removed'
+        Assert (Test-Path -LiteralPath "$outside\keep.txt") 'cleaner deleted junction target contents'
+        Assert ((Clear-PathContents $link) -eq 0) 'cleaner followed a junction root'
+        Assert (Test-Path -LiteralPath "$outside\keep.txt") 'junction root changed target'
+    } finally { [IO.Directory]::Delete($link) }
+}
+It 'service backup failure prevents all service changes' {
+    $saved = Save-Functions 'Get-SvcSnapshot', 'Set-SvcStart'
+    $old = $global:OptiBackupDir
+    $global:ServiceChanges = 0
+    function global:Get-SvcSnapshot { param($Name) @{ Name = $Name; Start = 3; Delayed = 0 } }
+    function global:Set-SvcStart { param($Name, $Start, $Delayed) $global:ServiceChanges++; return $true }
+    try {
+        $global:OptiBackupDir = Join-Path $tmp 'missing\backup'
+        $threw = $false
+        try { Set-OptiServices -Names @('Fax') -Start 4 } catch { $threw = $true }
+        Assert $threw 'backup failure was ignored'
+        Assert ($global:ServiceChanges -eq 0) 'service changed without a backup'
+    } finally { $global:OptiBackupDir = $old; Restore-Functions $saved }
+}
+It 'service restoration reports refusal and validates all records before changing any' {
+    $saved = Save-Functions 'Set-SvcStart'
+    $global:ServiceChanges = 0
+    function global:Set-SvcStart { param($Name, $Start, $Delayed) $global:ServiceChanges++; return $false }
+    $file = Join-Path $tmp 'service-restore.json'
+    try {
+        '[{"Name":"Fax","Start":3,"Delayed":0}]' | Set-Content -LiteralPath $file
+        Assert (-not (Restore-OptiServices $file)) 'failed restoration reported success'
+        Assert (Test-Path -LiteralPath $file) 'backup not kept after refusal'
+        $global:ServiceChanges = 0
+        '[{"Name":"Fax","Start":3,"Delayed":0},{"Name":"Other","Start":99,"Delayed":0}]' | Set-Content -LiteralPath $file
+        $threw = $false
+        try { [void](Restore-OptiServices $file) } catch { $threw = $true }
+        Assert $threw 'invalid backup accepted'
+        Assert ($global:ServiceChanges -eq 0) 'part of invalid backup was restored'
+    } finally { Restore-Functions $saved }
+}
+It 'unverified and non-HTTPS updates are rejected before download' {
+    Assert (-not (Install-OptiUpdate -Url 'https://example.invalid/update.zip' -Digest '' -Version '99.0' -InstallDir $tmp)) 'missing checksum accepted'
+    Assert (-not (Install-OptiUpdate -Url 'http://example.invalid/update.zip' -Digest ('sha256:' + ('0' * 64)) -Version '99.0' -InstallDir $tmp)) 'non-HTTPS update accepted'
+}
+It 'WinGet failures are returned to unattended callers' {
+    function global:Start-Process { param($FilePath, $ArgumentList, [switch]$NoNewWindow, [switch]$Wait, [switch]$PassThru, $RedirectStandardOutput, $RedirectStandardError, $ErrorAction) [pscustomobject]@{ ExitCode = 42 } }
+    try {
+        $r = Invoke-WingetPackages -Action Install -Programs @('Test.Package')
+        Assert (-not $r.Success -and $r.Failed -contains 'Test.Package') 'package failure not returned'
+        Assert ((Get-Content "$global:OptiRoot\Optimaxer.ps1" -Raw) -match 'if \(-not \$appResult.Success\) \{ \$code = 1 \}') 'silent runner ignores app failures'
+    } finally { Remove-Item -LiteralPath 'Function:\Start-Process' }
+}
+It 'failed wake-disable retries retain existing restore records' {
+    $saved = Save-Functions 'Invoke-Native'
+    $f = Get-OptiFeatures
+    $f.Wake.Devices = @('Test Device'); $f.Wake.Tasks = @('\Vendor\WakeTask')
+    Save-OptiFeatures $f
+    function global:Invoke-Native { param($Exe, $Arguments) $global:OptiExit = 1; return 'refused' }
+    function global:Get-ScheduledTask { param($TaskPath, $TaskName, $ErrorAction) throw 'task inaccessible' }
+    try {
+        Disable-WakeSources -Devices @('Test Device') -Tasks @('\Vendor\WakeTask')
+        $again = Get-OptiFeatures
+        Assert ($again.Wake.Devices -contains 'Test Device') 'device retry discarded existing original'
+        Assert ($again.Wake.Tasks -contains '\Vendor\WakeTask') 'task retry discarded existing original'
+    } finally { Restore-Functions $saved; Remove-Item -LiteralPath 'Function:\Get-ScheduledTask' }
+}
+It 'update helper backs up existing files and stops before replacement when backup fails' {
+    $ast = (Get-Command Install-OptiUpdate).ScriptBlock.Ast.Find({ param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $n.Value.StartsWith('param($WaitPid, $Stage, $Dst, $Backup, $Relaunch)') }, $true)
+    Assert ($null -ne $ast) 'update helper source not found'
+    $helper = Join-Path $tmp 'update-helper.ps1'
+    [IO.File]::WriteAllText($helper, $ast.Value)
+    $stage = Join-Path $tmp 'update-stage'; $dst = Join-Path $tmp 'update-dst'; $backup = Join-Path $tmp 'update-backup'
+    New-Item -ItemType Directory -Path $stage, $dst -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $stage 'app.txt'), 'new')
+    [IO.File]::WriteAllText((Join-Path $dst 'app.txt'), 'original')
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $helper -WaitPid 2147483647 -Stage $stage -Dst $dst -Backup $backup -Relaunch 0
+    Assert ($LASTEXITCODE -eq 0) 'update helper failed'
+    Assert ([IO.File]::ReadAllText((Join-Path $backup 'app.txt')) -eq 'original') 'update lost previous files'
+    Assert ([IO.File]::ReadAllText((Join-Path $dst 'app.txt')) -eq 'new') 'update did not replace files'
+    $blocked = Join-Path $tmp 'blocked-backup'
+    [IO.File]::WriteAllText($blocked, 'not a directory')
+    [IO.File]::WriteAllText((Join-Path $stage 'app.txt'), 'should not install')
+    try {
+        $ErrorActionPreference = 'Continue'
+        $failedOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $helper -WaitPid 2147483647 -Stage $stage -Dst $dst -Backup $blocked -Relaunch 0 2>&1
+        $failureCode = $LASTEXITCODE
+    } finally { $ErrorActionPreference = 'Stop' }
+    Assert ($failureCode -ne 0) 'helper ignored backup failure'
+    Assert ([IO.File]::ReadAllText((Join-Path $dst 'app.txt')) -eq 'new') 'backup failure changed installed files'
+}
+It 'updater rejects archive traversal after a valid checksum' {
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $global:TestUpdateArchive = Join-Path $tmp 'unsafe-update.zip'
+    $archive = [IO.Compression.ZipFile]::Open($global:TestUpdateArchive, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $entry = $archive.CreateEntry('../escaped.txt')
+        $writer = New-Object IO.StreamWriter ($entry.Open())
+        try { $writer.Write('must not escape') } finally { $writer.Dispose() }
+    } finally { $archive.Dispose() }
+    $digest = 'sha256:' + (Get-FileHash -LiteralPath $global:TestUpdateArchive -Algorithm SHA256).Hash
+    $global:CapturedUpdateDir = $null
+    function global:Invoke-WebRequest {
+        param($Uri, $Headers, $OutFile, [switch]$UseBasicParsing, $TimeoutSec, $ErrorAction)
+        $global:CapturedUpdateDir = Split-Path $OutFile -Parent
+        [IO.File]::Copy($global:TestUpdateArchive, $OutFile)
+    }
+    try {
+        Assert (-not (Install-OptiUpdate -Url 'https://example.invalid/update.zip' -Digest $digest -Version '99.0' -InstallDir $tmp)) 'traversal archive accepted'
+        Assert (-not (Test-Path -LiteralPath (Join-Path $global:CapturedUpdateDir 'escaped.txt'))) 'archive escaped extraction root'
+    } finally {
+        Remove-Item -LiteralPath 'Function:\Invoke-WebRequest'
+        if ($global:CapturedUpdateDir) {
+            $resolved = [IO.Path]::GetFullPath($global:CapturedUpdateDir)
+            Assert ($resolved.StartsWith((Join-Path ([IO.Path]::GetTempPath()) 'optimaxer-update-'), [StringComparison]::OrdinalIgnoreCase)) 'unexpected updater test cleanup path'
+            Remove-Item -LiteralPath $resolved -Recurse -Force
+        }
+    }
+}
+It 'Windows.old cleanup validates the system-drive target and never follows links' {
+    $oldDrive = $env:SystemDrive
+    $env:SystemDrive = Join-Path $tmp 'fake-system-drive'
+    $root = Join-Path $env:SystemDrive 'Windows.old'
+    $outside = Join-Path $tmp 'old-install-outside'
+    New-Item -ItemType Directory -Path $root, $outside -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $root 'delete.txt'), '12345')
+    [IO.File]::WriteAllText((Join-Path $outside 'keep.txt'), 'keep')
+    $link = Join-Path $root 'link'
+    New-Item -ItemType Junction -Path $link -Target $outside -ErrorAction Stop | Out-Null
+    try {
+        $threw = $false
+        try { [void](Invoke-CleanupTarget @{ Special = 'winold'; Paths = @($outside) }) } catch { $threw = $true }
+        Assert $threw 'Windows.old accepted an arbitrary directory'
+        Assert ((Invoke-CleanupTarget @{ Special = 'winold'; Paths = @($root) }) -eq 5) 'Windows.old cleanup did not count only removed files'
+        Assert (Test-Path -LiteralPath (Join-Path $outside 'keep.txt')) 'Windows.old cleanup followed a junction'
+    } finally { [IO.Directory]::Delete($link); $env:SystemDrive = $oldDrive }
+}
+It 'Windows Update reset preserves prior service states and previous backups' {
+    $tokens = $null; $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $global:OptiRoot 'src\App.ps1'), [ref]$tokens, [ref]$errors)
+    $assignment = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$toolJobs' }, $true)
+    $jobs = & ([scriptblock]::Create($assignment.Right.Extent.Text))
+    $oldWindows = $env:WINDIR
+    $env:WINDIR = Join-Path $tmp 'fake-windows'
+    $global:StoppedServices = @(); $global:RestartedServices = @()
+    function global:Get-Service { param($Name, $ErrorAction) [pscustomobject]@{ Status = $(if ($Name -eq 'bits') { 'Running' } else { 'Stopped' }) } }
+    function global:Stop-Service { param($Name, [switch]$Force, $ErrorAction) $global:StoppedServices += $Name }
+    function global:Start-Service { param($Name, $ErrorAction) $global:RestartedServices += $Name }
+    try {
+        New-Item -ItemType Directory -Path "$env:WINDIR\SoftwareDistribution", "$env:WINDIR\System32\catroot2", "$env:WINDIR\SoftwareDistribution.bak" -Force | Out-Null
+        [IO.File]::WriteAllText("$env:WINDIR\SoftwareDistribution.bak\keep.txt", 'previous backup')
+        & $jobs.wu
+        Assert (($global:StoppedServices -join ',') -eq 'bits') 'reset stopped a previously stopped service'
+        Assert (($global:RestartedServices -join ',') -eq 'bits') 'reset started a previously stopped service'
+        Assert (Test-Path -LiteralPath "$env:WINDIR\SoftwareDistribution.bak\keep.txt") 'reset deleted a previous backup'
+        Assert (-not (Test-Path -LiteralPath "$env:WINDIR\SoftwareDistribution")) 'cache directory was not moved'
+    } finally {
+        $env:WINDIR = $oldWindows
+        Remove-Item -LiteralPath 'Function:\Get-Service', 'Function:\Stop-Service', 'Function:\Start-Service'
+    }
 }
 
 Remove-Item -LiteralPath $TestKey -Recurse -Force -ErrorAction SilentlyContinue

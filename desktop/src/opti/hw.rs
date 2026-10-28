@@ -64,14 +64,18 @@ pub fn relaunch_as_admin() -> bool {
     r as usize > 32
 }
 
-fn has_battery() -> bool {
+fn has_battery() -> Option<bool> {
     let mut s: SYSTEM_POWER_STATUS = unsafe { std::mem::zeroed() };
     // SAFETY: `s` is a valid out-pointer.
     if unsafe { GetSystemPowerStatus(&mut s) } == 0 {
-        return false;
+        return None;
     }
     // 128 = no system battery, 255 = unknown
-    s.BatteryFlag != 128 && s.BatteryFlag != 255
+    match s.BatteryFlag {
+        255 => None,
+        128 => Some(false),
+        _ => Some(true),
+    }
 }
 
 fn total_ram_gb() -> f64 {
@@ -108,11 +112,11 @@ fn storage_query(volume: &str, property_id: u32) -> Option<Vec<u8>> {
     })
 }
 
-/// (is SSD, is NVMe) for the system drive. Defaults to SSD when Windows will not say.
-fn system_disk() -> (bool, bool) {
+/// (is SSD, is NVMe) for the system drive. Unknown seek-penalty results remain unknown.
+fn system_disk() -> (Option<bool>, bool) {
     let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
     // StorageDeviceSeekPenaltyProperty = 7: IncursSeekPenalty byte at offset 8. StorageAdapterProperty = 1: BusType at offset 24.
-    let ssd = storage_query(&drive, 7).filter(|d| d.len() > 8).is_none_or(|d| d[8] == 0);
+    let ssd = storage_query(&drive, 7).filter(|d| d.len() > 8).map(|d| d[8] == 0);
     let nvme = storage_query(&drive, 1).filter(|d| d.len() > 24).is_some_and(|d| d[24] == 17);
     (ssd, nvme)
 }
@@ -157,16 +161,34 @@ pub fn vendor_from(names: &str) -> &'static str {
 }
 
 pub fn detect(sys: &dyn System) -> Traits {
-    let laptop = has_battery();
-    let (ssd, nvme) = system_disk();
+    let laptop_probe = has_battery();
+    let (ssd_probe, nvme) = system_disk();
+    let laptop = laptop_probe.unwrap_or(false);
+    let ssd = ssd_probe.unwrap_or(false);
     let ram_gb = total_ram_gb();
     let threads = std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(0);
     let gpus = gpu_names(sys);
     let build = text(sys, r"HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion", "CurrentBuildNumber").parse().unwrap_or(0);
     let bios = r"HKLM:\HARDWARE\DESCRIPTION\System\BIOS";
     let vendor = vendor_from(&format!("{} {}", text(sys, bios, "SystemManufacturer"), text(sys, bios, "BaseBoardManufacturer"))).to_string();
-    let tags = tags_for(laptop, ssd, nvme, ram_gb, threads, &gpus, build);
+    let tags = detected_tags(laptop_probe, ssd_probe, nvme, ram_gb, threads, &gpus, build);
     Traits { laptop, ssd, vendor, ram_gb, threads, gpus, build, tags }
+}
+
+fn detected_tags(laptop: Option<bool>, ssd: Option<bool>, nvme: bool, ram_gb: f64, threads: u32, gpus: &[String], build: u32) -> Vec<String> {
+    let mut tags = tags_for(laptop.unwrap_or(false), ssd.unwrap_or(false), nvme, ram_gb, threads, gpus, build);
+    if laptop.is_none() {
+        tags.retain(|tag| tag != "desktop" && tag != "laptop");
+        tags.push("form-unknown".into());
+    }
+    if ssd.is_none() {
+        tags.retain(|tag| tag != "ssd" && tag != "hdd" && tag != "nvme");
+        if !((ram_gb > 0.0 && ram_gb <= 6.0) || (threads > 0 && threads <= 2)) {
+            tags.retain(|tag| tag != "lowend");
+        }
+        tags.push("storage-unknown".into());
+    }
+    tags
 }
 
 /// Trait tags: laptop|desktop, ssd|hdd, nvme, nvidia|amdgpu|intelgpu, dgpu, win11|win10, ram8 (8 GB or less),
@@ -195,7 +217,10 @@ pub fn tags_for(laptop: bool, ssd: bool, nvme: bool, ram_gb: f64, threads: u32, 
     if dgpu {
         t.push("dgpu");
     }
-    t.push(if build >= 22_000 { "win11" } else { "win10" });
+    t.push(if build == 0 { "windows-unknown" } else if build >= 22_000 { "win11" } else { "win10" });
+    if gpus.is_empty() { t.push("gpu-unknown"); }
+    if ram_gb <= 0.0 { t.push("ram-unknown"); }
+    if threads == 0 { t.push("cpu-unknown"); }
     if ram_gb > 0.0 && ram_gb <= 8.5 {
         t.push("ram8");
     }
@@ -216,37 +241,34 @@ pub fn tags_for(laptop: bool, ssd: bool, nvme: bool, ram_gb: f64, threads: u32, 
 
 /// True when a tweak makes sense on this hardware. `need` lists traits that must all be present; '!' means absent.
 pub fn fits(t: &Tweak, tr: &Traits) -> bool {
-    if t.desktop_only && tr.laptop {
-        return false;
-    }
-    if t.ssd_only && !tr.ssd {
-        return false;
-    }
-    if !t.vendor.is_empty() && t.vendor != tr.vendor {
-        return false;
-    }
-    if t.min_ram > 0.0 && tr.ram_gb > 0.0 && tr.ram_gb < t.min_ram {
-        return false;
-    }
-    t.need.iter().filter(|n| !n.is_empty()).all(|n| match n.strip_prefix('!') {
-        Some(neg) => !tr.has(neg),
-        None => tr.has(n),
-    })
+    fit_reason(t, tr).is_none()
 }
 
 /// The hardware fact that rules a tweak out on this PC, in plain words; None when it fits. Same wording as the
 /// PowerShell Get-TweakFitReason.
 pub fn fit_reason(t: &Tweak, tr: &Traits) -> Option<String> {
+    if t.desktop_only && !tr.has("laptop") && !tr.has("desktop") {
+        return Some("could not determine whether this PC is a laptop or desktop".into());
+    }
     if t.desktop_only && tr.laptop {
         return Some("this PC is a laptop".into());
+    }
+    if t.ssd_only && !tr.has("ssd") && !tr.has("hdd") {
+        return Some("could not determine the system drive type".into());
     }
     if t.ssd_only && !tr.ssd {
         return Some("the system drive is a hard disk".into());
     }
+    if !t.vendor.is_empty() && tr.vendor.is_empty() {
+        return Some("could not identify a supported system manufacturer".into());
+    }
     if !t.vendor.is_empty() && t.vendor != tr.vendor {
         return Some(format!("not a {} system", t.vendor));
     }
-    if t.min_ram > 0.0 && tr.ram_gb > 0.0 && tr.ram_gb < t.min_ram {
+    if t.min_ram > 0.0 && tr.ram_gb <= 0.0 {
+        return Some("could not read installed RAM".into());
+    }
+    if t.min_ram > 0.0 && tr.ram_gb < t.min_ram {
         return Some(format!("{:.0} GB RAM, needs {:.0} GB", tr.ram_gb, t.min_ram));
     }
     let name = |k: &str| match k {
@@ -261,6 +283,18 @@ pub fn fit_reason(t: &Tweak, tr: &Traits) -> Option<String> {
         other => other.to_string(),
     };
     for n in t.need.iter().filter(|n| !n.is_empty()) {
+        let trait_name = n.trim_start_matches('!');
+        let unknown = match trait_name {
+            "laptop" | "desktop" => tr.has("form-unknown"),
+            "ssd" | "hdd" | "nvme" => tr.has("storage-unknown"),
+            "dgpu" | "nvidia" | "amdgpu" | "intelgpu" => tr.has("gpu-unknown"),
+            "win10" | "win11" => tr.has("windows-unknown"),
+            "ram8" | "ram16" | "ram32" => tr.ram_gb <= 0.0,
+            "cores8" => tr.threads == 0,
+            "lowend" => !tr.has("lowend") && (tr.has("storage-unknown") || tr.ram_gb <= 0.0 || tr.threads == 0),
+            _ => false,
+        };
+        if unknown { return Some(format!("could not determine {}", name(trait_name))); }
         match n.strip_prefix('!') {
             Some(neg) if tr.has(neg) => return Some(format!("not for {}", name(neg))),
             None if !tr.has(n) => return Some(format!("needs {}", name(n))),
@@ -319,16 +353,18 @@ pub fn smart_plan(cat: &Catalog, tr: &Traits, applied: &HashMap<String, bool>) -
     }
     let ids = resolve_conflicts(cat, ids);
     let mut notes = vec!["Ticked: the recommended set and the performance tweaks that fit this hardware. Advanced tweaks and other Moderate ones are left for you to tick.".to_string()];
-    notes.push(if tr.laptop {
+    notes.push(if !tr.has("desktop") && !tr.has("laptop") {
+        "PC type could not be detected: desktop-only power tweaks are skipped.".into()
+    } else if tr.laptop {
         "Laptop: desktop-only tweaks (power throttling, USB/PCIe power saving, timer) are skipped to protect battery life.".into()
     } else {
         "Desktop: CPU power throttling off, no USB/PCIe link sleep, per-app timer requests honored. The Ultimate plan and 100% minimum CPU stay off (heat, no measured gain).".into()
     });
-    notes.push(if tr.ssd { "SSD: TRIM check included.".into() } else { "Hard disk: SSD-only tweaks are skipped; run a defrag from Windows.".into() });
+    notes.push(if !tr.has("ssd") && !tr.has("hdd") { "System drive type could not be detected: storage-specific tweaks are skipped.".into() } else if tr.ssd { "SSD: TRIM check included.".into() } else { "Hard disk: SSD-only tweaks are skipped; run a defrag from Windows.".into() });
     if tr.ram_gb > 0.0 {
         notes.push(format!("{:.0} GB RAM: tweaks that need more memory than this are skipped.", tr.ram_gb));
     }
-    notes.push(if tr.has("dgpu") { "Discrete GPU: hardware-accelerated GPU scheduling, Game Mode and Game DVR capture off are ticked.".into() } else { "No discrete GPU: GPU scheduling is skipped.".into() });
+    notes.push(if tr.has("gpu-unknown") { "Graphics adapters could not be identified: GPU-specific tweaks are skipped.".into() } else if tr.has("dgpu") { "Discrete GPU: hardware-accelerated GPU scheduling, Game Mode and Game DVR capture off are ticked.".into() } else { "No discrete GPU: GPU scheduling is skipped.".into() });
     Plan { ids, notes, skipped }
 }
 
@@ -462,5 +498,38 @@ mod tests {
         let ids = preset_ids(&cat, &tr, "safe");
         assert!(ids.len() >= 10);
         assert!(ids.iter().all(|i| cat.find(i).unwrap().has_tag("safe")));
+    }
+
+    #[test]
+    fn unknown_probes_are_not_reported_as_known_hardware() {
+        let tags = detected_tags(None, None, false, 0.0, 0, &[], 0);
+        for tag in ["form-unknown", "storage-unknown", "gpu-unknown", "ram-unknown", "cpu-unknown", "windows-unknown"] {
+            assert!(tags.iter().any(|t| t == tag), "missing {tag}");
+        }
+        for tag in ["desktop", "laptop", "ssd", "hdd", "lowend", "win10", "win11"] {
+            assert!(!tags.iter().any(|t| t == tag), "invented {tag}");
+        }
+        let tr = Traits { tags, ..Default::default() };
+        let cat = Catalog::load();
+        let plan = smart_plan(&cat, &tr, &HashMap::new());
+        for id in ["perf-powerthrottle", "perf-usbpcie", "perf-globaltimer", "perf-trimon", "perf-hags"] {
+            assert!(!plan.ids.iter().any(|selected| selected == id), "{id} selected with unknown hardware");
+        }
+        assert!(plan.notes.iter().any(|n| n.contains("PC type could not be detected")));
+        assert!(plan.notes.iter().any(|n| n.contains("System drive type could not be detected")));
+        assert!(fit_reason(cat.find("perf-trimon").unwrap(), &tr).unwrap().contains("could not determine"));
+        assert!(!fits(cat.find("perf-paging").unwrap(), &tr), "unknown RAM cannot satisfy a minimum RAM gate");
+    }
+
+    #[test]
+    fn negative_hardware_requirements_need_evidence_too() {
+        let tags = detected_tags(None, None, false, 32.0, 16, &[], 26100);
+        let tr = Traits { ram_gb: 32.0, threads: 16, tags, ..Default::default() };
+        for need in ["!lowend", "!laptop", "!hdd", "!dgpu"] {
+            let tweak = Tweak { need: vec![need.into()], ..Default::default() };
+            assert!(!fits(&tweak, &tr), "{need} accepted without probe evidence");
+        }
+        let tags = detected_tags(None, None, false, 4.0, 2, &[], 26100);
+        assert!(tags.iter().any(|tag| tag == "lowend"), "known low RAM/CPU remain valid evidence");
     }
 }

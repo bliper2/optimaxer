@@ -13,7 +13,7 @@ cargo build --release
 .\target\release\orion-store-desktop.exe
 ```
 
-`cargo test` runs 95 tests. Five more read the live system or the network and are ignored by default: `cargo test -- --ignored`. One of them downloads the latest release into a temp folder and checks the whole update path end to end.
+`cargo test --locked` runs the offline regression suite. Live-system and network tests are ignored by default. One downloads the latest release into a temp folder and checks the update path; another empties this PC's memory caches, so inspect the ignored tests before running them. `cargo clippy --locked --all-targets -- -D warnings` checks all desktop targets.
 
 The exe starts without administrator rights. The Store works as normal. The Optimaxer section can read everything, and shows a banner with a "Restart as administrator" button, because changing HKLM, services or tasks needs elevation.
 
@@ -58,6 +58,10 @@ Both halves share the theme, the `Settings` file, the data folder (`%LOCALAPPDAT
 Every action that changes the system opens a confirmation window first. For tweaks the window lists the exact registry values, services and tasks that will change (a read-only dry run), and offers a restore point. Advanced tweaks are marked in red. One job runs at a time, on a worker thread, so the window stays responsive.
 
 Undo records use the same JSON layout as Optimaxer's `state.json`. On first start an existing `%ProgramData%\Optimaxer\state.json` is imported once into `%LOCALAPPDATA%\OrionStore\optimaxer\state.json`. The original file is never modified.
+
+Unreadable undo state blocks tweak changes until a valid backup is recovered. Failed undo operations retain their records for retry. Retrying a tweak preserves its first saved originals, and a failed command is reported even when other steps succeeded.
+
+The verification scope and remaining integration checks are listed in [verification.md](../docs/verification.md).
 
 Nothing is downloaded or installed automatically, and Optimaxer never installs drivers. The vendor driver button only opens the maker's support page.
 

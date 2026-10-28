@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -62,6 +63,7 @@ pub struct Record {
 pub struct State {
     pub records: BTreeMap<String, Record>,
     pub(crate) path: PathBuf,
+    load_error: Option<String>,
 }
 
 pub fn state_dir() -> PathBuf {
@@ -84,9 +86,6 @@ fn read_records(path: &Path) -> Result<BTreeMap<String, Record>, String> {
     let bytes = fs::read(path).map_err(|e| e.to_string())?;
     // PowerShell writes a UTF-8 BOM
     let text = String::from_utf8_lossy(bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes)).into_owned();
-    if text.trim().is_empty() {
-        return Ok(BTreeMap::new());
-    }
     serde_json::from_str(&text).map_err(|e| e.to_string())
 }
 
@@ -97,6 +96,7 @@ impl State {
 
     pub fn load_from(path: PathBuf, legacy: Option<PathBuf>) -> Self {
         let mut records = BTreeMap::new();
+        let mut load_error = None;
         if path.exists() {
             match read_records(&path) {
                 Ok(r) => records = r,
@@ -104,28 +104,42 @@ impl State {
                     // keep the unreadable file: the next save would otherwise overwrite every saved original value
                     let keep = path.with_file_name(format!("state-unreadable-{}.json", super::now_stamp()));
                     let _ = fs::copy(&path, keep);
-                    eprintln!("optimaxer state unreadable ({why}); copy kept");
+                    load_error = Some(format!("Undo state is unreadable ({why}); recover the saved file before changing tweaks"));
                 }
             }
         } else if let Some(l) = legacy.filter(|l| l.exists()) {
-            if let Ok(r) = read_records(&l) {
-                records = r;
-                let s = State { records: records.clone(), path: path.clone() };
-                let _ = s.save();
+            match read_records(&l) {
+                Ok(r) => {
+                    records = r;
+                    let s = State { records: records.clone(), path: path.clone(), load_error: None };
+                    if let Err(e) = s.save() {
+                        load_error = Some(format!("Could not import the undo state: {e}"));
+                    }
+                }
+                Err(e) => load_error = Some(format!("Legacy undo state is unreadable: {e}")),
             }
         }
-        State { records, path }
+        State { records, path, load_error }
     }
 
     pub fn save(&self) -> Result<(), String> {
+        if let Some(e) = &self.load_error {
+            return Err(e.clone());
+        }
         let tmp = self.path.with_extension("tmp");
         let json = serde_json::to_vec_pretty(&self.records).map_err(|e| e.to_string())?;
-        fs::write(&tmp, json).map_err(|e| e.to_string())?;
+        let mut file = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+        file.write_all(&json).and_then(|_| file.sync_all()).map_err(|e| e.to_string())?;
+        drop(file);
         fs::rename(&tmp, &self.path).map_err(|e| e.to_string())
     }
 
     pub fn contains(&self, id: &str) -> bool {
         self.records.contains_key(id)
+    }
+
+    pub fn load_error(&self) -> Option<&str> {
+        self.load_error.as_deref()
     }
 }
 
@@ -177,6 +191,21 @@ mod tests {
         assert!(s.records.is_empty());
         let kept = fs::read_dir(&d).unwrap().filter_map(Result::ok).any(|e| e.file_name().to_string_lossy().starts_with("state-unreadable-"));
         assert!(kept);
+        assert!(s.save().is_err());
+        assert_eq!(fs::read_to_string(d.join("state.json")).unwrap(), "{ not json");
+    }
+
+    #[test]
+    fn empty_and_corrupt_legacy_state_block_saving() {
+        let d = temp("empty");
+        let p = d.join("state.json");
+        fs::write(&p, "").unwrap();
+        assert!(State::load_from(p.clone(), None).save().is_err());
+        fs::remove_file(&p).unwrap();
+        let legacy = d.join("legacy.json");
+        fs::write(&legacy, "[]").unwrap();
+        assert!(State::load_from(p.clone(), Some(legacy)).save().is_err());
+        assert!(!p.exists());
     }
 
     #[test]

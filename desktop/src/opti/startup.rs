@@ -37,6 +37,8 @@ pub fn list(sys: &dyn System) -> Vec<Item> {
                 Some(RegData::Str(s) | RegData::Expand(s)) => s,
                 _ => String::new(),
             };
+            // The unnamed default value and empty commands do not launch startup programs.
+            if name.trim().is_empty() || cmd.trim().is_empty() { continue; }
             let enabled = enabled_flag(sys, &approved, &name);
             out.push(Item { name, cmd, scope, approved: approved.clone(), enabled });
         }
@@ -114,5 +116,17 @@ mod tests {
         assert!(sys.reg_get(run, "alpha").is_some(), "the Run entry itself must stay");
         set_enabled(&sys, &item, true).unwrap();
         assert!(list(&sys).into_iter().find(|i| i.scope == "Registry (user)").unwrap().enabled);
+    }
+
+    #[test]
+    fn unnamed_defaults_empty_commands_and_non_strings_are_not_startup_items() {
+        let sys = FakeSystem::default();
+        let run = r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run";
+        sys.put(run, "", RegData::Str("default metadata".into()));
+        sys.put(run, "Empty", RegData::Str("  ".into()));
+        sys.put(run, "Number", RegData::Dword(1));
+        sys.put(run, "Valid", RegData::Str(r"C:\app.exe".into()));
+        let names: Vec<_> = list(&sys).into_iter().filter(|item| item.scope == "Registry (user)").map(|item| item.name).collect();
+        assert_eq!(names, vec!["valid"]);
     }
 }

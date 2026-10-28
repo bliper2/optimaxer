@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import optimaxer as ox  # noqa: E402
@@ -15,12 +16,15 @@ class FakeSys:
                       "NetworkManager-wait-online.service", "cups.service", "ufw.service"}
         self.commands, self.have = [], {"pacman", "systemctl", "yay", "flatpak", "nmcli", "paccache", "sudo", "dnf", "rpm"}
         self.fail_pkgs, self.nm = set(), {}
+        self.fail_commands = set()
         self.remotes = "flathub\n"          # `flatpak remotes` output
         self.unneeded = ""                  # `dnf repoquery --unneeded` output
 
     def __call__(self, cmd, user, write, input):
         self.commands.append((list(cmd), user, write))
         c = cmd
+        if any(tuple(c[:len(prefix)]) == prefix for prefix in self.fail_commands):
+            return 1, "simulated command failure"
         if c[0] == "which":
             return (0, "") if c[1] in self.have else (1, "")
         if c[:2] == ["pacman", "-Q"]:
@@ -66,6 +70,12 @@ class FakeSys:
             self.enabled.discard(c[-1])
             if "--now" in c:
                 self.active.discard(c[-1])
+            return 0, ""
+        if c[:2] == ["systemctl", "start"]:
+            self.active.add(c[-1])
+            return 0, ""
+        if c[:2] == ["systemctl", "stop"]:
+            self.active.discard(c[-1])
             return 0, ""
         if c[:3] == ["flatpak", "install", "-y"]:
             self.pkgs.add(c[-1])
@@ -113,6 +123,79 @@ class Base(unittest.TestCase):
 
 
 class TweakFiles(Base):
+    def test_originals_saved_before_first_write_and_survive_failure(self):
+        self.put("/etc/first.conf", "original\n")
+        t = ox.Tweak("test-order", "Order", "", "Test",
+                     files={"/etc/first.conf": "changed\n", "/etc/second.conf": "new\n"})
+        write = ox.write_text
+
+        def partial_write(path, content):
+            self.assertEqual(ox.load_state()[t.id]["files"][0]["content"], "original\n")
+            if path == "/etc/second.conf":
+                raise PermissionError("simulated failure")
+            write(path, content)
+
+        with mock.patch.object(ox, "write_text", side_effect=partial_write):
+            self.assertFalse(t.apply())
+        self.assertEqual(self.get("/etc/first.conf"), "changed\n")
+        self.assertTrue(t.undo())
+        self.assertEqual(self.get("/etc/first.conf"), "original\n")
+
+    def test_state_save_failure_changes_nothing(self):
+        t = ox.tweak_by_id("perf-vm")
+        with mock.patch.object(ox, "save_state", side_effect=PermissionError("read only")):
+            with self.assertRaises(PermissionError):
+                t.apply()
+        self.assertIsNone(self.get("/etc/sysctl.d/99-optimaxer-vm.conf"))
+        self.assertFalse(any(write for _cmd, _user, write in self.sys.commands))
+
+    def test_unreadable_state_is_not_overwritten(self):
+        for content in ("{broken", "", "[]", '{"x": null}'):
+            with self.subTest(content=content):
+                self.put(ox.STATE_FILE, content)
+                with self.assertRaises(ValueError):
+                    ox.tweak_by_id("perf-vm").apply()
+                self.assertEqual(self.get(ox.STATE_FILE), content)
+                self.assertIsNone(self.get("/etc/sysctl.d/99-optimaxer-vm.conf"))
+
+    def test_atomic_state_replace_failure_preserves_previous_state(self):
+        ox.save_state({"original": {"value": 1}})
+        with mock.patch.object(ox.os, "replace", side_effect=PermissionError("read only")):
+            with self.assertRaises(PermissionError):
+                ox.save_state({"replacement": {}})
+        self.assertEqual(ox.load_state(), {"original": {"value": 1}})
+
+    def test_failed_post_command_cannot_report_success(self):
+        self.sys.fail_commands.add(("sysctl", "--system"))
+        self.assertFalse(ox.tweak_by_id("perf-vm").apply())
+        self.assertIn("perf-vm", ox.load_state())
+
+    def test_failed_undo_command_keeps_originals_for_retry(self):
+        t = ox.tweak_by_id("perf-vm")
+        self.assertTrue(t.apply())
+        self.sys.fail_commands.add(("sysctl", "--system"))
+        self.assertFalse(t.undo())
+        self.assertIn(t.id, ox.load_state())
+        self.sys.fail_commands.clear()
+        self.assertTrue(t.undo())
+        self.assertNotIn(t.id, ox.load_state())
+
+    def test_failed_file_restore_keeps_originals(self):
+        t = ox.tweak_by_id("perf-vm")
+        self.assertTrue(t.apply())
+        with mock.patch.object(ox, "remove_file", side_effect=PermissionError("read only")):
+            self.assertFalse(t.undo())
+        self.assertIn(t.id, ox.load_state())
+
+    def test_undo_succeeds_when_original_already_matches_desired(self):
+        t = ox.tweak_by_id("perf-vm")
+        for path, content in t.files.items():
+            self.put(path, content)
+        self.assertTrue(t.apply())
+        self.assertTrue(t.undo())
+        self.assertTrue(t.is_applied())
+        self.assertNotIn(t.id, ox.load_state())
+
     def test_retry_after_failed_verification_and_drift_preserves_originals(self):
         self.put("/etc/first.conf", "original\n")
         t = ox.Tweak("test-retry", "Retry", "", "Test",
@@ -269,7 +352,8 @@ class Catalog(unittest.TestCase):
         self.assertTrue(all(a["src"] in "PAF" for a in ox.APPS))
 
     def test_version_matches_repo(self):
-        v = open(os.path.join(os.path.dirname(__file__), "..", "..", "VERSION"), encoding="utf-8").read().strip()
+        with open(os.path.join(os.path.dirname(__file__), "..", "..", "VERSION"), encoding="utf-8") as fh:
+            v = fh.read().strip()
         self.assertEqual(ox.__version__, v)
 
 
@@ -308,6 +392,66 @@ class Apps(Base):
 
 
 class Cleaner(Base):
+    def test_canonical_path_alias_does_not_block_cleanup(self):
+        self.put("/cache/file", "bytes")
+        target = {"id": "test", "name": "Test", "paths": ["/cache"]}
+        # Windows may expand an 8.3 name without the path crossing a link or junction.
+        with mock.patch.object(ox.os.path, "realpath", return_value="canonical-path-spelling"):
+            self.assertEqual(ox.clean_target(target), 5)
+        self.assertIsNone(self.get("/cache/file"))
+
+    @unittest.skipUnless(os.name == "nt", "Windows 8.3 path aliases")
+    def test_windows_short_temp_path_cleans_the_same_cache(self):
+        import ctypes
+        get_short = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+        get_short.argtypes = (ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32)
+        get_short.restype = ctypes.c_uint32
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = get_short(self.tmp.name, buffer, len(buffer))
+        if not length or length >= len(buffer) or "~" not in buffer.value:
+            self.skipTest("This temporary directory has no 8.3 alias")
+        ox.CTX.root = buffer.value
+        self.test_clean_home_cache()
+
+    def test_redirected_ancestor_is_not_followed(self):
+        self.put("/outside/nested/keep", "keep")
+        try:
+            os.symlink(ox.P("/outside"), ox.P("/cache"), target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("Creating symlinks is not permitted")
+        ox.clean_target({"id": "test", "name": "Test", "paths": ["/cache/nested"]})
+        self.assertEqual(self.get("/outside/nested/keep"), "keep")
+
+    def test_windows_reparse_attribute_blocks_cleanup_without_isjunction(self):
+        self.put("/cache/nested/keep", "keep")
+        original = os.lstat
+        ancestor = os.path.abspath(ox.P("/cache"))
+
+        def attributes(path, *args, **kwargs):
+            info = original(path, *args, **kwargs)
+            if os.path.abspath(path) == ancestor:
+                return mock.Mock(st_mode=info.st_mode, st_file_attributes=0x400)
+            return info
+
+        with mock.patch.object(ox.os, "lstat", side_effect=attributes):
+            self.assertEqual(ox.clean_target({"id": "test", "name": "Test", "paths": ["/cache/nested"]}), 0)
+        self.assertEqual(self.get("/cache/nested/keep"), "keep")
+
+    def test_dry_run_never_claims_bytes_freed(self):
+        self.put("/cache/file", "keep")
+        ox.CTX.dry_run = True
+        self.assertEqual(ox.clean_target({"id": "test", "name": "Test", "paths": ["/cache"]}), 0)
+        self.assertEqual(self.get("/cache/file"), "keep")
+
+    def test_redirected_target_is_not_followed(self):
+        self.put("/outside/keep", "keep")
+        try:
+            os.symlink(ox.P("/outside"), ox.P("/cache"), target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("Creating symlinks is not permitted")
+        ox.clean_target({"id": "test", "name": "Test", "paths": ["/cache"]})
+        self.assertEqual(self.get("/outside/keep"), "keep")
+
     def test_clean_home_cache(self):
         cache = ox.P(os.path.join(ox.CTX.home, ".cache", "pip"))
         os.makedirs(cache)
@@ -336,6 +480,12 @@ class Cleaner(Base):
 class Startup(Base):
     DESKTOP = "[Desktop Entry]\nType=Application\nName=Updater\nExec=/usr/bin/updater\n"
 
+    def test_enable_clears_gnome_disabled_flag(self):
+        self.put("/etc/xdg/autostart/updater.desktop", self.DESKTOP + "X-GNOME-Autostart-enabled=false\n")
+        self.assertFalse(ox.autostart_items()[0]["enabled"])
+        self.assertTrue(ox.set_autostart(ox.autostart_items()[0], True))
+        self.assertTrue(ox.autostart_items()[0]["enabled"])
+
     def test_disable_enable_system_entry(self):
         self.put("/etc/xdg/autostart/updater.desktop", self.DESKTOP)
         items = ox.autostart_items()
@@ -350,6 +500,40 @@ class Startup(Base):
 
 
 class Network(Base):
+    def test_escaped_connection_name(self):
+        runner = ox.CTX.runner
+
+        def names(cmd, user, write, input):
+            if cmd[:2] == ["nmcli", "-t"]:
+                return 0, "Wired\\: lab:802-3-ethernet:enp3s0\n"
+            return runner(cmd, user, write, input)
+
+        ox.CTX.runner = names
+        self.assertEqual(ox.active_connections()[0]["name"], "Wired: lab")
+    def test_dns_failure_keeps_restore_record(self):
+        self.assertTrue(ox.set_dns("cloudflare"))
+        self.sys.fail_commands.add(("nmcli", "connection", "modify"))
+        self.assertFalse(ox.restore_dns())
+        self.assertIn("dns:Wired connection 1", ox.load_state())
+        self.sys.fail_commands.clear()
+        self.assertTrue(ox.restore_dns())
+
+    def test_reapply_failure_is_reported(self):
+        self.sys.fail_commands.add(("nmcli", "device", "reapply"))
+        self.assertFalse(ox.set_dns("cloudflare"))
+        self.assertFalse(ox.restore_dns())
+        self.assertIn("dns:Wired connection 1", ox.load_state())
+
+    def test_failed_dns_snapshot_changes_nothing(self):
+        self.sys.fail_commands.add(("nmcli", "-g"))
+        with self.assertRaises(RuntimeError):
+            ox.set_dns("cloudflare")
+        self.assertFalse(self.sys.ran("nmcli", "connection", "modify"))
+
+    def test_no_connections_is_not_success(self):
+        self.sys.fail_commands.add(("nmcli", "-t"))
+        self.assertFalse(ox.set_dns("cloudflare"))
+
     def test_dns_set_and_restore(self):
         self.sys.nm[("Wired connection 1", "ipv4.dns")] = "192.168.1.1"
         self.assertTrue(ox.set_dns("cloudflare"))
@@ -363,6 +547,23 @@ class Network(Base):
 
 
 class Services(Base):
+    def test_restore_all_enabled_and_active_combinations(self):
+        for enabled in (False, True):
+            for active in (False, True):
+                with self.subTest(enabled=enabled, active=active):
+                    self.sys.enabled = {"cups.service"} if enabled else set()
+                    self.sys.active = {"cups.service"} if active else set()
+                    self.assertTrue(ox.set_service("cups.service", not enabled))
+                    self.assertTrue(ox.restore_service("cups.service"))
+                    self.assertEqual(ox.unit_enabled("cups.service"), enabled)
+                    self.assertEqual(ox.unit_active("cups.service"), active)
+
+    def test_failed_restore_keeps_record(self):
+        self.assertTrue(ox.set_service("cups.service", True))
+        self.sys.fail_commands.add(("systemctl", "stop"))
+        self.assertFalse(ox.restore_service("cups.service"))
+        self.assertIn("service:cups.service", ox.load_state())
+
     def test_set_and_restore(self):
         self.sys.enabled.add("cups.service")
         self.assertTrue(ox.set_service("cups.service", False))
@@ -371,6 +572,40 @@ class Services(Base):
         self.assertIn("cups.service", self.sys.enabled)
         rows = {r["unit"] for r in ox.service_rows()}
         self.assertIn("cups.service", rows)
+
+
+class Updates(Base):
+    def release(self, digest):
+        return {"newer": True, "tag": "v999.0.0", "url": "https://example.org/update.py", "digest": digest}
+
+    def test_missing_checksum_refuses_before_download(self):
+        with mock.patch.object(ox, "latest_release", return_value=self.release("")), mock.patch.object(ox.urllib.request, "urlopen") as download:
+            self.assertFalse(ox.self_update(ox.P("/optimaxer.py")))
+            download.assert_not_called()
+
+    def test_dry_run_update_does_not_download_or_write(self):
+        ox.CTX.dry_run = True
+        with mock.patch.object(ox, "latest_release", return_value=self.release("sha256:" + "0" * 64)), mock.patch.object(ox.urllib.request, "urlopen") as download:
+            self.assertTrue(ox.self_update(ox.P("/optimaxer.py")))
+            download.assert_not_called()
+        self.assertFalse(os.path.exists(ox.P("/optimaxer.py")))
+
+    def test_invalid_script_refuses_even_with_matching_checksum(self):
+        import hashlib
+        data = b"__version__ = '999'\ndef main(:\n"
+        self.put("/optimaxer.py", "original")
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = data
+        with mock.patch.object(ox, "latest_release", return_value=self.release("sha256:" + hashlib.sha256(data).hexdigest())), mock.patch.object(ox.urllib.request, "urlopen", return_value=response):
+            self.assertFalse(ox.self_update(ox.P("/optimaxer.py")))
+        self.assertEqual(self.get("/optimaxer.py"), "original")
+
+    def test_dry_run_launcher_and_command_do_not_write(self):
+        ox.CTX.dry_run = True
+        self.assertEqual(ox.install_command(), [])
+        self.assertEqual(ox.create_launcher(), [])
+        self.assertFalse(os.path.exists(ox.installed_script()))
+        self.assertFalse(os.path.exists(ox.P("/home/tester/.local")))
 
 
 class Cli(Base):
@@ -491,6 +726,22 @@ class GuiTest(Base):
         for key in ("apps", "tweaks", "clean", "services", "dns", "home"):
             self.assertTrue(self.g.lists[key]["data"], key)
         self.assertEqual(len(self.g.lists["apps"]["data"]), len(ox.APPS))
+
+    def test_dry_run_cannot_change_during_a_job(self):
+        self.g.busy = True
+        self.g.dry_var.set(True)
+        self.g._dry_toggled()
+        self.assertFalse(ox.CTX.dry_run)
+        self.assertFalse(self.g.dry_var.get())
+        self.g.busy = False
+
+    def test_callback_error_is_logged(self):
+        def fail():
+            raise ValueError("callback failure")
+        self.g._queue.put(("call", fail))
+        self.g._pump()
+        self.g.drain()
+        self.assertIn("UI callback failed: ValueError: callback failure", self.g.log_text.get("1.0", "end"))
 
     def test_apply_tweak_and_install_app(self):
         self.load_all()
