@@ -392,6 +392,51 @@ class Apps(Base):
 
 
 class Cleaner(Base):
+    def test_canonical_path_alias_does_not_block_cleanup(self):
+        self.put("/cache/file", "bytes")
+        target = {"id": "test", "name": "Test", "paths": ["/cache"]}
+        # Windows may expand an 8.3 name without the path crossing a link or junction.
+        with mock.patch.object(ox.os.path, "realpath", return_value="canonical-path-spelling"):
+            self.assertEqual(ox.clean_target(target), 5)
+        self.assertIsNone(self.get("/cache/file"))
+
+    @unittest.skipUnless(os.name == "nt", "Windows 8.3 path aliases")
+    def test_windows_short_temp_path_cleans_the_same_cache(self):
+        import ctypes
+        get_short = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+        get_short.argtypes = (ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32)
+        get_short.restype = ctypes.c_uint32
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = get_short(self.tmp.name, buffer, len(buffer))
+        if not length or length >= len(buffer) or "~" not in buffer.value:
+            self.skipTest("This temporary directory has no 8.3 alias")
+        ox.CTX.root = buffer.value
+        self.test_clean_home_cache()
+
+    def test_redirected_ancestor_is_not_followed(self):
+        self.put("/outside/nested/keep", "keep")
+        try:
+            os.symlink(ox.P("/outside"), ox.P("/cache"), target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("Creating symlinks is not permitted")
+        ox.clean_target({"id": "test", "name": "Test", "paths": ["/cache/nested"]})
+        self.assertEqual(self.get("/outside/nested/keep"), "keep")
+
+    def test_windows_reparse_attribute_blocks_cleanup_without_isjunction(self):
+        self.put("/cache/nested/keep", "keep")
+        original = os.lstat
+        ancestor = os.path.abspath(ox.P("/cache"))
+
+        def attributes(path, *args, **kwargs):
+            info = original(path, *args, **kwargs)
+            if os.path.abspath(path) == ancestor:
+                return mock.Mock(st_mode=info.st_mode, st_file_attributes=0x400)
+            return info
+
+        with mock.patch.object(ox.os, "lstat", side_effect=attributes):
+            self.assertEqual(ox.clean_target({"id": "test", "name": "Test", "paths": ["/cache/nested"]}), 0)
+        self.assertEqual(self.get("/cache/nested/keep"), "keep")
+
     def test_dry_run_never_claims_bytes_freed(self):
         self.put("/cache/file", "keep")
         ox.CTX.dry_run = True

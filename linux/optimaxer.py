@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1088,6 +1089,27 @@ def target_size(t: dict) -> int:
     return sum(dir_size(p) for p in target_paths(t))
 
 
+def redirected_path(path: str) -> bool:
+    """Check the target and its ancestors without confusing alternate path spellings with redirects."""
+    current = os.path.abspath(path)
+    reparse_point = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    while True:
+        try:
+            info = os.lstat(current)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return True  # Do not delete through an ancestor whose identity cannot be checked.
+        else:
+            # lstat exposes Windows junctions/reparse points on Python 3.10 too; isjunction needs 3.12.
+            if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & reparse_point:
+                return True
+        parent = os.path.dirname(current)
+        if parent == current:
+            return False
+        current = parent
+
+
 def clean_target(t: dict) -> int:
     """Clean one target; returns bytes freed (best effort)."""
     before = max(target_size(t), 0)
@@ -1110,7 +1132,7 @@ def clean_target(t: dict) -> int:
         for p in target_paths(t):
             full = P(p)
             # A redirected cache directory must never turn cleanup into deletion outside this target.
-            if os.path.normcase(os.path.realpath(full)) != os.path.normcase(os.path.abspath(full)):
+            if redirected_path(full):
                 log(f"Skipping redirected cleanup target: {p}", "WARN")
                 continue
             if not os.path.isdir(full):
