@@ -907,20 +907,35 @@ T -Id 'wu-nodrivers' -Cat $D -Name 'Windows Update: do not install drivers autom
       Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching' 'SearchOrderConfig' 0
   )
 
+$global:OptiUpdatePauseKey = 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings'
+$global:OptiUpdatePauseValues = @('PauseFeatureUpdatesStartTime', 'PauseQualityUpdatesStartTime', 'PauseUpdatesStartTime', 'PauseFeatureUpdatesEndTime', 'PauseQualityUpdatesEndTime', 'PauseUpdatesExpiryTime')
+
 T -Id 'wu-pause' -Cat $D -Name 'Windows Update: pause all updates for 35 days' -Tags optin -Risk Moderate `
   -Desc 'Uses the same pause Settings offers (maximum 35 days). Updates resume automatically afterwards. Undo resumes immediately.' `
+  -Snapshot {
+      foreach ($n in $global:OptiUpdatePauseValues) {
+          $s = Get-RegSnapshot @{ P = $global:OptiUpdatePauseKey; N = $n }
+          @{ Name = $n; Exists = [bool]$s.Exists; Value = $s.Value; Type = $s.Type }
+      }
+  } `
   -Apply {
       $now = [DateTime]::UtcNow
       $start = $now.ToString('yyyy-MM-ddTHH:mm:ssZ'); $end = $now.AddDays(35).ToString('yyyy-MM-ddTHH:mm:ssZ')
-      foreach ($n in 'PauseFeatureUpdatesStartTime', 'PauseQualityUpdatesStartTime', 'PauseUpdatesStartTime') { Set-RegEntry 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' $n $start 'String' }
-      foreach ($n in 'PauseFeatureUpdatesEndTime', 'PauseQualityUpdatesEndTime', 'PauseUpdatesExpiryTime') { Set-RegEntry 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' $n $end 'String' }
+      foreach ($n in $global:OptiUpdatePauseValues[0..2]) { Set-RegEntry $global:OptiUpdatePauseKey $n $start 'String' }
+      foreach ($n in $global:OptiUpdatePauseValues[3..5]) { Set-RegEntry $global:OptiUpdatePauseKey $n $end 'String' }
       $null
   } `
-  -Undo {
-      foreach ($n in 'PauseFeatureUpdatesStartTime', 'PauseQualityUpdatesStartTime', 'PauseUpdatesStartTime', 'PauseFeatureUpdatesEndTime', 'PauseQualityUpdatesEndTime', 'PauseUpdatesExpiryTime') { Remove-RegEntry 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' $n }
+  -Undo { param($d)
+      if (-not $d -or @($d).Count -ne $global:OptiUpdatePauseValues.Count) { throw 'original Windows Update pause values were not captured; refusing to guess their prior state' }
+      $bad = @()
+      foreach ($n in $global:OptiUpdatePauseValues) {
+          $saved = @($d | Where-Object { $_.Name -eq $n })
+          if ($saved.Count -ne 1 -or -not (Restore-RegSnapshot @{ P = $global:OptiUpdatePauseKey; N = $n; Exists = [bool]$saved[0].Exists; Value = $saved[0].Value; Type = $saved[0].Type })) { $bad += $n }
+      }
+      if ($bad.Count) { throw "could not restore Windows Update pause values: $($bad -join ', ')" }
   } `
   -Test {
-      $e = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' -ErrorAction SilentlyContinue).PauseUpdatesExpiryTime
+      $e = (Get-ItemProperty $global:OptiUpdatePauseKey -ErrorAction SilentlyContinue).PauseUpdatesExpiryTime
       [bool]$e -and ([DateTime]::Parse($e).ToUniversalTime() -gt [DateTime]::UtcNow)
   }
 

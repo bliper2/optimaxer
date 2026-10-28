@@ -182,6 +182,7 @@ mod tests {
     fn embedded_catalog_parses_and_ids_are_unique() {
         let c = Catalog::parse(EMBEDDED).unwrap();
         assert_eq!(c.tweaks.len() + c.not_ported.len(), 217);
+        assert_eq!(c.not_ported.len(), 11);
         let ids: HashSet<_> = c.tweaks.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids.len(), c.tweaks.len());
         assert!(c.tweaks.len() > 190, "most of the catalog should be ported, got {}", c.tweaks.len());
@@ -216,6 +217,9 @@ mod tests {
         assert!(c.find("net-smb1").unwrap().special.is_none());
         assert!(!c.find("net-smb1").unwrap().reg.is_empty());
         assert!(c.not_ported.iter().any(|s| s.id == "debloat-onedrive"));
+        assert!(c.find("ai-settingspage").is_some_and(|t| t.special.is_some()));
+        assert!(c.find("ui-thispc-folders").is_some_and(|t| t.special.is_some()));
+        assert!(c.find("wu-pause").is_some_and(|t| t.special.is_some()));
         assert!(c.find("ai-recall").map(|t| t.partial).unwrap_or(false));
         // the snapshot-based ports must exist, and perf-fth is plain registry now (no FTH list reset)
         for id in ["net-nagle", "perf-timer", "perf-sleepstudy"] {
@@ -236,7 +240,6 @@ mod tests {
         }
         assert!(c.tweaks.iter().filter(|t| !t.retired.is_empty()).count() >= 7);
         for id in ["perf-prefetch", "perf-timer", "perf-cpupower", "perf-priosep", "game-mpo", "game-fso", "net-nagle", "perf-bgapps", "perf-memcompress", "perf-fth"] {
-            // a few (memory compression) need PowerShell cmdlets and are listed as not ported
             let Some(t) = c.find(id) else {
                 assert!(c.not_ported.iter().any(|s| s.id == id), "{id} missing");
                 continue;

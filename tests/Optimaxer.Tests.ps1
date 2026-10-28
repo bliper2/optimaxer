@@ -252,6 +252,28 @@ It 'perf-timer undo puts back the exact boot values' {
         Assert (-not ($global:BcdCalls -match 'useplatformtick')) 'unchanged value was touched'
     } finally { Restore-Functions $saved }
 }
+It 'Windows Update pause undo restores prior values and types after a retry' {
+    $oldKey = $global:OptiUpdatePauseKey
+    $global:OptiUpdatePauseKey = "$TestKey\UpdatePause"
+    try {
+        Set-RegEntry $global:OptiUpdatePauseKey 'PauseUpdatesStartTime' 'original-start' 'String'
+        Set-RegEntry $global:OptiUpdatePauseKey 'PauseUpdatesExpiryTime' 42 'DWord'
+        $t = Get-TweakById 'wu-pause'
+        Assert (Invoke-TweakApply $t) 'pause apply not verified'
+        $expiry = Get-ItemProperty -LiteralPath $global:OptiUpdatePauseKey -Name PauseUpdatesExpiryTime
+        Assert ($expiry.PauseUpdatesExpiryTime -is [string] -and [DateTime]::Parse($expiry.PauseUpdatesExpiryTime).ToUniversalTime() -gt [DateTime]::UtcNow) 'pause expiry was not set'
+        Set-RegEntry $global:OptiUpdatePauseKey 'PauseUpdatesStartTime' 'drift-before-retry' 'String'
+        Assert (Invoke-TweakApply $t) 'retry apply not verified'
+        [void](Invoke-TweakUndo $t)
+        $state = Get-ItemProperty -LiteralPath $global:OptiUpdatePauseKey
+        Assert ($state.PauseUpdatesStartTime -eq 'original-start') 'original start value was not restored'
+        Assert ($state.PauseUpdatesExpiryTime -eq 42) 'original expiry value or type was not restored'
+        foreach ($name in 'PauseFeatureUpdatesStartTime', 'PauseQualityUpdatesStartTime', 'PauseFeatureUpdatesEndTime', 'PauseQualityUpdatesEndTime') {
+            Assert ($null -eq $state.$name) "$name should be absent after undo"
+        }
+        Assert (-not (Get-OptiState).ContainsKey('wu-pause')) 'record kept after successful restore'
+    } finally { $global:OptiUpdatePauseKey = $oldKey }
+}
 It 'perf-sleepstudy undo restores each log state' {
     $saved = Save-Functions 'Invoke-Wevtutil'
     $global:WevCalls = @()

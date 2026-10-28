@@ -10019,9 +10019,9 @@
                        "apply":  true,
                        "undo":  true,
                        "test":  true,
-                       "snapshot":  false
+                       "snapshot":  true
                    },
-        "apply_text":  "\r\n      $now = [DateTime]::UtcNow\r\n      $start = $now.ToString(\u0027yyyy-MM-ddTHH:mm:ssZ\u0027); $end = $now.AddDays(35).ToString(\u0027yyyy-MM-ddTHH:mm:ssZ\u0027)\r\n      foreach ($n in \u0027PauseFeatureUpdatesStartTime\u0027, \u0027PauseQualityUpdatesStartTime\u0027, \u0027PauseUpdatesStartTime\u0027) { Set-RegEntry \u0027HKLM:\\SOFTWARE\\Microsoft\\WindowsUpdate\\UX\\Settings\u0027 $n $start \u0027String\u0027 }\r\n      foreach ($n in \u0027PauseFeatureUpdatesEndTime\u0027, \u0027PauseQualityUpdatesEndTime\u0027, \u0027PauseUpdatesExpiryTime\u0027) { Set-RegEntry \u0027HKLM:\\SOFTWARE\\Microsoft\\WindowsUpdate\\UX\\Settings\u0027 $n $end \u0027String\u0027 }\r\n      $null\r\n  "
+        "apply_text":  "\r\n      $now = [DateTime]::UtcNow\r\n      $start = $now.ToString(\u0027yyyy-MM-ddTHH:mm:ssZ\u0027); $end = $now.AddDays(35).ToString(\u0027yyyy-MM-ddTHH:mm:ssZ\u0027)\r\n      foreach ($n in $global:OptiUpdatePauseValues[0..2]) { Set-RegEntry $global:OptiUpdatePauseKey $n $start \u0027String\u0027 }\r\n      foreach ($n in $global:OptiUpdatePauseValues[3..5]) { Set-RegEntry $global:OptiUpdatePauseKey $n $end \u0027String\u0027 }\r\n      $null\r\n  "
     },
     {
         "id":  "net-hosts-spy",
