@@ -35,7 +35,8 @@ if [[ "$digest" == sha256:* ]]; then
     [[ "sha256:$got" == "$digest" ]] || { echo "checksum mismatch, aborting" >&2; exit 1; }
     echo "Checksum verified (SHA-256)."
 else
-    echo "No published checksum for this release; relying on HTTPS." >&2
+    echo "No valid published SHA-256 checksum for this release; aborting." >&2
+    exit 1
 fi
 python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$tmp/optimaxer.py"
 

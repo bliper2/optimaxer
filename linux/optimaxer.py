@@ -134,18 +134,33 @@ def remove_file(path: str) -> None:
 
 def load_state() -> dict:
     raw = read_text(STATE_FILE)
-    if not raw:
+    if raw is None:
         return {}
     try:
-        return json.loads(raw)
-    except ValueError:
-        return {}
+        state = json.loads(raw)
+    except ValueError as exc:
+        raise ValueError(f"Undo state is unreadable at {STATE_FILE}; repair it before making changes") from exc
+    if not isinstance(state, dict) or any(not isinstance(record, dict) for record in state.values()):
+        raise ValueError(f"Undo state has an invalid format at {STATE_FILE}; no changes made")
+    return state
 
 
 def save_state(state: dict) -> None:
     if CTX.dry_run:
         return
-    write_text(STATE_FILE, json.dumps(state, indent=2))
+    full = P(STATE_FILE)
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    # Keep the prior complete record if writing or replacing the new state fails.
+    fd, temp = tempfile.mkstemp(prefix=".optimaxer-state-", dir=os.path.dirname(full))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, indent=2)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(temp, full)
+    finally:
+        if os.path.exists(temp):
+            os.remove(temp)
 
 
 def parse_os_release(text: str | None) -> dict:
@@ -292,6 +307,23 @@ def unit_active(unit: str) -> bool:
     return run(["systemctl", "is-active", unit])[0] == 0
 
 
+def change_command(cmd) -> bool:
+    rc, out = run(cmd, write=True)
+    if rc != 0:
+        label = " ".join(cmd) if isinstance(cmd, list) else cmd
+        log(f"Command failed ({label}, exit {rc}): {out.strip()[-160:]}", "WARN")
+    return rc == 0
+
+
+def restore_unit(snap: dict) -> bool:
+    # Enabled at boot and running now are independent states, including disabled but active units.
+    unit = snap["unit"]
+    enabled = change_command(["systemctl", "enable" if snap["enabled"] else "disable", unit])
+    active = change_command(["systemctl", "start" if snap["active"] else "stop", unit])
+    return enabled and active and (CTX.dry_run or
+           (unit_enabled(unit) == snap["enabled"] and unit_active(unit) == snap["active"]))
+
+
 class PacmanPM:
     """Manjaro, Arch and friends."""
     name = "pacman"
@@ -326,10 +358,10 @@ class PacmanPM:
 
     def clean_cache(self) -> None:
         if have("paccache"):
-            run(["paccache", "-rk2"], write=True)
-            run(["paccache", "-ruk0"], write=True)
+            change_command(["paccache", "-rk2"])
+            change_command(["paccache", "-ruk0"])
         else:
-            run(["pacman", "-Sc", "--noconfirm"], write=True)
+            change_command(["pacman", "-Sc", "--noconfirm"])
 
     def rank_mirrors(self) -> bool:
         if not have("pacman-mirrors"):
@@ -337,7 +369,7 @@ class PacmanPM:
             return False
         rc, out = run(["pacman-mirrors", "--fasttrack", "10"], write=True)
         if rc == 0:
-            run(["pacman", "-Syy"], write=True)
+            rc, out = run(["pacman", "-Syy"], write=True)
         log("Mirrors ranked and databases refreshed" if rc == 0 else f"Mirror ranking failed: {out.strip()[-120:]}", "OK" if rc == 0 else "WARN")
         return rc == 0
 
@@ -384,7 +416,7 @@ class DnfPM:
         return run(["dnf", "upgrade", "-y", "--refresh"], write=True)
 
     def clean_cache(self) -> None:
-        run(["dnf", "clean", "all"], write=True)
+        change_command(["dnf", "clean", "all"])
 
     def rank_mirrors(self) -> bool:
         """dnf picks mirrors itself; refreshing the metadata is the closest useful action."""
@@ -458,55 +490,60 @@ class Tweak:
     def apply(self) -> bool:
         state = load_state()
         # A failed apply or later setting drift must not replace the first saved originals on retry.
-        already = self.id in state
-        snap = {"files": [], "edits": [], "units": [], "pkgs_added": [], "time": time.strftime("%Y-%m-%dT%H:%M:%S")}
-        if already:
-            snap = state[self.id]
+        snap = state.get(self.id, {"files": [], "edits": [], "units": [], "pkgs_added": [],
+                                   "time": time.strftime("%Y-%m-%dT%H:%M:%S")})
         log(f"Apply: {self.name}")
+        edits = {}
+        for path in self.files:
+            if not any(f["path"] == path for f in snap["files"]):
+                prev = read_text(path)
+                snap["files"].append({"path": path, "existed": prev is not None, "content": prev})
+        for e in self.edits:
+            text = edits[e.path] if e.path in edits else read_text(e.path)
+            if text is None:
+                log(f"  {e.path} not found, skipped", "WARN")
+                continue
+            new, orig = e.apply(text)
+            if not any(ed["path"] == e.path and ed["key"] == e.key and ed.get("section") == e.section
+                       for ed in snap["edits"]):
+                snap["edits"].append({"path": e.path, "key": e.key, "value": e.value, "section": e.section, "sep": e.sep,
+                                      "orig": orig, "changed": new != text})
+            if new != text:
+                edits[e.path] = new
+        for u in self.enable + self.disable:
+            if not any(s["unit"] == u for s in snap["units"]):
+                snap["units"].append({"unit": u, "enabled": unit_enabled(u), "active": unit_active(u)})
         missing = [p for p in self.pkgs if not pkg_installed(p)]
+        snap["pkgs_added"] = list(dict.fromkeys(snap.get("pkgs_added", []) + missing))
+        state[self.id] = snap
+        # Every original reaches disk before package, file, command or service changes begin.
+        save_state(state)
         if missing:
             log(f"  installing packages: {' '.join(missing)}")
             rc, out = PM.install(missing)
             if rc != 0:
                 log(f"  package install failed: {out.strip().splitlines()[-1] if out.strip() else rc}", "WARN")
                 return False
-            if not already:
-                snap["pkgs_added"] = missing
-        for path, content in self.files.items():
-            if not already:
-                prev = read_text(path)
-                snap["files"].append({"path": path, "existed": prev is not None, "content": prev})
-            write_text(path, content)
-        for e in self.edits:
-            text = read_text(e.path)
-            if text is None:
-                log(f"  {e.path} not found, skipped", "WARN")
-                continue
-            new, orig = e.apply(text)
-            if not already:
-                snap["edits"].append({"path": e.path, "key": e.key, "value": e.value, "section": e.section, "sep": e.sep,
-                                      "orig": orig, "changed": new != text})
-            if new != text:
+        try:
+            for path, content in self.files.items():
+                write_text(path, content)
+            for path, new in edits.items():
                 if not CTX.dry_run:
                     os.makedirs(P(BACKUP_DIR), exist_ok=True)
-                    shutil.copy2(P(e.path), os.path.join(P(BACKUP_DIR), os.path.basename(e.path) + "." + time.strftime("%Y%m%d-%H%M%S") + ".bak"))
-                write_text(e.path, new)
-        for u in self.enable + self.disable:
-            if not already:
-                snap["units"].append({"unit": u, "enabled": unit_enabled(u), "active": unit_active(u)})
-        for c in self.cmds:
-            run(c, write=True)
-        for u in self.enable:
-            run(["systemctl", "enable", "--now", u], write=True)
-        for u in self.disable:
-            run(["systemctl", "disable", "--now", u], write=True)
-        for c in self.post:
-            rc, out = run(c, write=True)
-            if rc != 0:
-                log(f"  command failed ({' '.join(c) if isinstance(c, list) else c}): {out.strip()[-120:]}", "WARN")
-        state[self.id] = snap
-        save_state(state)
-        ok = CTX.dry_run or self.is_applied()
+                    shutil.copy2(P(path), os.path.join(P(BACKUP_DIR), os.path.basename(path) + "." + time.strftime("%Y%m%d-%H%M%S") + ".bak"))
+                write_text(path, new)
+        except OSError as exc:
+            log(f"  file change failed: {exc}; originals kept for undo", "WARN")
+            return False
+        commands = list(self.cmds)
+        commands += [["systemctl", "enable", "--now", u] for u in self.enable]
+        commands += [["systemctl", "disable", "--now", u] for u in self.disable]
+        commands += self.post
+        commands_ok = True
+        for cmd in commands:
+            if not change_command(cmd):
+                commands_ok = False
+        ok = commands_ok and (CTX.dry_run or self.is_applied())
         log(("  verified" if ok else "  NOT verified: check the messages above"), "OK" if ok else "WARN")
         return ok
 
@@ -517,32 +554,44 @@ class Tweak:
         if not snap:
             log("  no saved original values for this tweak (was it applied by Optimaxer?)", "WARN")
             return False
+        ok = True
         for u in snap.get("units", []):
-            if u["unit"] in self.enable and not u["enabled"]:
-                run(["systemctl", "disable", "--now", u["unit"]], write=True)
-            if u["unit"] in self.disable and u["enabled"]:
-                run(["systemctl", "enable"] + (["--now"] if u["active"] else []) + [u["unit"]], write=True)
+            if not restore_unit(u):
+                ok = False
         for f in snap.get("files", []):
-            if f["existed"]:
-                write_text(f["path"], f["content"])
-            else:
-                remove_file(f["path"])
+            try:
+                if f["existed"]:
+                    write_text(f["path"], f["content"])
+                else:
+                    remove_file(f["path"])
+            except OSError as exc:
+                log(f"  could not restore {f['path']}: {exc}", "WARN")
+                ok = False
         for ed in snap.get("edits", []):
             if not ed.get("changed"):
                 continue
-            text = read_text(ed["path"])
-            if text is None:
-                continue
-            e = LineEdit(ed["path"], ed["key"], ed["value"], ed.get("section"), ed.get("sep", " = "))
-            write_text(ed["path"], e.revert(text, ed["orig"]))
+            try:
+                text = read_text(ed["path"])
+                if text is None:
+                    log(f"  cannot restore missing configuration {ed['path']}", "WARN")
+                    ok = False
+                    continue
+                e = LineEdit(ed["path"], ed["key"], ed["value"], ed.get("section"), ed.get("sep", " = "))
+                write_text(ed["path"], e.revert(text, ed["orig"]))
+            except OSError as exc:
+                log(f"  could not restore {ed['path']}: {exc}", "WARN")
+                ok = False
         for c in self.undo_cmds + self.undo_post + self.post_for_undo():
-            run(c, write=True)
+            if not change_command(c):
+                ok = False
         if snap.get("pkgs_added"):
-            log(f"  kept packages installed by this tweak: {' '.join(snap['pkgs_added'])} (remove with {PM.remove_hint} if unwanted)")
-        state.pop(self.id, None)
-        save_state(state)
-        ok = CTX.dry_run or not self.is_applied()
-        log(("  reverted" if ok else "  still looks applied"), "OK" if ok else "WARN")
+            kept = [p for p in snap["pkgs_added"] if pkg_installed(p)]
+            if kept:
+                log(f"  kept packages installed by this tweak: {' '.join(kept)} (remove with {PM.remove_hint} if unwanted)")
+        if ok:
+            state.pop(self.id, None)
+            save_state(state)
+        log("  restored original values" if ok else "  restore incomplete; saved values kept for retry", "OK" if ok else "WARN")
         return ok
 
     def post_for_undo(self):
@@ -1049,15 +1098,21 @@ def clean_target(t: dict) -> int:
     elif tid == "orphans":
         pk = orphans()
         if pk:
-            PM.remove(pk)
+            rc, out = PM.remove(pk)
+            if rc != 0:
+                log(f"Package removal failed: {out.strip()[-160:]}", "WARN")
     elif tid == "journal":
-        run(["journalctl", "--vacuum-size=100M"], write=True)
+        change_command(["journalctl", "--vacuum-size=100M"])
     elif tid == "flatpak-unused":
         if have("flatpak"):
-            run(["flatpak", "uninstall", "--unused", "-y"], write=True)
+            change_command(["flatpak", "uninstall", "--unused", "-y"])
     else:
         for p in target_paths(t):
             full = P(p)
+            # A redirected cache directory must never turn cleanup into deletion outside this target.
+            if os.path.normcase(os.path.realpath(full)) != os.path.normcase(os.path.abspath(full)):
+                log(f"Skipping redirected cleanup target: {p}", "WARN")
+                continue
             if not os.path.isdir(full):
                 continue
             for entry in os.listdir(full):
@@ -1067,9 +1122,9 @@ def clean_target(t: dict) -> int:
                     continue
                 try:
                     shutil.rmtree(path) if os.path.isdir(path) and not os.path.islink(path) else os.remove(path)
-                except OSError:
-                    pass
-    after = 0 if CTX.dry_run else max(target_size(t), 0)
+                except OSError as exc:
+                    log(f"Could not remove {path}: {exc}", "WARN")
+    after = before if CTX.dry_run else max(target_size(t), 0)
     return max(before - after, 0)
 
 
@@ -1109,8 +1164,8 @@ def set_service(unit: str, enable: bool) -> bool:
     if key not in state:
         state[key] = {"unit": unit, "enabled": unit_enabled(unit), "active": unit_active(unit)}
         save_state(state)
-    run(["systemctl", "enable" if enable else "disable", "--now", unit], write=True)
-    ok = CTX.dry_run or (unit_enabled(unit) == enable)
+    changed = change_command(["systemctl", "enable" if enable else "disable", "--now", unit])
+    ok = changed and (CTX.dry_run or (unit_enabled(unit) == enable and unit_active(unit) == enable))
     log(f"{'Enabled' if enable else 'Disabled'} {unit}" + ("" if ok else " (state did not change)"), "OK" if ok else "WARN")
     return ok
 
@@ -1121,11 +1176,12 @@ def restore_service(unit: str) -> bool:
     if not snap:
         log(f"No saved state for {unit}", "WARN")
         return False
-    run(["systemctl", "enable" if snap["enabled"] else "disable"] + (["--now"] if snap["active"] == snap["enabled"] else []) + [unit], write=True)
-    state.pop(f"service:{unit}", None)
-    save_state(state)
-    log(f"Restored {unit}", "OK")
-    return True
+    ok = restore_unit(snap)
+    if ok:
+        state.pop(f"service:{unit}", None)
+        save_state(state)
+    log(f"Restored {unit}" if ok else f"Restore failed for {unit}; saved state kept for retry", "OK" if ok else "WARN")
+    return ok
 
 
 # ======================================================================================================== startup (XDG autostart)
@@ -1175,6 +1231,8 @@ def set_autostart(item: dict, enable: bool) -> bool:
             return False
         current = base.rstrip("\n") + "\n" + MARK + "\n"
     lines = [l for l in current.split("\n") if not re.match(r"^\s*Hidden\s*=", l)]
+    if enable:
+        lines = ["X-GNOME-Autostart-enabled=true" if re.match(r"^\s*X-GNOME-Autostart-enabled\s*=", l) else l for l in lines]
     if not enable:
         idx = next((i for i, l in enumerate(lines) if l.strip() == "[Desktop Entry]"), -1)
         lines.insert(idx + 1, "Hidden=true")
@@ -1208,7 +1266,20 @@ def active_connections() -> list:
     if rc != 0:
         return conns
     for line in out.splitlines():
-        parts = line.split(":")
+        # nmcli escapes colons and backslashes in connection names.
+        parts, current, escaped = [], [], False
+        for char in line:
+            if escaped:
+                current.append(char)
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == ":":
+                parts.append("".join(current))
+                current = []
+            else:
+                current.append(char)
+        parts.append("".join(current))
         if len(parts) >= 3 and parts[1] in ("802-3-ethernet", "802-11-wireless", "ethernet", "wifi"):
             conns.append({"name": parts[0], "type": parts[1], "device": parts[2]})
     return conns
@@ -1224,11 +1295,18 @@ def set_dns(key: str) -> bool:
     label, v4, v6 = DNS[key]
     state = load_state()
     ok_all = True
-    for c in active_connections():
+    connections = active_connections()
+    if not connections:
+        log("No active physical NetworkManager connections found", "WARN")
+        return False
+    for c in connections:
         sk = f"dns:{c['name']}"
         if sk not in state:
             def get(prop):
-                return run(["nmcli", "-g", prop, "connection", "show", c["name"]])[1].strip()
+                rc, out = run(["nmcli", "-g", prop, "connection", "show", c["name"]])
+                if rc != 0:
+                    raise RuntimeError(f"Cannot read {prop} for {c['name']}: {out.strip()}")
+                return out.strip()
             state[sk] = {"name": c["name"], "ipv4.dns": get("ipv4.dns"), "ipv4.ignore-auto-dns": get("ipv4.ignore-auto-dns"),
                          "ipv6.dns": get("ipv6.dns"), "ipv6.ignore-auto-dns": get("ipv6.ignore-auto-dns")}
             save_state(state)
@@ -1236,8 +1314,10 @@ def set_dns(key: str) -> bool:
                 "ipv6.dns", ",".join(v6), "ipv6.ignore-auto-dns", "yes" if v6 else "no"]
         rc, out = run(args, write=True)
         if rc == 0:
-            run(["nmcli", "device", "reapply", c["device"]], write=True)
-            log(f"DNS on {c['name']}: {label}", "OK")
+            if change_command(["nmcli", "device", "reapply", c["device"]]):
+                log(f"DNS on {c['name']}: {label}", "OK")
+            else:
+                ok_all = False
         else:
             ok_all = False
             log(f"DNS on {c['name']}: {out.strip()[-100:]}", "WARN")
@@ -1252,13 +1332,22 @@ def restore_dns() -> bool:
     if not names:
         log("No saved DNS settings", "WARN")
         return False
+    connections = {c["name"]: c for c in active_connections()}
+    ok = True
     for k in names:
-        s = state.pop(k)
-        run(["nmcli", "connection", "modify", s["name"], "ipv4.dns", s["ipv4.dns"].replace(" ", ","), "ipv4.ignore-auto-dns", s["ipv4.ignore-auto-dns"] or "no",
-             "ipv6.dns", s["ipv6.dns"].replace(" ", ","), "ipv6.ignore-auto-dns", s["ipv6.ignore-auto-dns"] or "no"], write=True)
-        log(f"Restored DNS on {s['name']}", "OK")
+        s = state[k]
+        restored = change_command(["nmcli", "connection", "modify", s["name"], "ipv4.dns", s["ipv4.dns"].replace(" ", ","), "ipv4.ignore-auto-dns", s["ipv4.ignore-auto-dns"] or "no",
+             "ipv6.dns", s["ipv6.dns"].replace(" ", ","), "ipv6.ignore-auto-dns", s["ipv6.ignore-auto-dns"] or "no"])
+        if restored and s["name"] in connections:
+            restored = change_command(["nmcli", "device", "reapply", connections[s["name"]]["device"]])
+        if restored:
+            state.pop(k)
+            log(f"Restored DNS on {s['name']}", "OK")
+        else:
+            ok = False
+            log(f"DNS restore failed on {s['name']}; saved settings kept", "WARN")
     save_state(state)
-    return True
+    return ok
 
 
 # ======================================================================================================== tools
@@ -1348,14 +1437,26 @@ def self_update(target: str | None = None) -> bool:
         log(f"Optimaxer is up to date (v{__version__}).", "OK")
         return True
     log(f"Updating v{__version__} -> {rel['tag']}")
+    m = re.fullmatch(r"sha256:([0-9a-f]{64})", rel["digest"] or "")
+    if not m:
+        log("Update rejected: release has no valid SHA-256 checksum", "ERROR")
+        return False
+    if CTX.dry_run:
+        log(f"[dry-run] update Optimaxer to {rel['tag']}", "DRY")
+        return True
     req = urllib.request.Request(rel["url"], headers={"User-Agent": "optimaxer-linux"})
-    data = urllib.request.urlopen(req, timeout=60).read()
-    m = re.match(r"sha256:([0-9a-f]{64})", rel["digest"] or "")
-    if m and hashlib.sha256(data).hexdigest() != m.group(1):
+    with urllib.request.urlopen(req, timeout=60) as response:
+        data = response.read()
+    if hashlib.sha256(data).hexdigest() != m.group(1):
         log("Update rejected: checksum mismatch", "ERROR")
         return False
     if b"__version__" not in data or b"def main" not in data:
         log("Update rejected: not an Optimaxer script", "ERROR")
+        return False
+    try:
+        compile(data, "optimaxer-update", "exec")
+    except (SyntaxError, UnicodeError) as exc:
+        log(f"Update rejected: invalid Python script ({exc})", "ERROR")
         return False
     dest = target or os.path.realpath(sys.argv[0])
     tmp = dest + ".new"
@@ -1686,6 +1787,9 @@ def desktop_entry() -> str:
 def create_launcher() -> list:
     """Write an application-menu entry (and a copy on the Desktop if there is one). Returns the paths written."""
     import base64
+    if CTX.dry_run:
+        log("[dry-run] create Optimaxer application-menu launcher", "DRY")
+        return []
     home = P(real_home())
     made = []
     icon_dir = os.path.join(home, ".local", "share", "icons", "hicolor", "64x64", "apps")
@@ -1715,6 +1819,9 @@ def create_launcher() -> list:
 def install_command() -> list:
     """Keep a copy of this script under ~/.local/share and put an `optimaxer` command in ~/.local/bin, so the app opens
     without remembering where the file was downloaded. Returns the paths written."""
+    if CTX.dry_run:
+        log("[dry-run] install Optimaxer command", "DRY")
+        return []
     home = P(real_home())
     target = installed_script()
     own = os.path.realpath(sys.argv[0])
@@ -1900,6 +2007,7 @@ class Gui:
 
     # ---- background work
     def _pump(self):
+        import queue
         try:
             while True:
                 item = self._queue.get_nowait()
@@ -1907,8 +2015,10 @@ class Gui:
                     self._append_log(item[1], item[2])
                 elif item[0] == "call":
                     item[1]()
-        except Exception:      # queue.Empty
+        except queue.Empty:
             pass
+        except Exception as exc:
+            log(f"UI callback failed: {type(exc).__name__}: {exc}", "ERROR")
         try:
             self.root.after(60, self._pump)
         except self.tk.TclError:
@@ -1977,6 +2087,10 @@ class Gui:
         return messagebox.askyesno("Optimaxer", question, parent=self.root)
 
     def _dry_toggled(self):
+        if self.busy:
+            self.dry_var.set(CTX.dry_run)
+            self.say("Wait for the current task before changing dry run mode.")
+            return
         CTX.dry_run = bool(self.dry_var.get())
         self.say("Dry run on: commands are shown, nothing changes." if CTX.dry_run else "Dry run off: changes are real.")
 
