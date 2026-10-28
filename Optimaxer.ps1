@@ -55,7 +55,10 @@ if ($Silent) {
         $code = Invoke-UnattendedTweaks -Ids $ids -NoRestorePoint:$NoRestorePoint
         if ($code -eq 3) { if ($PSCommandPath -and -not $NoElevate) { Start-Sleep -Seconds 4 }; exit 3 }   # restore point failed: apply nothing, apps included
     }
-    if ($apps.Count) { Invoke-WingetPackages -Action Install -Programs $apps }
+    if ($apps.Count) {
+        $appResult = Invoke-WingetPackages -Action Install -Programs $apps
+        if (-not $appResult.Success) { $code = 1 }
+    }
     if ($PSCommandPath -and -not $NoElevate) { Start-Sleep -Seconds 4 }
     exit $code
 }

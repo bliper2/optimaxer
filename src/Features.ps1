@@ -10,11 +10,29 @@ function Get-OptiFeatures {
     $h = @{ GameProfiles = @{}; SearchExclusions = @{}; Wake = @{ Devices = @(); Tasks = @() } }
     if (Test-Path -LiteralPath $global:OptiFeaturesPath) {
         try {
-            $o = Get-Content -LiteralPath $global:OptiFeaturesPath -Raw -ErrorAction Stop | ConvertFrom-Json
+            $raw = Get-Content -LiteralPath $global:OptiFeaturesPath -Raw -ErrorAction Stop
+            if (-not $raw -or -not $raw.TrimStart().StartsWith('{')) { throw 'Expected a JSON object of feature backups.' }
+            $o = $raw | ConvertFrom-Json -ErrorAction Stop
+            if ($null -eq $o -or $o -isnot [pscustomobject]) { throw 'Expected a JSON object of feature backups.' }
+            foreach ($kind in 'GameProfiles', 'SearchExclusions') {
+                if ($o.PSObject.Properties.Name -contains $kind -and ($null -eq $o.$kind -or $o.$kind -isnot [pscustomobject] -or $o.$kind -is [Array])) { throw "Invalid $kind backups." }
+            }
+            foreach ($p in $o.GameProfiles.PSObject.Properties) {
+                foreach ($kind in 'Gpu', 'Layers') {
+                    $rec = $p.Value.$kind
+                    if ($null -eq $rec -or $rec.Exists -isnot [bool] -or ($rec.Exists -and $rec.PSObject.Properties.Name -notcontains 'Value')) { throw "Invalid $kind original for $($p.Name)" }
+                }
+            }
+            foreach ($p in $o.SearchExclusions.PSObject.Properties) {
+                if (-not $p.Value.Dir -or $p.Value.WasIncluded -isnot [bool]) { throw "Invalid Search exclusion backup: $($p.Name)" }
+            }
+            if ($o.PSObject.Properties.Name -contains 'Wake' -and ($null -eq $o.Wake -or $o.Wake.Devices -isnot [Array] -or $o.Wake.Tasks -isnot [Array])) { throw 'Invalid wake-source backups.' }
             if ($o.GameProfiles) { foreach ($p in $o.GameProfiles.PSObject.Properties) { $h.GameProfiles[$p.Name] = $p.Value } }
             if ($o.SearchExclusions) { foreach ($p in $o.SearchExclusions.PSObject.Properties) { $h.SearchExclusions[$p.Name] = $p.Value } }
             if ($o.Wake) { $h.Wake = @{ Devices = @($o.Wake.Devices | Where-Object { $_ }); Tasks = @($o.Wake.Tasks | Where-Object { $_ }) } }
-        } catch { Write-Log "features.json unreadable: $($_.Exception.Message)" 'WARN' }
+        } catch {
+            throw "Cannot read feature backups at $global:OptiFeaturesPath. Restore a valid backup before changing features. $($_.Exception.Message)"
+        }
     }
     return $h
 }
@@ -23,7 +41,8 @@ function Save-OptiFeatures {
     param($F)
     $tmp = "$global:OptiFeaturesPath.tmp"
     $F | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $tmp -Encoding UTF8 -ErrorAction Stop
-    Move-Item -LiteralPath $tmp -Destination $global:OptiFeaturesPath -Force -ErrorAction Stop
+    if (Test-Path -LiteralPath $global:OptiFeaturesPath) { [IO.File]::Replace($tmp, $global:OptiFeaturesPath, [NullString]::Value) }
+    else { [IO.File]::Move($tmp, $global:OptiFeaturesPath) }
 }
 
 # ---------------------------------------------------------------- boot cost (read-only; disabling uses the Startup page)
@@ -121,8 +140,9 @@ function Remove-GameProfile {
     foreach ($x in @($(if ($Exe) { $Exe } else { @($f.GameProfiles.Keys) }))) {
         $rec = $f.GameProfiles[$x]
         if (-not $rec) { continue }
-        $ok = (Restore-RegSnapshot @{ P = $global:OptiGpuPrefKey; N = $x; Exists = [bool]$rec.Gpu.Exists; Value = $rec.Gpu.Value; Type = $(if ($rec.Gpu.Type) { $rec.Gpu.Type } else { 'String' }) }) -and
-              (Restore-RegSnapshot @{ P = $global:OptiLayersKey; N = $x; Exists = [bool]$rec.Layers.Exists; Value = $rec.Layers.Value; Type = $(if ($rec.Layers.Type) { $rec.Layers.Type } else { 'String' }) })
+        $gpuOk = Restore-RegSnapshot @{ P = $global:OptiGpuPrefKey; N = $x; Exists = [bool]$rec.Gpu.Exists; Value = $rec.Gpu.Value; Type = $(if ($rec.Gpu.Type) { $rec.Gpu.Type } else { 'String' }) }
+        $layersOk = Restore-RegSnapshot @{ P = $global:OptiLayersKey; N = $x; Exists = [bool]$rec.Layers.Exists; Value = $rec.Layers.Value; Type = $(if ($rec.Layers.Type) { $rec.Layers.Type } else { 'String' }) }
+        $ok = $gpuOk -and $layersOk
         if ($ok) { $f.GameProfiles.Remove($x); Write-Log "  profile removed: $x" 'OK' } else { $bad += $x }
     }
     Save-OptiFeatures $f
@@ -270,15 +290,20 @@ function Disable-WakeSources {
     param([string[]]$Devices, [string[]]$Tasks)
     $f = Get-OptiFeatures
     foreach ($d in $Devices) {
-        if ($f.Wake.Devices -notcontains $d) { $f.Wake.Devices += $d; Save-OptiFeatures $f }
+        $newRecord = $f.Wake.Devices -notcontains $d
+        if ($newRecord) { $f.Wake.Devices += $d; Save-OptiFeatures $f }
         $o = Invoke-Native powercfg.exe @('/devicedisablewake', $d)
-        if ($global:OptiExit -ne 0) { Write-Log "  $d : $($o.Trim())" 'WARN'; $f.Wake.Devices = @($f.Wake.Devices | Where-Object { $_ -ne $d }); Save-OptiFeatures $f }
+        if ($global:OptiExit -ne 0) {
+            Write-Log "  $d : $($o.Trim())" 'WARN'
+            if ($newRecord) { $f.Wake.Devices = @($f.Wake.Devices | Where-Object { $_ -ne $d }); Save-OptiFeatures $f }
+        }
         else { Write-Log "  can no longer wake the PC: $d" 'OK' }
     }
     foreach ($full in $Tasks) {
         $s = Split-TaskPath $full
         if (Test-ProtectedWakeTask $s.Path) { Write-Log "  left alone (update or Defender task): $full" 'WARN'; continue }
-        if ($f.Wake.Tasks -notcontains $full) { $f.Wake.Tasks += $full; Save-OptiFeatures $f }
+        $newRecord = $f.Wake.Tasks -notcontains $full
+        if ($newRecord) { $f.Wake.Tasks += $full; Save-OptiFeatures $f }
         try {
             $t = Get-ScheduledTask -TaskPath $s.Path -TaskName $s.Name -ErrorAction Stop
             $t.Settings.WakeToRun = $false
@@ -286,7 +311,7 @@ function Disable-WakeSources {
             Write-Log "  task no longer wakes the PC: $full" 'OK'
         } catch {
             Write-Log "  $full : $($_.Exception.Message)" 'WARN'
-            $f.Wake.Tasks = @($f.Wake.Tasks | Where-Object { $_ -ne $full }); Save-OptiFeatures $f
+            if ($newRecord) { $f.Wake.Tasks = @($f.Wake.Tasks | Where-Object { $_ -ne $full }); Save-OptiFeatures $f }
         }
     }
 }

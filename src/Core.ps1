@@ -31,9 +31,13 @@ function Format-Size {
 
 function Invoke-Native {
     # Runs an external program, returns combined output as one string. Exit code in $global:OptiExit.
-    param([string]$Exe, [string[]]$Arguments = @())
-    $out = & $Exe @Arguments 2>&1 | Out-String
-    $global:OptiExit = $LASTEXITCODE
+    param([string]$Exe, [string[]]$Arguments = @(), [switch]$CheckExit)
+    $global:LASTEXITCODE = $null
+    try {
+        $out = & $Exe @Arguments 2>&1 | Out-String
+        $global:OptiExit = if ($null -eq $LASTEXITCODE) { -1 } else { $LASTEXITCODE }
+    } catch { $global:OptiExit = -1; $out = $_.Exception.Message }
+    if ($CheckExit -and $global:OptiExit -ne 0) { throw "$Exe failed (exit $global:OptiExit): $($out.Trim())" }
     return $out
 }
 
@@ -42,14 +46,34 @@ function Get-OptiState {
     $h = @{}
     if (Test-Path -LiteralPath $global:OptiStatePath) {
         try {
-            $o = Get-Content -LiteralPath $global:OptiStatePath -Raw -ErrorAction Stop | ConvertFrom-Json
-            foreach ($p in $o.PSObject.Properties) { $h[$p.Name] = $p.Value }
+            $raw = Get-Content -LiteralPath $global:OptiStatePath -Raw -ErrorAction Stop
+            if (-not $raw -or -not $raw.TrimStart().StartsWith('{')) { throw 'Expected a JSON object of undo records.' }
+            $o = $raw | ConvertFrom-Json -ErrorAction Stop
+            if ($null -eq $o -or $o -isnot [pscustomobject]) { throw 'Expected a JSON object of undo records.' }
+            foreach ($p in $o.PSObject.Properties) {
+                $rec = $p.Value
+                if ($null -eq $rec -or $rec -isnot [pscustomobject] -or $rec -is [Array]) { throw "Invalid undo record: $($p.Name)" }
+                foreach ($kind in 'Reg', 'Svc', 'Task') {
+                    if ($rec.$kind -isnot [Array]) { throw "Invalid $kind originals for $($p.Name)" }
+                }
+                foreach ($r in $rec.Reg) {
+                    if (-not $r.P -or $r.N -isnot [string] -or $r.Exists -isnot [bool] -or ($r.Exists -and -not $r.Type)) { throw "Invalid registry original for $($p.Name)" }
+                }
+                foreach ($s in $rec.Svc) {
+                    if (-not $s.Name -or $null -eq $s.Start -or $s.Start -notin 0, 1, 2, 3, 4 -or $null -eq $s.Delayed -or $s.Delayed -notin 0, 1) { throw "Invalid service original for $($p.Name)" }
+                }
+                foreach ($t in $rec.Task) {
+                    if (-not $t.Full -or $null -eq $t.Enabled -or $t.Enabled -notin 0, 1) { throw "Invalid task original for $($p.Name)" }
+                }
+                $h[$p.Name] = $rec
+            }
         } catch {
             # Keep the unreadable file: the next Save-OptiState would otherwise overwrite every saved original value.
             $why = $_.Exception.Message
-            $keep = Join-Path $global:OptiBackupDir ('state-unreadable-{0}.json' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+            $keep = Join-Path $global:OptiBackupDir ('state-unreadable-{0}.json' -f [guid]::NewGuid().ToString('N'))
             try { Copy-Item -LiteralPath $global:OptiStatePath -Destination $keep -Force -ErrorAction Stop; Write-Log "State file unreadable ($why); copy kept at $keep" 'WARN' }
             catch { Write-Log "State file unreadable: $why" 'WARN' }
+            throw "Cannot read undo state at $global:OptiStatePath. Restore a valid backup before changing tweaks. $why"
         }
     }
     return $h
@@ -60,7 +84,8 @@ function Save-OptiState {
     param($State)
     $tmp = "$global:OptiStatePath.tmp"
     $State | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $tmp -Encoding UTF8 -ErrorAction Stop
-    Move-Item -LiteralPath $tmp -Destination $global:OptiStatePath -Force -ErrorAction Stop
+    if (Test-Path -LiteralPath $global:OptiStatePath) { [IO.File]::Replace($tmp, $global:OptiStatePath, [NullString]::Value) }
+    else { [IO.File]::Move($tmp, $global:OptiStatePath) }
 }
 
 # ---------------------------------------------------------------- registry
@@ -129,7 +154,14 @@ function Compare-RegValue {
     param($Actual, $Wanted, [string]$Type)
     switch ($Type) {
         'Binary' { return (($Actual -join ',') -eq ($Wanted -join ',')) }
-        { $_ -in 'DWord', 'QWord' } { return (([int64]$Actual -band 4294967295L) -eq ([int64]$Wanted -band 4294967295L)) }
+        'DWord' { return (([int64]$Actual -band 4294967295L) -eq ([int64]$Wanted -band 4294967295L)) }
+        'QWord' { return ([int64]$Actual -eq [int64]$Wanted) }
+        'MultiString' {
+            $a = @($Actual); $w = @($Wanted)
+            if ($a.Count -ne $w.Count) { return $false }
+            for ($i = 0; $i -lt $a.Count; $i++) { if ([string]$a[$i] -cne [string]$w[$i]) { return $false } }
+            return $true
+        }
         default  { return ("$Actual" -eq "$Wanted") }
     }
 }
@@ -184,6 +216,41 @@ function Set-SvcStart {
 }
 
 # ---------------------------------------------------------------- scheduled tasks
+function Set-OptiServices {
+    param([string[]]$Names, [ValidateSet(2, 3, 4)][int]$Start)
+    $backup = @()
+    foreach ($n in $Names) {
+        if ($global:OptiProtectedServices -contains $n) { Write-Log "  protected service left unchanged: $n" 'WARN'; continue }
+        $s = Get-SvcSnapshot $n
+        if ($s) { $backup += $s }
+    }
+    if (-not $backup.Count) { Write-Log 'No services could be read; nothing changed.' 'WARN'; return }
+    $file = Join-Path $global:OptiBackupDir ('services-{0}-{1}.json' -f (Get-Date -Format 'yyyyMMdd-HHmmss-fffffff'), [guid]::NewGuid().ToString('N'))
+    # Stop before any service change if its prior start type cannot be saved.
+    ConvertTo-Json -InputObject $backup -Depth 4 | Set-Content -LiteralPath $file -Encoding UTF8 -ErrorAction Stop
+    Write-Log "Backup saved: $file"
+    foreach ($b in $backup) {
+        if (Set-SvcStart $b.Name $Start) { Write-Log "  $($b.Name) updated" }
+        else { Write-Log "  $($b.Name): refused (protected by Windows)" 'WARN' }
+    }
+}
+
+function Restore-OptiServices {
+    param([string]$File)
+    $list = @(Get-Content -LiteralPath $File -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop)
+    if (-not $list.Count) { throw 'The service backup contains no records.' }
+    foreach ($b in $list) {
+        if (-not $b.Name -or $b.Start -notin 2, 3, 4 -or $null -eq $b.Delayed) { throw 'The service backup contains an invalid record.' }
+    }
+    $failed = @()
+    foreach ($b in $list) {
+        if ($global:OptiProtectedServices -contains $b.Name) { $failed += $b.Name; Write-Log "  protected service left unchanged: $($b.Name)" 'WARN'; continue }
+        if (Set-SvcStart $b.Name $b.Start $b.Delayed) { Write-Log "  restored $($b.Name)" 'OK' }
+        else { $failed += $b.Name; Write-Log "  NOT restored: $($b.Name); backup kept for retry." 'WARN' }
+    }
+    return $failed.Count -eq 0
+}
+
 function Split-TaskPath {
     param([string]$Full)
     $i = $Full.LastIndexOf('\')
@@ -452,7 +519,7 @@ function Test-Tweak {
         if ($snap.Enabled) { return $false }
     }
     if (-not $checked) {
-        $st = if ($global:OptiStateCache) { $global:OptiStateCache } else { Get-OptiState }
+        $st = if ($null -ne $global:OptiStateCache) { $global:OptiStateCache } else { Get-OptiState }
         return $null -ne $st[$T.Id]
     }
     return $true
@@ -462,7 +529,8 @@ function Get-TweakStatus {
     # Returns one @{Id; On} per catalog entry. The saved state and powercfg answers are read once for the whole pass.
     param([string[]]$Ids)
     Clear-TaskCache
-    $global:OptiStateCache = Get-OptiState
+    try { $global:OptiStateCache = Get-OptiState }
+    catch { Write-Log $_.Exception.Message 'ERROR'; return }
     $global:OptiPowerCache = @{}
     try {
         foreach ($t in $global:OptiCatalog) {
@@ -518,7 +586,7 @@ function Invoke-TweakApply {
     # 1. read the originals (no writes)
     $svcSnaps = @{}; $taskSnaps = @{}
     foreach ($r in $T.Reg) {
-        if (-not $fresh) { break }
+        if (@($rec.Reg | Where-Object { $_.P -eq $r.P -and $_.N -eq $r.N }).Count) { continue }
         $shared = Find-SharedOriginal $state $T.Id 'Reg' $r.P $r.N
         if ($shared) { $rec.Reg += @{ P = $r.P; N = $r.N; Exists = [bool]$shared.Exists; Value = $shared.Value; Type = $shared.Type } }
         else {
@@ -530,19 +598,19 @@ function Invoke-TweakApply {
         $snap = Get-SvcSnapshot $s.Name
         if (-not $snap) { continue }
         $svcSnaps[$s.Name] = $snap
-        if ($fresh) { $sh = Find-SharedOriginal $state $T.Id 'Svc' $s.Name; $rec.Svc += $(if ($sh) { @{ Name = $s.Name; Start = [int]$sh.Start; Delayed = [int]$sh.Delayed } } else { $snap }) }
+        if (-not @($rec.Svc | Where-Object { $_.Name -eq $s.Name }).Count) { $sh = Find-SharedOriginal $state $T.Id 'Svc' $s.Name; $rec.Svc += $(if ($sh) { @{ Name = $s.Name; Start = [int]$sh.Start; Delayed = [int]$sh.Delayed } } else { $snap }) }
     }
     foreach ($tk in $T.Task) {
         $snap = Get-TaskSnapshot $tk
         if (-not $snap) { continue }
         $taskSnaps[$tk] = $snap
-        if ($fresh) { $sh = Find-SharedOriginal $state $T.Id 'Task' $tk; $rec.Task += $(if ($sh) { @{ Full = $tk; Enabled = [int]$sh.Enabled } } else { $snap }) }
+        if (-not @($rec.Task | Where-Object { $_.Full -eq $tk }).Count) { $sh = Find-SharedOriginal $state $T.Id 'Task' $tk; $rec.Task += $(if ($sh) { @{ Full = $tk; Enabled = [int]$sh.Enabled } } else { $snap }) }
     }
     if ($fresh -and $T.Snapshot) {
         try { $rec.Data = & $T.Snapshot }
         catch {
             Write-Log "  could not read the current values, nothing changed: $($_.Exception.Message)" 'WARN'
-            return (Test-Tweak $T)
+            return $false
         }
     }
 
@@ -551,13 +619,15 @@ function Invoke-TweakApply {
     try { Save-OptiState $state }
     catch {
         Write-Log "  could not save the undo record, nothing changed: $($_.Exception.Message)" 'WARN'
-        return (Test-Tweak $T)
+        return $false
     }
 
     # 3. change things
+    $failed = $false
     foreach ($r in $T.Reg) {
         try { Set-RegEntry $r.P $r.N $r.V $r.T }
         catch {
+            $failed = $true
             $msg = $_.Exception.Message
             if ($msg -match 'not allowed|denied') { $msg += ' (this key is write-protected on this PC by Windows, a policy or another tool)' }
             Write-Log "  registry $($r.P)\$($r.N): $msg" 'WARN'
@@ -566,17 +636,20 @@ function Invoke-TweakApply {
     foreach ($s in $T.Svc) {
         $snap = $svcSnaps[$s.Name]
         if (-not $snap) { continue }
-        if ($snap.Start -ne $s.Start -and -not (Set-SvcStart $s.Name $s.Start)) { Write-Log "  service $($s.Name): could not change (protected?)" 'WARN' }
+        if ($snap.Start -ne $s.Start -and -not (Set-SvcStart $s.Name $s.Start)) { $failed = $true; Write-Log "  service $($s.Name): could not change (protected?)" 'WARN' }
     }
-    foreach ($tk in $T.Task) { if ($taskSnaps[$tk]) { [void](Set-TaskEnabled $tk $false) } }
+    foreach ($tk in $T.Task) { if ($taskSnaps[$tk] -and -not (Set-TaskEnabled $tk $false)) { $failed = $true } }
     if ($T.Apply) {
         try {
-            $d = if ($T.Snapshot) { & $T.Apply $rec.Data } else { & $T.Apply }
+            $global:LASTEXITCODE = 0
+            $d = & { $ErrorActionPreference = 'Stop'; if ($T.Snapshot) { & $T.Apply $rec.Data } else { & $T.Apply } }
+            if ($LASTEXITCODE -ne 0) { throw "Apply command failed with exit code $LASTEXITCODE." }
             # tweaks without a -Snapshot script return their originals from Apply; save them as soon as they exist
             if ($fresh -and -not $T.Snapshot) { $rec.Data = $d; $state[$T.Id] = $rec; Save-OptiState $state }
-        } catch { Write-Log "  script: $($_.Exception.Message)" 'WARN' }
+        } catch { $failed = $true; Write-Log "  script: $($_.Exception.Message)" 'WARN' }
     }
-    return (Test-Tweak $T)
+    Clear-TaskCache
+    return ((Test-Tweak $T) -and -not $failed)
 }
 
 # Ids whose last undo left something unrestored, with the failed steps. Filled by Invoke-TweakUndo.
@@ -591,6 +664,11 @@ function Invoke-TweakUndo {
     $state = Get-OptiState
     $rec = $state[$T.Id]
     $failed = @()
+    if (-not $rec) {
+        $global:OptiUndoFailed[$T.Id] = @('no saved original values')
+        Write-Log '  no saved original values for this tweak; nothing changed.' 'WARN'
+        return (Test-Tweak $T)
+    }
     if ($rec) {
         # A value another applied tweak also changed stays as it is until that tweak is undone too; restoring it now
         # would silently switch the other tweak off. The last one undone puts the original back.
@@ -607,13 +685,17 @@ function Invoke-TweakUndo {
         foreach ($tk in @($rec.Task)) {
             $owner = Find-SharedOwner $state $T.Id 'Task' $tk.Full
             if ($owner) { Write-Log "  kept task $($tk.Full): still used by $owner"; continue }
-            if ($tk.Enabled -and -not (Set-TaskEnabled $tk.Full $true)) { $failed += "task $($tk.Full)" }
+            if (-not (Set-TaskEnabled $tk.Full ([bool]$tk.Enabled))) { $failed += "task $($tk.Full)" }
         }
     } elseif ($T.Reg.Count -or $T.Svc.Count -or $T.Task.Count) {
         Write-Log '  no saved original values for this tweak (was it applied by Optimaxer?)' 'WARN'
     }
     if ($T.Undo) {
-        try { & $T.Undo $(if ($rec) { $rec.Data }) | Out-Null } catch { $failed += "undo script: $($_.Exception.Message)" }
+        try {
+            $global:LASTEXITCODE = 0
+            & { $ErrorActionPreference = 'Stop'; & $T.Undo $rec.Data } | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Undo command failed with exit code $LASTEXITCODE." }
+        } catch { $failed += "undo script: $($_.Exception.Message)" }
     }
     if ($failed.Count) {
         $global:OptiUndoFailed[$T.Id] = $failed
@@ -772,23 +854,38 @@ function Set-DnsProvider {
     }
     if ($Doh -and (Get-Command Add-DnsClientDohServerAddress -ErrorAction SilentlyContinue)) {
         foreach ($ip in ($V4 + $V6)) {
-            try { Add-DnsClientDohServerAddress -ServerAddress $ip -DohTemplate $Doh -AllowFallbackToUdp $true -AutoUpgrade $true -ErrorAction Stop | Out-Null } catch {}
+            try { Add-DnsClientDohServerAddress -ServerAddress $ip -DohTemplate $Doh -AllowFallbackToUdp $true -AutoUpgrade $true -ErrorAction Stop | Out-Null }
+            catch { Write-Log "  DNS-over-HTTPS registration failed for ${ip}: $($_.Exception.Message)" 'WARN' }
         }
     }
     Clear-DnsClientCache
 }
 
 # ---------------------------------------------------------------- cleanup
+function Test-CleanupPath {
+    # A matched wildcard can sit below a junction. Check its ancestors before reading or deleting anything.
+    param([string]$Path)
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        while ($item) {
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+            $item = if ($item -is [IO.DirectoryInfo]) { $item.Parent } else { $item.Directory }
+        }
+        return $true
+    } catch { return $false }
+}
+
 function Get-DirSize {
     # Iterative .NET walk: much faster than Get-ChildItem -Recurse, skips junctions/symlinks, ignores unreadable folders.
     param([string]$Dir)
+    if (-not (Test-CleanupPath $Dir)) { return 0.0 }
     $total = 0.0
     $stack = New-Object 'System.Collections.Generic.Stack[string]'
     $stack.Push($Dir)
     while ($stack.Count) {
         $d = New-Object IO.DirectoryInfo ($stack.Pop())
         try {
-            foreach ($f in $d.EnumerateFiles()) { $total += $f.Length }
+            foreach ($f in $d.EnumerateFiles()) { if (-not ($f.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $total += $f.Length } }
             foreach ($s in $d.EnumerateDirectories()) { if (-not ($s.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $stack.Push($s.FullName) } }
         } catch {}
     }
@@ -799,6 +896,7 @@ function Get-PathSize {
     param([string]$Path)
     $t = 0.0
     foreach ($i in Get-ChildItem -Path $Path -Force -ErrorAction SilentlyContinue) {
+        if (-not (Test-CleanupPath $i.FullName)) { continue }
         if ($i.PSIsContainer) { if (-not ($i.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $t += Get-DirSize $i.FullName } }
         else { $t += [double]$i.Length }
     }
@@ -808,16 +906,29 @@ function Get-PathSize {
 function Clear-PathContents {
     param([string]$Path)
     $freed = 0.0
+    $stack = New-Object 'System.Collections.Generic.Stack[object]'
     foreach ($i in Get-ChildItem -Path $Path -Force -ErrorAction SilentlyContinue) {
-        $size = if ($i.PSIsContainer) { Get-PathSize $i.FullName } else { [double]$i.Length }
-        try { Remove-Item -LiteralPath $i.FullName -Recurse -Force -ErrorAction Stop; $freed += $size }
-        catch {
-            if ($i.PSIsContainer) {
-                # locked files inside: remove what can be removed
-                foreach ($f in Get-ChildItem -LiteralPath $i.FullName -Recurse -Force -File -ErrorAction SilentlyContinue) {
-                    try { $len = $f.Length; Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop; $freed += $len } catch {}
-                }
+        if (Test-CleanupPath $i.FullName) { $stack.Push(@{ Item = $i; Visited = $false }) }
+    }
+    while ($stack.Count) {
+        $entry = $stack.Pop(); $i = $entry.Item
+        # Never use recursive deletion: Windows PowerShell can follow a junction inside the selected folder.
+        if ($i.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+        if ($i -is [IO.DirectoryInfo] -and -not $entry.Visited) {
+            $stack.Push(@{ Item = $i; Visited = $true })
+            foreach ($child in Get-ChildItem -LiteralPath $i.FullName -Force -ErrorAction SilentlyContinue) {
+                $stack.Push(@{ Item = $child; Visited = $false })
             }
+            continue
+        }
+        try {
+            $size = if ($i -is [IO.DirectoryInfo]) { 0.0 } else { [double]$i.Length }
+            if ($i -is [IO.DirectoryInfo]) { $i.Delete() }
+            else { Remove-Item -LiteralPath $i.FullName -Force -ErrorAction Stop }
+            $freed += $size
+        } catch {
+            # A directory containing a skipped link or locked file stays in place.
+            Write-Log "  left in place: $($i.FullName) ($($_.Exception.Message))" 'WARN'
         }
     }
     return $freed
@@ -839,28 +950,44 @@ function Get-CleanupSize {
 function Invoke-CleanupTarget {
     param($Target)
     switch ($Target.Special) {
-        'recycle'   { $before = Get-CleanupSize $Target; Clear-RecycleBin -Force -ErrorAction SilentlyContinue; return $before }
-        'component' { Dism.exe /Online /Cleanup-Image /StartComponentCleanup | Out-Null; return 0.0 }
+        'recycle'   { $before = Get-CleanupSize $Target; Clear-RecycleBin -Force -ErrorAction Stop; return [math]::Max(0, $before - (Get-CleanupSize $Target)) }
+        'component' { Invoke-Native Dism.exe @('/Online', '/Cleanup-Image', '/StartComponentCleanup') -CheckExit | Out-Null; return 0.0 }
         'eventlogs' {
             $before = Get-CleanupSize $Target
-            foreach ($log in (wevtutil.exe el)) { wevtutil.exe cl $log 2>&1 | Out-Null }
-            return $before
+            $logs = (Invoke-Native wevtutil.exe @('el') -CheckExit) -split '[\r\n]+'
+            foreach ($log in $logs) { if ($log.Trim()) { Invoke-Native wevtutil.exe @('cl', $log.Trim()) -CheckExit | Out-Null } }
+            return [math]::Max(0, $before - (Get-CleanupSize $Target))
         }
         'winold' {
             $dir = $Target.Paths[0]
+            $expected = [IO.Path]::GetFullPath((Join-Path $env:SystemDrive 'Windows.old')).TrimEnd('\')
+            if ([IO.Path]::GetFullPath($dir).TrimEnd('\') -ne $expected) { throw 'Refusing to clean a Windows.old path outside the system drive.' }
             if (-not (Test-Path -LiteralPath $dir)) { return 0.0 }
-            $before = Get-CleanupSize $Target
-            takeown.exe /F $dir /R /A /D Y 2>&1 | Out-Null
-            icacls.exe $dir /grant 'Administrators:F' /T /C /Q 2>&1 | Out-Null
-            cmd.exe /c rd /s /q "$dir" 2>&1 | Out-Null
-            return $(if (Test-Path -LiteralPath $dir) { 0.0 } else { $before })
+            if (-not (Test-CleanupPath $dir)) { throw 'Refusing to clean Windows.old through a junction or symbolic link.' }
+            $freed = Clear-PathContents $dir
+            try { [IO.Directory]::Delete($dir) }
+            catch { Write-Log '  Windows.old still contains protected files or links. Use Windows Settings > Storage > Temporary files to remove the remaining previous installation.' 'WARN' }
+            return $freed
         }
     }
     $wasRunning = @()
-    if ($Target.Services) { foreach ($s in $Target.Services) { if ((Get-Service -Name $s -ErrorAction SilentlyContinue).Status -eq 'Running') { $wasRunning += $s }; Stop-Service -Name $s -Force -ErrorAction SilentlyContinue } }
     $freed = 0.0
-    foreach ($p in $Target.Paths) { $freed += Clear-PathContents $p }
-    foreach ($s in $wasRunning) { Start-Service -Name $s -ErrorAction SilentlyContinue }
+    try {
+        if ($Target.Services) {
+            foreach ($s in $Target.Services) {
+                if ((Get-Service -Name $s -ErrorAction Stop).Status -eq 'Running') {
+                    $wasRunning += $s
+                    Stop-Service -Name $s -Force -ErrorAction Stop
+                }
+            }
+        }
+        foreach ($p in $Target.Paths) { $freed += Clear-PathContents $p }
+    } finally {
+        foreach ($s in $wasRunning) {
+            try { Start-Service -Name $s -ErrorAction Stop }
+            catch { Write-Log "  could not restart service ${s}: $($_.Exception.Message)" 'WARN' }
+        }
+    }
     return $freed
 }
 
@@ -873,9 +1000,9 @@ function Remove-RegKeysWithBackup {
         $p = "Registry::$k"
         if (-not (Test-Path -LiteralPath $p)) { continue }
         $i++
-        $f = Join-Path $global:OptiBackupDir ('{0}-{1}-{2}.reg' -f $Tag, (Get-Date -Format 'yyyyMMdd-HHmmss'), $i)
+        $f = Join-Path $global:OptiBackupDir ('{0}-{1}-{2}.reg' -f $Tag, [guid]::NewGuid().ToString('N'), $i)
         reg.exe export $k $f /y 2>&1 | Out-Null
-        if (Test-Path -LiteralPath $f) { $files += $f; Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
+        if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $f)) { $files += $f; Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
         else { Write-Log "  could not back up $k, left untouched" 'WARN' }
     }
     , $files
@@ -883,7 +1010,12 @@ function Remove-RegKeysWithBackup {
 
 function Restore-RegFiles {
     param($Files)
-    foreach ($f in @($Files)) { if ($f -and (Test-Path -LiteralPath $f)) { reg.exe import $f 2>&1 | Out-Null } }
+    foreach ($f in @($Files)) {
+        if (-not $f) { continue }
+        if (-not (Test-Path -LiteralPath $f)) { throw "Registry backup not found: $f" }
+        $out = Invoke-Native reg.exe @('import', $f)
+        if ($global:OptiExit -ne 0) { throw "Registry backup could not be restored: $f ($out)" }
+    }
 }
 
 function Test-RegKeysGone {
@@ -911,6 +1043,12 @@ function Clear-OldTemp {
     param([string]$Root)
     $freed = [int64]0
     if (-not (Test-Path -LiteralPath $Root)) { return $freed }
+    # A profile, AppData directory or Temp itself may be a user-created junction.
+    $ancestor = New-Object IO.DirectoryInfo $Root
+    while ($ancestor) {
+        if ($ancestor.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $freed }
+        $ancestor = $ancestor.Parent
+    }
     $stack = New-Object System.Collections.Stack
     $dirs = New-Object System.Collections.ArrayList
     $stack.Push((New-Object IO.DirectoryInfo $Root))
@@ -1181,13 +1319,14 @@ function Invoke-WingetPackages {
             Write-Log ("    {0} ok in {1:N0}s ({2}), verified" -f $Action.ToLower(), $sw.Elapsed.TotalSeconds, $detail) 'OK'
         }
         elseif ($nothingToDo.ContainsKey($exit)) { $skipped++; Write-Log "    skipped: $($nothingToDo[$exit])" }
-        elseif ($exit -eq $adminContextProhibited) { $skipped++; Write-Log '    skipped: installed for the current user only; an elevated session cannot change it' 'WARN' }
+        elseif ($exit -eq $adminContextProhibited) { $failed += $program; Write-Log '    failed: installed for the current user only; an elevated session cannot change it' 'WARN' }
         else {
             $failed += $program
             Write-Log ("    FAILED (WinGet 0x{0:X8}, exit {1}) {2}" -f $exit, $exit, $tail) 'WARN'
         }
     }
     Write-Log ("{0} finished: {1} ok, {2} skipped, {3} failed{4}" -f $Action, $ok, $skipped, $failed.Count, $(if ($failed.Count) { ' (' + ($failed -join ', ') + ')' } else { '' })) $(if ($failed.Count) { 'WARN' } else { 'OK' })
+    return @{ Ok = $ok; Skipped = $skipped; Failed = @($failed); Success = ($failed.Count -eq 0) }
 }
 
 function Repair-WingetClient {
@@ -1230,6 +1369,10 @@ function Install-OptiUpdate {
     # Downloads and verifies the release zip, stages it, and starts a helper that swaps the files once this process exits.
     # Returns $true when the helper is running and the caller should exit.
     param([string]$Url, [string]$Digest, [string]$Version, [string]$InstallDir = $global:OptiRoot, [int]$WaitPid = $PID, [switch]$NoRelaunch)
+    if ($Url -notmatch '^https://') { Write-Log 'Update rejected: an HTTPS download URL is required.' 'ERROR'; return $false }
+    if (Test-Path -LiteralPath (Join-Path $InstallDir '.git')) { Write-Log 'This copy is a git checkout. Use git pull to update it.' 'ERROR'; return $false }
+    if ($Digest -notmatch '^sha256:(?<h>[0-9a-fA-F]{64})$') { Write-Log 'Update rejected: release has no valid SHA-256 checksum.' 'ERROR'; return $false }
+    $expectedHash = $Matches['h']
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $work = Join-Path ([IO.Path]::GetTempPath()) ('optimaxer-update-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
     New-Item -ItemType Directory -Path $work -Force | Out-Null
@@ -1238,13 +1381,22 @@ function Install-OptiUpdate {
     if ($Url -like 'https://api.github.com/*') { $headers['Accept'] = 'application/octet-stream' }
     Write-Log "Downloading Optimaxer v$Version ..."
     try { Invoke-WebRequest -Uri $Url -Headers $headers -OutFile $zip -UseBasicParsing -TimeoutSec 120 -ErrorAction Stop } catch { Write-Log "Download failed: $($_.Exception.Message)" 'ERROR'; return $false }
-    if ($Digest -match '^sha256:(?<h>[0-9a-fA-F]{64})$') {
-        $got = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
-        if ($got -ne $Matches['h']) { Write-Log "Update rejected: checksum mismatch (expected $($Matches['h']), got $got)" 'ERROR'; return $false }
-        Write-Log 'Checksum verified (SHA-256).' 'OK'
-    } else { Write-Log 'Release has no published checksum; relying on HTTPS only.' 'WARN' }
+    $got = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+    if ($got -ne $expectedHash) { Write-Log "Update rejected: checksum mismatch (expected $expectedHash, got $got)" 'ERROR'; return $false }
+    Write-Log 'Checksum verified (SHA-256).' 'OK'
     $stage = Join-Path $work 'stage'
-    try { Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force -ErrorAction Stop } catch { Write-Log "Could not unpack update: $($_.Exception.Message)" 'ERROR'; return $false }
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $root = [IO.Path]::GetFullPath($stage).TrimEnd('\') + '\'
+        $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+        try {
+            foreach ($entry in $archive.Entries) {
+                $target = [IO.Path]::GetFullPath((Join-Path $stage $entry.FullName))
+                if (-not $target.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) -or $entry.FullName.Contains(':')) { throw "Unsafe update archive path: $($entry.FullName)" }
+            }
+        } finally { $archive.Dispose() }
+        Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force -ErrorAction Stop
+    } catch { Write-Log "Could not unpack update: $($_.Exception.Message)" 'ERROR'; return $false }
     foreach ($need in 'Optimaxer.ps1', 'src\Core.ps1', 'src\App.ps1', 'VERSION') {
         if (-not (Test-Path -LiteralPath (Join-Path $stage $need))) { Write-Log "Update rejected: package is missing $need" 'ERROR'; return $false }
     }
@@ -1252,11 +1404,17 @@ function Install-OptiUpdate {
     $helper = Join-Path $work 'apply.ps1'
     @'
 param($WaitPid, $Stage, $Dst, $Backup, $Relaunch)
-try { Wait-Process -Id $WaitPid -Timeout 90 -ErrorAction SilentlyContinue } catch {}
+$ErrorActionPreference = 'Stop'
+# Never replace files while the old process is still running or before its backup is complete.
+if (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue) { Wait-Process -Id $WaitPid -Timeout 90 -ErrorAction Stop }
 Start-Sleep -Milliseconds 400
-New-Item -ItemType Directory -Path $Backup -Force | Out-Null
-Copy-Item -Path (Join-Path $Dst '*') -Destination $Backup -Recurse -Force -ErrorAction SilentlyContinue
-Copy-Item -Path (Join-Path $Stage '*') -Destination $Dst -Recurse -Force
+[IO.Directory]::CreateDirectory($Backup) | Out-Null
+Copy-Item -Path (Join-Path $Dst '*') -Destination $Backup -Recurse -Force -ErrorAction Stop
+try { Copy-Item -Path (Join-Path $Stage '*') -Destination $Dst -Recurse -Force -ErrorAction Stop }
+catch {
+    Copy-Item -Path (Join-Path $Backup '*') -Destination $Dst -Recurse -Force -ErrorAction Stop
+    throw
+}
 if ($Relaunch -eq '1') {
     Start-Process powershell.exe -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "{0}"' -f (Join-Path $Dst 'Optimaxer.ps1'))
 }
@@ -1289,13 +1447,15 @@ function Add-HostsBlock {
 function Get-SystemTraits {
     # Hardware profile used to pick tweaks. Tags: laptop|desktop, ssd|hdd, nvme, nvidia|amdgpu|intelgpu, dgpu, win11|win10,
     # ram8 (8 GB or less), ram16 (16 GB or more), ram32, cores8 (8+ logical processors), lowend (weak CPU or little RAM).
-    $laptop = [bool](Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue)
-    $ssd = $true; $nvme = $false
+    $laptop = $null
+    try { $laptop = @(Get-CimInstance Win32_Battery -ErrorAction Stop).Count -gt 0 } catch {}
+    $ssd = $null; $nvme = $false
     try {
         $dn = (Get-Partition -DriveLetter $env:SystemDrive[0] -ErrorAction Stop).DiskNumber
-        $pd = Get-PhysicalDisk | Where-Object { $_.DeviceId -eq "$dn" } | Select-Object -First 1
+        $pd = Get-PhysicalDisk -ErrorAction Stop | Where-Object { $_.DeviceId -eq "$dn" } | Select-Object -First 1
         if ($pd.MediaType -eq 'HDD') { $ssd = $false }
-        if ($pd.BusType -eq 'NVMe') { $nvme = $true }
+        if ($pd.MediaType -eq 'SSD') { $ssd = $true }
+        if ($pd.BusType -eq 'NVMe') { $nvme = $true; $ssd = $true }
     } catch {}
     $ram = 0.0; $threads = 0
     try { $ram = [math]::Round((Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory / 1GB, 1) } catch {}
@@ -1309,29 +1469,29 @@ function Get-SystemTraits {
     $dgpu = $nv -or $amdDiscrete
     $build = 0; try { $build = [int](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).BuildNumber } catch {}
     $tags = New-Object System.Collections.ArrayList
-    [void]$tags.Add($(if ($laptop) { 'laptop' } else { 'desktop' }))
-    [void]$tags.Add($(if ($ssd) { 'ssd' } else { 'hdd' }))
+    if ($null -ne $laptop) { [void]$tags.Add($(if ($laptop) { 'laptop' } else { 'desktop' })) }
+    if ($null -ne $ssd) { [void]$tags.Add($(if ($ssd) { 'ssd' } else { 'hdd' })) }
     if ($nvme) { [void]$tags.Add('nvme') }
     if ($nv) { [void]$tags.Add('nvidia') }
     if ($amd) { [void]$tags.Add('amdgpu') }
     if ($gpus -match 'Intel') { [void]$tags.Add('intelgpu') }
     if ($dgpu) { [void]$tags.Add('dgpu') }
-    [void]$tags.Add($(if ($build -ge 22000) { 'win11' } else { 'win10' }))
+    if ($build -gt 0) { [void]$tags.Add($(if ($build -ge 22000) { 'win11' } else { 'win10' })) }
     if ($ram -gt 0 -and $ram -le 8.5) { [void]$tags.Add('ram8') }
     if ($ram -ge 15.5) { [void]$tags.Add('ram16') }
     if ($ram -ge 31.5) { [void]$tags.Add('ram32') }
     if ($threads -ge 8) { [void]$tags.Add('cores8') }
-    if (($ram -gt 0 -and $ram -le 6) -or ($threads -gt 0 -and $threads -le 2) -or -not $ssd) { [void]$tags.Add('lowend') }
+    if (($ram -gt 0 -and $ram -le 6) -or ($threads -gt 0 -and $threads -le 2) -or $ssd -eq $false) { [void]$tags.Add('lowend') }
     return @{ Laptop = $laptop; SSD = $ssd; Vendor = Get-SystemVendor; RamGB = $ram; Threads = $threads; Gpus = $gpus; Build = $build; Tags = @($tags) }
 }
 
 function Test-TweakFits {
     # True when a tweak makes sense on this hardware. -Need lists traits that must all be present; a leading '!' means absent.
     param($T, $Traits)
-    if ($T.DesktopOnly -and $Traits.Laptop) { return $false }
+    if ($T.DesktopOnly -and $Traits.Laptop -ne $false) { return $false }
     if ($T.SSDOnly -and -not $Traits.SSD) { return $false }
     if ($T.Vendor -and $T.Vendor -ne $Traits.Vendor) { return $false }
-    if ($T.MinRamGB -and $Traits.RamGB -and $Traits.RamGB -lt $T.MinRamGB) { return $false }
+    if ($T.MinRamGB -and $Traits.RamGB -lt $T.MinRamGB) { return $false }
     foreach ($n in @($T.Need)) {
         if (-not $n) { continue }
         if ($n.StartsWith('!')) { if (@($Traits.Tags) -contains $n.Substring(1)) { return $false } }
@@ -1399,10 +1559,13 @@ function Test-AutoPick {
 function Get-TweakFitReason {
     # Plain-language hardware fact that rules a tweak out on this PC, or '' when it fits.
     param($T, $Traits)
+    if ($T.DesktopOnly -and $null -eq $Traits.Laptop) { return 'computer type could not be detected' }
     if ($T.DesktopOnly -and $Traits.Laptop) { return 'this PC is a laptop' }
+    if ($T.SSDOnly -and $null -eq $Traits.SSD) { return 'system drive type could not be detected' }
     if ($T.SSDOnly -and -not $Traits.SSD) { return 'the system drive is a hard disk' }
     if ($T.Vendor -and $T.Vendor -ne $Traits.Vendor) { return "not a $($T.Vendor) system" }
-    if ($T.MinRamGB -and $Traits.RamGB -and $Traits.RamGB -lt $T.MinRamGB) { return ('{0:N0} GB RAM, needs {1:N0} GB' -f $Traits.RamGB, $T.MinRamGB) }
+    if ($T.MinRamGB -and -not $Traits.RamGB) { return 'RAM size could not be detected' }
+    if ($T.MinRamGB -and $Traits.RamGB -lt $T.MinRamGB) { return ('{0:N0} GB RAM, needs {1:N0} GB' -f $Traits.RamGB, $T.MinRamGB) }
     $names = @{ dgpu = 'a discrete GPU'; hdd = 'a hard disk'; ssd = 'an SSD'; laptop = 'a laptop'; desktop = 'a desktop'; lowend = 'low-end hardware'; nvidia = 'an NVIDIA GPU'; win11 = 'Windows 11' }
     foreach ($n in @($T.Need)) {
         if (-not $n) { continue }
@@ -1436,8 +1599,8 @@ function Get-SmartPlan {
     $ids = @(Resolve-ConflictIds $ids)
     $tg = @($Traits.Tags)
     [void]$notes.Add('Ticked: the recommended set and the performance tweaks that fit this hardware. Advanced tweaks and other Moderate ones are left for you to tick.')
-    [void]$notes.Add($(if ($tg -contains 'laptop') { 'Laptop: desktop-only tweaks (power throttling, USB/PCIe power saving, timer) are skipped to protect battery life.' } else { 'Desktop: CPU power throttling off, no USB/PCIe link sleep, per-app timer requests honored. The Ultimate plan and 100% minimum CPU stay off (heat, no measured gain).' }))
-    [void]$notes.Add($(if ($tg -contains 'ssd') { 'SSD: TRIM check included.' } else { 'Hard disk: SSD-only tweaks are skipped; run Defragment in Tools.' }))
+    [void]$notes.Add($(if ($tg -contains 'laptop') { 'Laptop: desktop-only tweaks (power throttling, USB/PCIe power saving, timer) are skipped to protect battery life.' } elseif ($tg -contains 'desktop') { 'Desktop: CPU power throttling off, no USB/PCIe link sleep, per-app timer requests honored. The Ultimate plan and 100% minimum CPU stay off (heat, no measured gain).' } else { 'Computer type unknown: desktop-only tweaks are skipped.' }))
+    [void]$notes.Add($(if ($tg -contains 'ssd') { 'SSD: TRIM check included.' } elseif ($tg -contains 'hdd') { 'Hard disk: SSD-only tweaks are skipped; run Defragment in Tools.' } else { 'System drive type unknown: SSD-only tweaks are skipped.' }))
     if ($Traits.RamGB) { [void]$notes.Add(('{0:N0} GB RAM: tweaks that need more memory than this are skipped.' -f $Traits.RamGB)) }
     [void]$notes.Add($(if ($tg -contains 'dgpu') { 'Discrete GPU: hardware-accelerated GPU scheduling, Game Mode and Game DVR capture off are ticked.' } else { 'No discrete GPU: GPU scheduling is skipped.' }))
     return @{ Ids = @($ids); Notes = @($notes); Skipped = $skipped }
