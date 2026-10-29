@@ -1355,6 +1355,20 @@ impl OrionApp {
                         self.reapply_theme(ctx);
                         self.settings.save();
                     }
+                    ui.horizontal_wrapped(|ui| {
+                        if kit::secondary(ui, "Export appearance…", !net::READ_ONLY.load(Ordering::Relaxed)).clicked() {
+                            self.export_appearance();
+                        }
+                        if kit::secondary(ui, "Import appearance…", !net::READ_ONLY.load(Ordering::Relaxed)).clicked() {
+                            self.import_appearance(ctx);
+                        }
+                    });
+                    if let Some((message, at)) = &self.toast
+                        && at.elapsed() < Duration::from_secs(4)
+                    {
+                        ui.add(egui::Label::new(RichText::new(message).size(T_CAPTION).color(t.muted)).wrap());
+                    }
+                    ui.add(egui::Label::new(RichText::new("Appearance files include theme, control style, palette, accent and motion preference. They do not change other app settings or Windows settings.").size(T_CAPTION).color(t.subtle)).wrap());
                 });
                 ui.add_space(S2);
                 kit::card(ui, |ui| {
@@ -1409,6 +1423,51 @@ impl OrionApp {
         });
         if resp.should_close() {
             self.show_settings = false;
+        }
+    }
+
+    fn export_appearance(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Optimaxer appearance", &["json"])
+            .set_file_name("optimaxer-appearance.json")
+            .save_file()
+        else {
+            return;
+        };
+        let preset = crate::appearance::Preset::capture(&self.settings);
+        let message = match crate::appearance::write(&path, &preset) {
+            Ok(()) => format!("Appearance exported to {}.", path.display()),
+            Err(error) => format!("Could not export appearance: {error}"),
+        };
+        self.toast = Some((message, Instant::now()));
+    }
+
+    fn import_appearance(&mut self, ctx: &egui::Context) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Optimaxer appearance", &["json"])
+            .pick_file()
+        else {
+            return;
+        };
+        let preset = match crate::appearance::read(&path) {
+            Ok(preset) => preset,
+            Err(error) => {
+                self.toast = Some((format!("Could not import appearance: {error}"), Instant::now()));
+                return;
+            }
+        };
+        let previous = self.settings.clone();
+        preset.apply(&mut self.settings);
+        self.reapply_theme(ctx);
+        match self.settings.save_checked() {
+            Ok(()) => {
+                self.toast = Some((format!("Imported appearance from {}.", path.display()), Instant::now()));
+            }
+            Err(error) => {
+                self.settings = previous;
+                self.reapply_theme(ctx);
+                self.toast = Some((format!("Appearance was not saved: {error}"), Instant::now()));
+            }
         }
     }
 }
