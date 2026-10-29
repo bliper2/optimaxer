@@ -189,11 +189,43 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let temp = path.with_extension("tmp");
     fs::write(&temp, bytes)
         .map_err(|error| format!("Could not stage {}: {error}", path.display()))?;
-    if let Err(error) = fs::rename(&temp, path) {
+    if let Err(error) = replace_file(&temp, path) {
         let _ = fs::remove_file(&temp);
         return Err(format!("Could not replace {}: {error}", path.display()));
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    // MoveFileExW atomically replaces an existing file on the same volume.
+    let flags = windows_sys::Win32::Storage::FileSystem::MOVEFILE_REPLACE_EXISTING
+        | windows_sys::Win32::Storage::FileSystem::MOVEFILE_WRITE_THROUGH;
+    if unsafe {
+        windows_sys::Win32::Storage::FileSystem::MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            flags,
+        )
+    } == 0
+    {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::rename(source, destination)
 }
 
 #[cfg(test)]
@@ -292,6 +324,11 @@ mod tests {
         let replacement = vec![profile("Work", &["three"])];
         save_store(&path, &replacement).unwrap();
         assert_eq!(load_store(&path).unwrap()[0].name, "Work");
+
+        let export = root.join("portable.json");
+        write_export(&export, &profile("Daily", &["one"])).unwrap();
+        write_export(&export, &profile("Work", &["two"])).unwrap();
+        assert_eq!(read_export(&export).unwrap().name, "Work");
 
         fs::write(&path, b"{").unwrap();
         assert!(load_store(&path).is_err());
