@@ -6,6 +6,7 @@ pub mod cleaner;
 pub mod engine;
 pub mod hw;
 pub mod history;
+pub mod gaming;
 pub mod network;
 pub mod processes;
 pub mod profiles;

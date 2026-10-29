@@ -106,4 +106,9 @@ mod tests {
         assert_eq!(s.step().unwrap().0, "store-detail");
         assert!(!s.finished());
     }
+
+    #[test]
+    fn screenshot_walk_covers_gaming_page() {
+        assert!(STEPS.iter().any(|(name, _)| *name == "optimaxer-gaming"));
+    }
 }

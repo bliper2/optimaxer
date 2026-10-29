@@ -5,7 +5,7 @@
 use crate::kit;
 use crate::model::{format_size, AppItem};
 use crate::net::{self, Settings};
-use crate::opti::backend::{System, WinSystem};
+use crate::opti::backend::{RegData, System, WinSystem};
 use crate::opti::catalog::{Catalog, Tweak};
 use crate::opti::cleaner::{self, Target};
 use crate::opti::engine::{Change, Engine};
@@ -14,6 +14,7 @@ use crate::opti::history::{
     self, Action as HistoryAction, Change as HistoryChange, Entry as HistoryEntry,
     OperationEntry,
 };
+use crate::opti::gaming::{self, GameProfile, GraphicsPreference, ProfileState};
 use crate::opti::network;
 use crate::opti::processes::{self, CpuTimes, ProcessInfo};
 use crate::opti::profiles::{self, Profile};
@@ -117,6 +118,8 @@ enum Action {
     ResetNetwork,
     RunTool(Tool),
     RunInstaller(PathBuf),
+    ApplyGameGraphics { executable: String, expected_current: Option<RegData> },
+    UndoGameGraphics { executable: String },
 }
 
 struct Line {
@@ -137,6 +140,7 @@ struct Pending {
 
 enum Msg {
     Log(String),
+    Toast(String),
     Idle,
     Traits(Traits),
     Status(HashMap<String, bool>),
@@ -148,6 +152,8 @@ enum Msg {
     Bench(Vec<(String, Option<f64>)>),
     History(Result<Vec<HistoryEntry>, String>),
     OperationHistory(Result<Vec<OperationEntry>, String>),
+    GameProfiles(Result<Vec<GameProfile>, String>),
+    GameStates(HashMap<String, Result<ProfileState, String>>),
     Processes(Result<(Vec<ProcessInfo>, CpuTimes), String>),
     RestartRequired,
 }
@@ -174,6 +180,19 @@ impl Worker {
             }
         }
         self.send(Msg::Log(s.to_string()));
+    }
+}
+
+fn refresh_game_profile_messages(worker: &Worker, store_path: &std::path::Path) {
+    match gaming::load_store(store_path) {
+        Ok(profiles) => {
+            let states = profiles.iter().map(|profile| {
+                (profile.executable.clone(), gaming::state(&WinSystem, profile))
+            }).collect();
+            worker.send(Msg::GameProfiles(Ok(profiles)));
+            worker.send(Msg::GameStates(states));
+        }
+        Err(error) => worker.send(Msg::GameProfiles(Err(error))),
     }
 }
 
@@ -206,6 +225,11 @@ pub struct OptiUi {
     history_search: String,
     profiles: Vec<Profile>,
     profiles_error: Option<String>,
+    game_profiles: Vec<GameProfile>,
+    game_profiles_error: Option<String>,
+    game_states: HashMap<String, Result<ProfileState, String>>,
+    game_states_loaded: bool,
+    game_status_loading: bool,
     profile_name: String,
     compare_profile_left: String,
     compare_profile_right: String,
@@ -587,6 +611,10 @@ impl OptiUi {
             Ok(profiles) => (profiles, None),
             Err(error) => (Vec::new(), Some(error)),
         };
+        let (game_profiles, game_profiles_error) = match gaming::load_store(&gaming::store_path()) {
+            Ok(profiles) => (profiles, None),
+            Err(error) => (Vec::new(), Some(error)),
+        };
         Self {
             page: Page::Overview,
             cat: Arc::new(Catalog::load()),
@@ -612,6 +640,11 @@ impl OptiUi {
             history_search: String::new(),
             profiles,
             profiles_error,
+            game_profiles,
+            game_profiles_error,
+            game_states: HashMap::new(),
+            game_states_loaded: false,
+            game_status_loading: false,
             profile_name: "My profile".into(),
             compare_profile_left: String::new(),
             compare_profile_right: String::new(),
@@ -661,6 +694,9 @@ impl OptiUi {
         let live = |page| matches!(page, Page::Overview | Page::Performance);
         if live(p) != live(self.page) {
             self.telemetry_needs_reset = true;
+        }
+        if p == Page::Gaming && self.page != Page::Gaming {
+            self.game_states_loaded = false;
         }
         self.page = p;
         self.start_transition(ctx);
@@ -757,6 +793,7 @@ impl OptiUi {
         while let Ok(m) = self.rx.try_recv() {
             match m {
                 Msg::Log(s) => self.say(&s),
+                Msg::Toast(message) => self.events.push(OptiEvent::Toast(message)),
                 Msg::Idle => self.busy = None,
                 Msg::Traits(t) => self.traits = Some(t),
                 Msg::Status(map) => {
@@ -796,6 +833,17 @@ impl OptiUi {
                     self.operations_error = None;
                 }
                 Msg::OperationHistory(Err(error)) => self.operations_error = Some(error),
+                Msg::GameProfiles(Ok(profiles)) => {
+                    self.game_profiles = profiles;
+                    self.game_profiles_error = None;
+                    self.game_states_loaded = false;
+                }
+                Msg::GameProfiles(Err(error)) => self.game_profiles_error = Some(error),
+                Msg::GameStates(states) => {
+                    self.game_states = states;
+                    self.game_states_loaded = true;
+                    self.game_status_loading = false;
+                }
                 Msg::Processes(Ok((rows, cpu_times))) => {
                     self.processes = rows;
                     self.process_cpu = cpu_times;
@@ -1038,6 +1086,52 @@ impl OptiUi {
                     } else {
                         w.log("The installer was not opened because the restore point failed. Open it from the Downloads list if you want to continue anyway.");
                     }
+                });
+            }
+            Action::ApplyGameGraphics { executable, expected_current } => {
+                self.spawn_recorded(ctx, "Setting per-game graphics preference", move |w| {
+                    let store_path = gaming::store_path();
+                    match gaming::load_store(&store_path) {
+                        Ok(mut profiles) => {
+                            let requested = profiles.iter().find(|profile| profile.executable.eq_ignore_ascii_case(&executable))
+                                .map(|profile| profile.preference.label().to_owned());
+                            w.log(&format!("Executable: {executable}"));
+                            w.log(&format!("Previous value: {}", expected_current.as_ref().map_or("not set".into(), RegData::show)));
+                            if let Some(requested) = requested { w.log(&format!("Requested preference: {requested}")); }
+                            match gaming::apply(&WinSystem, &store_path, &mut profiles, &executable, &expected_current) {
+                                Ok(()) => w.log("Windows graphics preference applied and verified."),
+                                Err(error) => w.log(&format!("WARN Could not apply the graphics preference: {error}")),
+                            }
+                        }
+                        Err(error) => w.log(&format!("WARN Could not read game profiles: {error}")),
+                    }
+                    refresh_game_profile_messages(w, &store_path);
+                });
+            }
+            Action::UndoGameGraphics { executable } => {
+                self.spawn_recorded(ctx, "Restoring per-game graphics preference", move |w| {
+                    let store_path = gaming::store_path();
+                    match gaming::load_store(&store_path) {
+                        Ok(mut profiles) => {
+                            let exact = profiles.iter().find(|profile| profile.executable.eq_ignore_ascii_case(&executable))
+                                .ok_or_else(|| "Game profile no longer exists.".to_string())
+                                .and_then(|profile| gaming::undo_preview(&WinSystem, profile));
+                            match exact {
+                                Ok((current, original)) => {
+                                    w.log(&format!("Executable: {executable}"));
+                                    w.log(&format!("Current value: {}", current.as_ref().map_or("not set".into(), RegData::show)));
+                                    w.log(&format!("Restoring original: {}", original.as_ref().map_or("not set".into(), RegData::show)));
+                                    match gaming::undo(&WinSystem, &store_path, &mut profiles, &executable) {
+                                        Ok(()) => w.log("Original Windows graphics preference restored and verified."),
+                                        Err(error) => w.log(&format!("WARN Could not restore the graphics preference: {error}")),
+                                    }
+                                }
+                                Err(error) => w.log(&format!("WARN Could not prepare graphics restore: {error}")),
+                            }
+                        }
+                        Err(error) => w.log(&format!("WARN Could not read game profiles: {error}")),
+                    }
+                    refresh_game_profile_messages(w, &store_path);
                 });
             }
         }
@@ -2004,9 +2098,158 @@ impl OptiUi {
             });
     }
 
+    fn refresh_game_states(&mut self, ctx: &egui::Context) {
+        if self.game_status_loading || self.game_profiles_error.is_some() || self.game_states_loaded {
+            return;
+        }
+        if self.game_profiles.is_empty() {
+            self.game_states_loaded = true;
+            return;
+        }
+        self.game_status_loading = true;
+        let profiles = self.game_profiles.clone();
+        let worker = self.worker(ctx);
+        std::thread::spawn(move || {
+            let states = profiles.iter().map(|profile| {
+                (profile.executable.clone(), gaming::state(&WinSystem, profile))
+            }).collect();
+            worker.send(Msg::GameStates(states));
+        });
+    }
+
+    fn add_game_executable(&mut self, ctx: &egui::Context) {
+        if self.game_profiles_error.is_some() {
+            self.events.push(OptiEvent::Toast("Saved game profiles are unreadable. Recover the file before adding profiles.".into()));
+            return;
+        }
+        let Some(path) = rfd::FileDialog::new().add_filter("Windows game executable", &["exe"]).pick_file() else { return };
+        let canonical = match path.canonicalize() {
+            Ok(path) if path.is_file() && path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("exe")) => {
+                let text = path.to_string_lossy();
+                text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned()
+            }
+            Ok(_) => {
+                self.events.push(OptiEvent::Toast("Choose an existing Windows .exe file.".into()));
+                return;
+            }
+            Err(error) => {
+                self.events.push(OptiEvent::Toast(format!("Could not resolve that executable path: {error}")));
+                return;
+            }
+        };
+        let profile = match GameProfile::new(&canonical) {
+            Ok(profile) => profile,
+            Err(error) => {
+                self.events.push(OptiEvent::Toast(error));
+                return;
+            }
+        };
+        let mut profiles = self.game_profiles.clone();
+        profiles.push(profile);
+        match gaming::save_store(&gaming::store_path(), &profiles) {
+            Ok(()) => {
+                self.game_profiles = profiles;
+                self.game_profiles_error = None;
+                self.game_states.clear();
+                self.game_states_loaded = false;
+                self.refresh_game_states(ctx);
+            }
+            Err(error) => self.events.push(OptiEvent::Toast(error)),
+        }
+    }
+
+    fn export_game_preference(&mut self, profile: &GameProfile) {
+        let name = std::path::Path::new(&profile.executable).file_stem()
+            .map_or_else(|| "game".into(), |stem| stem.to_string_lossy().to_string());
+        let Some(path) = rfd::FileDialog::new().add_filter("Optimaxer graphics preset", &["json"])
+            .set_file_name(format!("{name}-graphics.json")).save_file() else { return };
+        if let Err(error) = gaming::write_export(&path, profile) {
+            self.events.push(OptiEvent::Toast(error));
+        }
+    }
+
+    fn import_game_preference(&mut self, profile: &GameProfile) {
+        if !profile.can_remove() {
+            self.events.push(OptiEvent::Toast("Restore the active setting before importing another graphics preference.".into()));
+            return;
+        }
+        let Some(path) = rfd::FileDialog::new().add_filter("Optimaxer graphics preset", &["json"]).pick_file() else { return };
+        let preference = match gaming::read_export(&path) {
+            Ok(preference) => preference,
+            Err(error) => {
+                self.events.push(OptiEvent::Toast(error));
+                return;
+            }
+        };
+        let mut updated = self.game_profiles.clone();
+        match gaming::set_preference(&gaming::store_path(), &mut updated, &profile.executable, preference) {
+            Ok(()) => {
+                self.game_profiles = updated;
+                self.game_states_loaded = false;
+            }
+            Err(error) => self.events.push(OptiEvent::Toast(error)),
+        }
+    }
+
+    fn preview_game_apply(&mut self, ctx: &egui::Context, executable: String) {
+        let store_path = gaming::store_path();
+        self.spawn(ctx, "Reading per-game graphics preference", move |worker| {
+            let result = gaming::load_store(&store_path).and_then(|profiles| {
+                let profile = profiles.iter().find(|profile| profile.executable.eq_ignore_ascii_case(&executable))
+                    .ok_or_else(|| "Game profile no longer exists. Refresh the page.".to_string())?;
+                let (current, desired) = gaming::preview(&WinSystem, profile)?;
+                worker.log(&format!("Preview for {executable}: {} -> {}", current.as_ref().map_or("not set".into(), RegData::show), desired.as_ref().map_or("Windows default".into(), RegData::show)));
+                Ok(Pending {
+                    title: "Set Windows per-game graphics preference".into(),
+                    intro: "This changes the current Windows user's graphics preference for this executable. Start the game again for Windows and the driver to use the new preference. It does not guarantee higher performance.".into(),
+                    lines: vec![
+                        Line { text: format!("Executable: {executable}"), warn: false, head: false },
+                        Line { text: format!("Current: {}", current.as_ref().map_or("not set".into(), RegData::show)), warn: false, head: false },
+                        Line { text: format!("Requested: {}", desired.as_ref().map_or("Windows default (remove override)".into(), RegData::show)), warn: false, head: false },
+                    ],
+                    action: Action::ApplyGameGraphics { executable: executable.clone(), expected_current: current },
+                    restore_option: false,
+                    ok_label: "Apply preference".into(),
+                })
+            });
+            match result {
+                Ok(plan) => worker.send(Msg::Plan(plan)),
+                Err(error) => worker.send(Msg::Toast(format!("Could not prepare graphics preference: {error}"))),
+            }
+        });
+    }
+
+    fn preview_game_undo(&mut self, ctx: &egui::Context, executable: String) {
+        let store_path = gaming::store_path();
+        self.spawn(ctx, "Preparing graphics preference restore", move |worker| {
+            let result = gaming::load_store(&store_path).and_then(|profiles| {
+                let profile = profiles.iter().find(|profile| profile.executable.eq_ignore_ascii_case(&executable))
+                    .ok_or_else(|| "Game profile no longer exists. Refresh the page.".to_string())?;
+                let (current, original) = gaming::undo_preview(&WinSystem, profile)?;
+                Ok(Pending {
+                    title: "Restore original Windows graphics preference".into(),
+                    intro: "Optimaxer will restore the exact registry value captured before the profile was applied. If it was already restored, this only clears the completed recovery record.".into(),
+                    lines: vec![
+                        Line { text: format!("Executable: {executable}"), warn: false, head: false },
+                        Line { text: format!("Current: {}", current.as_ref().map_or("not set".into(), RegData::show)), warn: false, head: false },
+                        Line { text: format!("Original: {}", original.as_ref().map_or("not set".into(), RegData::show)), warn: false, head: false },
+                    ],
+                    action: Action::UndoGameGraphics { executable: executable.clone() },
+                    restore_option: false,
+                    ok_label: "Restore original".into(),
+                })
+            });
+            match result {
+                Ok(plan) => worker.send(Msg::Plan(plan)),
+                Err(error) => worker.send(Msg::Toast(format!("Could not prepare graphics restore: {error}"))),
+            }
+        });
+    }
+
     fn gaming_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let t = tokens(ctx);
         kit::page_header(ui, "Gaming", "Review the existing reversible Windows gaming settings. These switches do not promise higher frame rates.");
+        self.refresh_game_states(ctx);
 
         let supported: Vec<_> = self.cat.tweaks.iter().filter(|tw| tw.has_tag("gaming") && tw.retired.is_empty() && !tw.has_tag("optin")).collect();
         let Some(traits) = self.traits.as_ref() else {
@@ -2079,6 +2322,134 @@ impl OptiUi {
                 ui.label(RichText::new("Administrator access is required to change Windows settings.").size(T_SMALL).color(t.muted));
             }
         });
+
+        ui.add_space(S4);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("Per-game graphics preferences").font(FontId::new(T_HEADING, semibold())).color(t.text));
+            if kit::ghost(ui, "Refresh", !self.game_status_loading && self.game_profiles_error.is_none()).clicked() {
+                self.game_states.clear();
+                self.game_states_loaded = false;
+                self.refresh_game_states(ctx);
+            }
+            if kit::secondary(ui, "Add game…", self.game_profiles_error.is_none()).clicked() {
+                self.add_game_executable(ctx);
+            }
+        });
+        ui.label(RichText::new("Choose a Windows GPU preference for a game executable. Optimaxer stores the exact prior registry value and refuses to overwrite a later change made elsewhere.").size(T_SMALL).color(t.muted));
+        if let Some(error) = &self.game_profiles_error {
+            ui.add_space(S2);
+            kit::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                kit::chip(ui, "Profiles unavailable", Tone::Bad);
+                ui.add(egui::Label::new(RichText::new(error).size(T_SMALL).color(t.bad)).wrap());
+            });
+        } else if self.game_profiles.is_empty() {
+            ui.add_space(S2);
+            kit::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new("No game executables added.").font(FontId::new(T_BODY, semibold())).color(t.text));
+                ui.label(RichText::new("Add a game's .exe file to create a per-user Windows graphics preference. No setting changes until you review and confirm it.").size(T_SMALL).color(t.muted));
+            });
+        } else if self.game_status_loading || !self.game_states_loaded {
+            ui.add_space(S2);
+            ui.label(RichText::new("Reading current Windows graphics preferences…").size(T_SMALL).color(t.muted));
+        } else {
+            let profile_rows = self.game_profiles.clone();
+            for profile in profile_rows {
+                let state_result = self.game_states.get(&profile.executable);
+                let state = state_result.and_then(|result| result.as_ref().ok()).copied();
+                let state_error = state_result.and_then(|result| result.as_ref().err()).cloned();
+                let mut requested_action: Option<bool> = None;
+                kit::card(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal_wrapped(|ui| {
+                        ui.vertical(|ui| {
+                            let name = std::path::Path::new(&profile.executable).file_stem().map_or_else(|| "Game".into(), |name| name.to_string_lossy().to_string());
+                            ui.label(RichText::new(name).font(FontId::new(T_BODY, semibold())).color(t.text));
+                            ui.add(egui::Label::new(RichText::new(&profile.executable).size(T_SMALL).color(t.subtle)).wrap());
+                        });
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if state_error.is_some() {
+                                kit::chip(ui, "Unavailable", Tone::Bad);
+                            } else if let Some(state) = state {
+                                let (label, tone) = match state {
+                                    ProfileState::WindowsDefault => ("Windows default", Tone::Neutral),
+                                    ProfileState::Selected if profile.has_saved_original() => ("Applied by Optimaxer", Tone::Good),
+                                    ProfileState::Selected => ("Already selected", Tone::Good),
+                                    ProfileState::Available => ("Not applied", Tone::Neutral),
+                                    ProfileState::RestorePending => ("Restore pending", Tone::Warn),
+                                    ProfileState::ChangedElsewhere => ("Changed elsewhere", Tone::Warn),
+                                };
+                                kit::chip(ui, label, tone);
+                            } else {
+                                kit::chip(ui, "Checking", Tone::Neutral);
+                            }
+                        });
+                    });
+                    ui.add_space(S1);
+                    ui.horizontal_wrapped(|ui| {
+                        let mut preference = profile.preference;
+                        egui::ComboBox::from_id_salt(("game-gpu", &profile.executable))
+                            .selected_text(preference.label())
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut preference, GraphicsPreference::Windows, GraphicsPreference::Windows.label());
+                                ui.selectable_value(&mut preference, GraphicsPreference::PowerSaving, GraphicsPreference::PowerSaving.label());
+                                ui.selectable_value(&mut preference, GraphicsPreference::HighPerformance, GraphicsPreference::HighPerformance.label());
+                            });
+                        if preference != profile.preference {
+                            let mut updated = self.game_profiles.clone();
+                            match gaming::set_preference(&gaming::store_path(), &mut updated, &profile.executable, preference) {
+                                Ok(()) => {
+                                    self.game_profiles = updated;
+                                    self.game_states_loaded = false;
+                                }
+                                Err(error) => self.events.push(OptiEvent::Toast(error)),
+                            }
+                        }
+                        if state == Some(ProfileState::Available) && kit::primary(ui, "Review", self.busy.is_none()).clicked() {
+                            requested_action = Some(true);
+                        }
+                        if profile.has_saved_original()
+                            && matches!(state, Some(ProfileState::Selected | ProfileState::RestorePending))
+                            && kit::secondary(ui, "Restore original", self.busy.is_none()).clicked()
+                        {
+                            requested_action = Some(false);
+                        }
+                        if kit::ghost(ui, "Import preset", profile.can_remove()).clicked() {
+                            self.import_game_preference(&profile);
+                        }
+                        if kit::ghost(ui, "Export preset", true).clicked() {
+                            self.export_game_preference(&profile);
+                        }
+                        if profile.can_remove() && kit::ghost(ui, "Remove", true).clicked() {
+                            let mut updated = self.game_profiles.clone();
+                            match gaming::remove(&gaming::store_path(), &mut updated, &profile.executable) {
+                                Ok(()) => {
+                                    self.game_profiles = updated;
+                                    self.game_states.remove(&profile.executable);
+                                    self.game_states_loaded = false;
+                                }
+                                Err(error) => self.events.push(OptiEvent::Toast(error)),
+                            }
+                        }
+                    });
+                    if let Some(error) = state_error {
+                        ui.add(egui::Label::new(RichText::new(error).size(T_SMALL).color(t.bad)).wrap());
+                    }
+                    if state == Some(ProfileState::ChangedElsewhere) {
+                        ui.add(egui::Label::new(RichText::new("Saved originals are protected. Restore either Optimaxer's selected value or the original Windows value, then refresh to retry.").size(T_SMALL).color(t.warn)).wrap());
+                    }
+                });
+                if let Some(apply) = requested_action {
+                    if apply {
+                        self.preview_game_apply(ctx, profile.executable.clone());
+                    } else {
+                        self.preview_game_undo(ctx, profile.executable.clone());
+                    }
+                }
+                ui.add_space(S1);
+            }
+        }
     }
 
     fn tweaks_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
