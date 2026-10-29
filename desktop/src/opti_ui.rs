@@ -646,6 +646,9 @@ impl OptiUi {
     }
 
     fn set_page(&mut self, ctx: &egui::Context, p: Page) {
+        if p == Page::Overview && self.page != Page::Overview {
+            self.sampler.reset_window();
+        }
         self.page = p;
         self.start_transition(ctx);
     }
@@ -1621,6 +1624,22 @@ impl OptiUi {
                         });
                     });
                 }
+            });
+            kit::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new("Adapter traffic, last 60 seconds").font(FontId::new(T_BODY, semibold())).color(t.text));
+                    if let Some(sample) = s.network {
+                        ui.label(RichText::new(format!("↓ {}", crate::opti::sysmon::format_network_rate(sample.received_bytes_per_sec))).size(T_SMALL).color(t.brand_text));
+                        ui.label(RichText::new(format!("↑ {}", crate::opti::sysmon::format_network_rate(sample.sent_bytes_per_sec))).size(T_SMALL).color(t.good));
+                    } else {
+                        let status = if s.network_available { "Sampling adapter counters…" } else { "Adapter counters unavailable" };
+                        ui.label(RichText::new(status).size(T_SMALL).color(t.muted));
+                    }
+                });
+                ui.label(RichText::new("Aggregate active adapter counters. Virtual adapters may be included; this is not internet throughput.").size(T_CAPTION).color(t.subtle));
+                ui.add_space(S1);
+                kit::network_chart(ui, vec2(ui.available_width(), 78.0), &self.sampler.network_history, t.brand_text, t.good);
             });
             kit::card(ui, |ui| {
                 ui.set_width(ui.available_width());

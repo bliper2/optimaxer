@@ -427,6 +427,58 @@ pub fn sparkline(ui: &mut Ui, size: egui::Vec2, data: &std::collections::VecDequ
     p.add(Shape::mesh(mesh));
     p.add(Shape::line(pts, Stroke::new(2.0, color)));
 }
+
+/// Dual-series adapter-rate chart. The scale follows the visible 60-second sample window.
+pub fn network_chart(
+    ui: &mut Ui,
+    size: egui::Vec2,
+    data: &std::collections::VecDeque<Option<crate::opti::sysmon::NetworkSample>>,
+    received: Color32,
+    sent: Color32,
+) {
+    let t = tokens(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let painter = ui.painter();
+    painter.rect_filled(rect, CornerRadius::same(t.ctl_radius().min(8)), t.surface2);
+    for fraction in [0.25, 0.5, 0.75] {
+        let y = rect.bottom() - rect.height() * fraction;
+        painter.line_segment(
+            [egui::pos2(rect.left() + 6.0, y), egui::pos2(rect.right() - 6.0, y)],
+            Stroke::new(1.0, mix(t.surface2, t.hairline, 0.7)),
+        );
+    }
+    let peak = data
+        .iter()
+        .flatten()
+        .flat_map(|sample| [sample.received_bytes_per_sec, sample.sent_bytes_per_sec])
+        .filter(|rate| rate.is_finite())
+        .fold(0.0_f32, f32::max)
+        .max(1.0);
+    if data.len() < 2 {
+        return;
+    }
+    let inner = rect.shrink2(vec2(6.0, 6.0));
+    let step = inner.width() / (crate::opti::sysmon::HISTORY as f32 - 1.0);
+    let x0 = inner.right() - step * (data.len() as f32 - 1.0);
+    let mut previous: Option<(egui::Pos2, egui::Pos2)> = None;
+    for (index, sample) in data.iter().enumerate() {
+        let current = sample.map(|sample| {
+            let y = |rate: f32| inner.bottom() - inner.height() * (rate / peak).clamp(0.0, 1.0);
+            (
+                egui::pos2(x0 + step * index as f32, y(sample.received_bytes_per_sec)),
+                egui::pos2(x0 + step * index as f32, y(sample.sent_bytes_per_sec)),
+            )
+        });
+        if let (Some((old_received, old_sent)), Some((new_received, new_sent))) = (previous, current) {
+            painter.line_segment([old_received, new_received], Stroke::new(2.0, received));
+            painter.line_segment([old_sent, new_sent], Stroke::new(2.0, sent));
+        }
+        previous = current;
+    }
+}
 // endregion
 
 /// A window caption button (minimize, maximize, restore, close): a Segoe Fluent glyph, or a plain character when
