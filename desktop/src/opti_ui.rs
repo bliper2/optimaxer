@@ -342,15 +342,17 @@ fn run_batch(eng: &Engine, cat: &Catalog, ids: &[String], apply: bool, restore_p
     }
     for id in ids {
         let Some(t) = cat.find(id) else { continue };
+        let was_active = eng.test(t, st);
         let details = if apply {
             eng.plan(t).iter().map(Change::describe).collect()
         } else {
             st.records.get(id).map(|record| vec![format!("Saved originals: {} registry values, {} service settings, {} scheduled tasks", record.reg.len(), record.svc.len(), record.task.len())]).unwrap_or_default()
         };
         let (on, failed) = if apply { (eng.apply(t, st, log), Vec::new()) } else { eng.undo_checked(t, st, log) };
-        b.restart |= t.restart;
-        b.explorer |= t.explorer;
         let verified = on == apply && failed.is_empty();
+        let changed_state = was_active != eng.test(t, st);
+        b.restart |= t.restart && changed_state;
+        b.explorer |= t.explorer && verified && changed_state;
         if verified {
             b.ok += 1;
         }
@@ -1809,6 +1811,65 @@ mod tests {
         assert!(undone.changes[0].verified && !undone.changes[0].undo_available);
         assert!(undone.changes[0].details[0].contains("Saved originals: 1 registry values"));
         assert_eq!(sys.reg_get(path, "Choice"), Some(RegData::Dword(2)));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn batch_requests_restart_only_after_a_state_transition() {
+        use crate::opti::catalog::{RegItem, RegVal};
+        let path = r"HKCU:\Software\OptimaxerRestartTest";
+        let tweak = Tweak {
+            id: "restart-test".into(),
+            name: "Restart test".into(),
+            reg: vec![RegItem { p: path.into(), n: "Enabled".into(), v: RegVal::Num(1), t: "DWord".into() }],
+            restart: true,
+            explorer: true,
+            ..Default::default()
+        };
+        let cat = Catalog { tweaks: vec![tweak], ..Default::default() };
+        let sys = FakeSystem::default();
+        sys.put(path, "Enabled", RegData::Dword(0));
+        let dir = std::env::temp_dir().join(format!("opti-restart-state-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut state = State::load_from(dir.join("state.json"), None);
+        let engine = Engine::new(&sys, PathBuf::new());
+
+        let applied = run_batch(&engine, &cat, &["restart-test".into()], true, false, &mut state, &mut |_| {});
+        assert!(applied.changes[0].verified && applied.restart && applied.explorer);
+
+        let unchanged = run_batch(&engine, &cat, &["restart-test".into()], true, false, &mut state, &mut |_| {});
+        assert!(unchanged.changes[0].verified);
+        assert!(!unchanged.restart && !unchanged.explorer, "reapplying an active tweak must not request restarts");
+
+        let undone = run_batch(&engine, &cat, &["restart-test".into()], false, false, &mut state, &mut |_| {});
+        assert!(undone.changes[0].verified && undone.restart && undone.explorer);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn failed_tweak_does_not_restart_explorer_or_claim_a_state_change() {
+        use crate::opti::catalog::{RegItem, RegVal};
+        let path = r"HKCU:\Software\OptimaxerRestartFailureTest";
+        let tweak = Tweak {
+            id: "restart-failure-test".into(),
+            name: "Restart failure test".into(),
+            reg: vec![RegItem { p: path.into(), n: "Enabled".into(), v: RegVal::Num(1), t: "DWord".into() }],
+            restart: true,
+            explorer: true,
+            ..Default::default()
+        };
+        let cat = Catalog { tweaks: vec![tweak], ..Default::default() };
+        let sys = FakeSystem::default();
+        sys.put(path, "Enabled", RegData::Dword(0));
+        sys.deny_writes.borrow_mut().insert(path.to_lowercase());
+        let dir = std::env::temp_dir().join(format!("opti-restart-failure-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut state = State::load_from(dir.join("state.json"), None);
+        let engine = Engine::new(&sys, PathBuf::new());
+
+        let failed = run_batch(&engine, &cat, &["restart-failure-test".into()], true, false, &mut state, &mut |_| {});
+        assert!(!failed.changes[0].verified && !failed.restart && !failed.explorer);
+        assert!(!sys.ran("taskkill.exe"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 
