@@ -302,6 +302,40 @@ fn operation_entry_matches(entry: &OperationEntry, query: &str) -> bool {
         || entry.details.iter().any(|detail| detail.to_lowercase().contains(&query))
 }
 
+enum ActivityEntry<'a> {
+    Tweak(&'a HistoryEntry),
+    Operation(&'a OperationEntry),
+}
+
+impl ActivityEntry<'_> {
+    fn time(&self) -> &str {
+        match self {
+            Self::Tweak(entry) => &entry.time,
+            Self::Operation(entry) => &entry.time,
+        }
+    }
+}
+
+fn activity_entries<'a>(
+    history: &'a [HistoryEntry],
+    operations: &'a [OperationEntry],
+    query: &str,
+) -> Vec<ActivityEntry<'a>> {
+    let mut entries: Vec<_> = history
+        .iter()
+        .filter(|entry| history_entry_matches(entry, query))
+        .map(ActivityEntry::Tweak)
+        .chain(
+            operations
+                .iter()
+                .filter(|entry| operation_entry_matches(entry, query))
+                .map(ActivityEntry::Operation),
+        )
+        .collect();
+    entries.sort_by(|left, right| right.time().cmp(left.time()));
+    entries
+}
+
 #[cfg(test)]
 mod operation_history_tests {
     use super::*;
@@ -322,6 +356,26 @@ mod operation_history_tests {
         assert!(operation_entry_matches(&entry, "flushed"));
         assert!(!operation_entry_matches(&entry, "installer"));
         assert!(operation_entry_matches(&entry, "  "));
+    }
+
+    #[test]
+    fn activity_entries_merge_tweak_and_system_records_newest_first() {
+        let older_tweak = HistoryEntry {
+            time: "2026-10-29T12:00:00Z".into(),
+            action: HistoryAction::Apply,
+            changes: vec![],
+        };
+        let newer_operation = OperationEntry {
+            time: "2026-10-29T12:05:00Z".into(),
+            title: "Flush DNS".into(),
+            details: vec![],
+        };
+        let history = [older_tweak];
+        let operations = [newer_operation];
+        let entries = activity_entries(&history, &operations, "");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].time(), "2026-10-29T12:05:00Z");
+        assert_eq!(entries[1].time(), "2026-10-29T12:00:00Z");
     }
 }
 
@@ -1636,8 +1690,8 @@ impl OptiUi {
         ui.horizontal_wrapped(|ui| {
             ui.add_sized(
                 [280.0, 34.0],
-                egui::TextEdit::singleline(&mut self.history_search)
-                    .hint_text("Search action, tweak or date"),
+                    egui::TextEdit::singleline(&mut self.history_search)
+                    .hint_text("Search action, tweak, output or date"),
             );
             let visible = self
                 .history
@@ -1670,79 +1724,63 @@ impl OptiUi {
             }
             return;
         }
-        let tweak_matches: Vec<_> = self
-            .history
-            .iter()
-            .rev()
-            .filter(|entry| history_entry_matches(entry, &self.history_search))
-            .collect();
-        let operation_matches: Vec<_> = self
-            .operations
-            .iter()
-            .rev()
-            .filter(|entry| operation_entry_matches(entry, &self.history_search))
-            .collect();
-        if tweak_matches.is_empty() && operation_matches.is_empty() {
+        let entries = activity_entries(&self.history, &self.operations, &self.history_search);
+        if entries.is_empty() {
             kit::empty_state(ui, "No matching activity", "Try another search or clear the filter.");
             return;
         }
-        ui.label(RichText::new("Tweak changes").font(FontId::new(T_HEADING, semibold())).color(t.text));
-        if self.history_error.is_none() && tweak_matches.is_empty() {
-            ui.label(RichText::new("No matching tweak changes.").size(T_SMALL).color(t.subtle));
-        }
-        for (index, entry) in tweak_matches.iter().enumerate() {
-            let verified = entry.changes.iter().filter(|change| change.verified).count();
-            let undoable = entry.changes.iter().filter(|change| change.undo_available).count();
-            let action = match entry.action {
-                HistoryAction::Apply => "Applied",
-                HistoryAction::Undo => "Undid",
-            };
-            egui::CollapsingHeader::new(format!(
-                "{action} {} tweaks · {verified}/{} verified · {undoable} undoable",
-                entry.changes.len(),
-                entry.changes.len()
-            ))
-                .id_salt(("activity-record", index, &entry.time))
-                .show(ui, |ui| {
-                    ui.label(RichText::new(&entry.time).size(T_CAPTION).color(t.subtle));
-                    for change in &entry.changes {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(RichText::new(&change.name).size(T_SMALL).color(t.text));
-                            kit::chip(ui, if change.verified { "Verified" } else { "Incomplete" }, if change.verified { Tone::Good } else { Tone::Warn });
-                            if change.undo_available {
-                                kit::chip(ui, "Undo available", Tone::Neutral);
+        for (index, item) in entries.iter().enumerate() {
+            match item {
+                ActivityEntry::Tweak(entry) => {
+                    let verified = entry.changes.iter().filter(|change| change.verified).count();
+                    let undoable = entry.changes.iter().filter(|change| change.undo_available).count();
+                    let action = match entry.action {
+                        HistoryAction::Apply => "Applied",
+                        HistoryAction::Undo => "Undid",
+                    };
+                    egui::CollapsingHeader::new(format!(
+                        "{action} {} tweaks · {verified}/{} verified · {undoable} undoable",
+                        entry.changes.len(),
+                        entry.changes.len()
+                    ))
+                    .id_salt(("activity-tweak", index, &entry.time))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(&entry.time).size(T_CAPTION).color(t.subtle));
+                        for change in &entry.changes {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(RichText::new(&change.name).size(T_SMALL).color(t.text));
+                                kit::chip(ui, if change.verified { "Verified" } else { "Incomplete" }, if change.verified { Tone::Good } else { Tone::Warn });
+                                if change.undo_available {
+                                    kit::chip(ui, "Undo available", Tone::Neutral);
+                                }
+                            });
+                            for detail in &change.details {
+                                ui.add(egui::Label::new(RichText::new(detail).size(T_CAPTION).color(t.muted)).wrap());
+                            }
+                        }
+                    });
+                }
+                ActivityEntry::Operation(entry) => {
+                    egui::CollapsingHeader::new(format!("{} · {} output line(s)", entry.title, entry.details.len()))
+                        .id_salt(("activity-operation", index, &entry.time))
+                        .show(ui, |ui| {
+                            ui.label(RichText::new(&entry.time).size(T_CAPTION).color(t.subtle));
+                            if entry.details.is_empty() {
+                                ui.label(RichText::new("No output was captured; completion is not verified by this record.")
+                                    .size(T_CAPTION).color(t.warn));
+                            } else {
+                                for detail in &entry.details {
+                                    let color = if detail.starts_with("WARN") || detail.contains("failed") {
+                                        t.warn
+                                    } else {
+                                        t.muted
+                                    };
+                                    ui.add(egui::Label::new(RichText::new(detail).monospace().size(T_CAPTION).color(color)).wrap());
+                                }
                             }
                         });
-                        for detail in &change.details {
-                            ui.add(egui::Label::new(RichText::new(detail).size(T_CAPTION).color(t.muted)).wrap());
-                        }
-                    }
-                });
-        }
-        ui.add_space(S3);
-        ui.label(RichText::new("System actions").font(FontId::new(T_HEADING, semibold())).color(t.text));
-        if self.operations_error.is_none() && operation_matches.is_empty() {
-            ui.label(RichText::new("No matching system actions.").size(T_SMALL).color(t.subtle));
-        }
-        for (index, entry) in operation_matches.iter().enumerate() {
-            egui::CollapsingHeader::new(format!("{} · {} output line(s)", entry.title, entry.details.len()))
-                .id_salt(("system-operation", index, &entry.time))
-                .show(ui, |ui| {
-                    ui.label(RichText::new(&entry.time).size(T_CAPTION).color(t.subtle));
-                    if entry.details.is_empty() {
-                        ui.label(RichText::new("No output was captured; completion is not verified by this record.")
-                            .size(T_CAPTION).color(t.warn));
-                    } else {
-                        for detail in &entry.details {
-                            let color = if detail.starts_with("WARN") || detail.contains("failed") {
-                                t.warn
-                            } else {
-                                t.muted
-                            };
-                            ui.add(egui::Label::new(RichText::new(detail).monospace().size(T_CAPTION).color(color)).wrap());
-                        }
-                    }
-                });
+                }
+            }
         }
     }
 
