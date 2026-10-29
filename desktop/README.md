@@ -19,7 +19,7 @@ The exe starts without administrator rights. The Store works as normal. The Opti
 
 ## Design
 
-A calm tool surface on a tonal ladder instead of lines, with indigo for selection and focus and lime for the one main action of each view. Three styles in Settings: Windows (the default: Windows 11 Fluent layering, 4 px controls, Segoe Fluent Icons, and your Windows light or dark mode and accent colour, followed live), Classic, and Material with the Material Design 3 palettes and pill-shaped controls, animated hover, selection and page transitions, and a reduce-motion switch that follows the Windows setting. Text contrast is checked by tests. The tokens, components and motion are written up in [DESIGN.md](DESIGN.md).
+A calm tool surface on a tonal ladder instead of lines, with indigo for selection and focus and lime for the one main action of each view. Three styles in Settings: Windows (the default: Windows 11 Fluent layering, 4 px controls, Segoe Fluent Icons, and your Windows light or dark mode and accent colour, followed live), Classic, and Material with the Material Design 3 palettes and pill-shaped controls, animated hover, selection and page transitions, and a reduce-motion switch that follows the Windows setting. The Commands button or `Ctrl+K` opens a searchable palette for existing pages, Store search, Downloads and Settings. Text contrast is checked by tests. The tokens, components and motion are written up in [DESIGN.md](DESIGN.md). Current feature differences are in [the edition comparison](../docs/edition-comparison.md).
 
 ## Updates
 

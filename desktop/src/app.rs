@@ -35,6 +35,34 @@ enum Section {
     Optimaxer,
 }
 
+#[derive(Clone, Copy)]
+enum PaletteCommand {
+    Page(&'static str),
+    Store,
+    SearchStore,
+    Downloads,
+    Settings,
+}
+
+const PALETTE_COMMANDS: [(&str, &str, PaletteCommand); 11] = [
+    ("Overview", "Optimaxer page", PaletteCommand::Page("Overview")),
+    ("Tweaks", "Optimaxer page", PaletteCommand::Page("Tweaks")),
+    ("Services", "Optimaxer page", PaletteCommand::Page("Services")),
+    ("Startup", "Optimaxer page", PaletteCommand::Page("Startup")),
+    ("Cleaner", "Optimaxer page", PaletteCommand::Page("Cleaner")),
+    ("Network", "Optimaxer page", PaletteCommand::Page("Network")),
+    ("Tools", "Optimaxer page", PaletteCommand::Page("Tools")),
+    ("Store", "Browse apps", PaletteCommand::Store),
+    ("Search apps", "Focus Store search", PaletteCommand::SearchStore),
+    ("Downloads", "Show download activity", PaletteCommand::Downloads),
+    ("Settings", "Open application settings", PaletteCommand::Settings),
+];
+
+fn matching_palette_commands(query: &str) -> Vec<&'static (&'static str, &'static str, PaletteCommand)> {
+    let query = query.trim().to_lowercase();
+    PALETTE_COMMANDS.iter().filter(|(name, hint, _)| query.is_empty() || name.to_lowercase().contains(&query) || hint.to_lowercase().contains(&query)).collect()
+}
+
 /// PC tools from the catalog that Optimaxer offers on its Tools page.
 fn suggest(apps: &[AppItem]) -> Vec<AppItem> {
     let mut v: Vec<AppItem> = apps.iter().filter(|a| a.platform == PC && matches!(a.category.as_str(), "Utility" | "Customization")).cloned().collect();
@@ -68,6 +96,9 @@ pub struct OrionApp {
     downloads: Vec<Arc<Download>>,
     show_downloads: bool,
     show_settings: bool,
+    show_palette: bool,
+    palette_query: String,
+    palette_selected: usize,
     /// Screenshots of the open app and the one shown full size, if any.
     lightbox: Option<(Vec<String>, usize)>,
     toast: Option<(String, Instant)>,
@@ -163,6 +194,9 @@ impl OrionApp {
             downloads: Vec::new(),
             show_downloads: false,
             show_settings: false,
+            show_palette: false,
+            palette_query: String::new(),
+            palette_selected: 0,
             lightbox: None,
             toast: None,
             search_id: egui::Id::unique("orion-search"),
@@ -562,7 +596,9 @@ impl eframe::App for OrionApp {
         }
         self.tick_toast(ctx);
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            if self.lightbox.is_some() {
+            if self.show_palette {
+                self.show_palette = false;
+            } else if self.lightbox.is_some() {
                 self.lightbox = None;
             } else if self.show_settings {
                 self.show_settings = false;
@@ -575,6 +611,9 @@ impl eframe::App for OrionApp {
             self.set_section(ctx, Section::Store);
             self.detail = None;
             ctx.memory_mut(|m| m.request_focus(self.search_id));
+        }
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::K)) {
+            self.open_command_palette();
         }
 
         if self.shots.is_none() {
@@ -608,12 +647,94 @@ impl eframe::App for OrionApp {
         if self.show_settings {
             self.settings_modal(ctx);
         }
+        if self.show_palette {
+            self.command_palette(ctx);
+        }
         self.lightbox_view(ctx);
         self.toast_view(ctx);
     }
 }
 
 impl OrionApp {
+    fn open_command_palette(&mut self) {
+        self.palette_query.clear();
+        self.palette_selected = 0;
+        self.show_palette = true;
+    }
+
+    fn command_palette(&mut self, ctx: &egui::Context) {
+        let t = tokens(ctx);
+        let matches = matching_palette_commands(&self.palette_query);
+        if matches.is_empty() {
+            self.palette_selected = 0;
+        } else {
+            self.palette_selected = self.palette_selected.min(matches.len() - 1);
+        }
+        let mut chosen = None;
+        let mut close = false;
+        let modal = egui::Modal::new(egui::Id::NULL.with("command-palette")).backdrop_color(Color32::from_black_alpha(if t.dark { 155 } else { 80 })).show(ctx, |ui| {
+            ui.set_width(ui.available_width().clamp(240.0, 520.0));
+            ui.heading("Command palette");
+            ui.add_space(S2);
+            let search_id = egui::Id::NULL.with("command-palette-search");
+            let search = ui.add(egui::TextEdit::singleline(&mut self.palette_query).id(search_id).hint_text("Find a page or command…").desired_width(f32::INFINITY));
+            if !search.has_focus() {
+                ctx.memory_mut(|m| m.request_focus(search_id));
+            }
+            if search.changed() {
+                self.palette_selected = 0;
+            }
+            ui.add_space(S2);
+            egui::ScrollArea::vertical().max_height(460.0).show(ui, |ui| {
+                for (index, (name, hint, command)) in matches.iter().enumerate() {
+                    let response = ui.selectable_label(index == self.palette_selected, format!("{name}    ·    {hint}"));
+                    if response.clicked() {
+                        chosen = Some(*command);
+                    }
+                }
+            });
+            ui.add_space(S2);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("↑ ↓ select   Enter open   Esc close").size(T_CAPTION).color(t.muted));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if kit::ghost(ui, "Close", true).clicked() { close = true; }
+                });
+            });
+        });
+        if ctx.input(|i| i.key_pressed(egui::Key::ArrowDown)) && !matches.is_empty() {
+            self.palette_selected = (self.palette_selected + 1) % matches.len();
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::ArrowUp)) && !matches.is_empty() {
+            self.palette_selected = self.palette_selected.checked_sub(1).unwrap_or(matches.len() - 1);
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+            chosen = matches.get(self.palette_selected).map(|(_, _, command)| *command);
+        }
+        if let Some(command) = chosen {
+            self.run_palette_command(ctx, command);
+        } else if close || modal.should_close() {
+            self.show_palette = false;
+        }
+    }
+
+    fn run_palette_command(&mut self, ctx: &egui::Context, command: PaletteCommand) {
+        self.show_palette = false;
+        match command {
+            PaletteCommand::Page(name) => {
+                self.set_section(ctx, Section::Optimaxer);
+                self.opti.show_page(ctx, name);
+            }
+            PaletteCommand::Store => self.set_section(ctx, Section::Store),
+            PaletteCommand::SearchStore => {
+                self.set_section(ctx, Section::Store);
+                self.detail = None;
+                ctx.memory_mut(|m| m.request_focus(self.search_id));
+            }
+            PaletteCommand::Downloads => self.show_downloads = true,
+            PaletteCommand::Settings => self.show_settings = true,
+        }
+    }
+
     fn toast_view(&self, ctx: &egui::Context) {
         let Some((msg, born)) = &self.toast else { return };
         let (t, m) = (tokens(ctx), motion(ctx));
@@ -722,6 +843,10 @@ impl OrionApp {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                     }
                     ui.add_space(S3);
+                    let command_label = if compact { "Commands" } else { "Commands  Ctrl+K" };
+                    if kit::ghost(ui, command_label, true).clicked() {
+                        self.open_command_palette();
+                    }
                     if kit::ghost(ui, "Settings", true).clicked() {
                         self.show_settings = !self.show_settings;
                     }
@@ -1250,5 +1375,30 @@ fn resize_edges(ctx: &egui::Context) {
         if ctx.input(|i| i.pointer.primary_pressed()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(dir));
         }
+    }
+}
+
+#[cfg(test)]
+mod palette_tests {
+    use super::matching_palette_commands;
+
+    #[test]
+    fn palette_lists_all_commands_for_blank_query() {
+        assert_eq!(matching_palette_commands("  ").len(), 11);
+    }
+
+    #[test]
+    fn palette_search_is_case_insensitive_and_matches_hints() {
+        let page = matching_palette_commands("  tWeAkS  ");
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].0, "Tweaks");
+        let hint = matching_palette_commands("focus store search");
+        assert_eq!(hint.len(), 1);
+        assert_eq!(hint[0].0, "Search apps");
+    }
+
+    #[test]
+    fn palette_returns_no_commands_for_unknown_query() {
+        assert!(matching_palette_commands("not a command").is_empty());
     }
 }
