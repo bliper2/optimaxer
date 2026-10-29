@@ -157,6 +157,10 @@ impl OrionApp {
             if let Ok(collapsed) = std::env::var("ORION_SHOTS_SIDEBAR_COLLAPSED") {
                 settings.sidebar_collapsed = collapsed.eq_ignore_ascii_case("true");
             }
+            if let Ok(restart_required) = std::env::var("ORION_SHOTS_RESTART_REQUIRED") {
+                settings.opti_restart_required = restart_required.eq_ignore_ascii_case("true");
+                settings.opti_restart_uptime = crate::opti::sysmon::uptime_secs();
+            }
             if let Ok(t) = std::env::var("ORION_SHOTS_THEME") {
                 settings.theme = t;
             }
@@ -169,6 +173,9 @@ impl OrionApp {
                 Ok("windows") => settings.style = theme::Style::Windows,
                 _ => {}
             }
+        }
+        if settings.clear_restart_after_reboot(crate::opti::sysmon::uptime_secs()) {
+            settings.save();
         }
         theme::apply(&cc.egui_ctx, settings.effective_dark(), settings.reduce_motion, settings.style, settings.palette, settings.accent());
         let catalog = net::load_cache().unwrap_or_else(net::embedded);

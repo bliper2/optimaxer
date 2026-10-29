@@ -94,6 +94,11 @@ fn process_count() -> u32 {
     if unsafe { EnumProcesses(pids.as_mut_ptr(), (pids.len() * 4) as u32, &mut bytes) } == 0 { 0 } else { bytes / 4 }
 }
 
+pub fn uptime_secs() -> u64 {
+    // SAFETY: GetTickCount64 has no pointer parameters.
+    unsafe { GetTickCount64() / 1000 }
+}
+
 pub struct Sampler {
     last_times: Option<(u64, u64, u64)>,
     last_at: Option<Instant>,
@@ -121,7 +126,7 @@ impl Sampler {
         self.last_times = now;
         let (ram_used, ram_total) = read_memory();
         let (disk_used, disk_total) = read_disk();
-        self.latest = Snapshot { cpu, ram_used, ram_total, disk_used, disk_total, uptime: unsafe { GetTickCount64() } / 1000, processes: process_count() };
+        self.latest = Snapshot { cpu, ram_used, ram_total, disk_used, disk_total, uptime: uptime_secs(), processes: process_count() };
         push(&mut self.cpu_history, cpu);
         push(&mut self.ram_history, self.latest.ram_fraction() * 100.0);
         true

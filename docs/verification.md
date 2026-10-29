@@ -27,6 +27,8 @@ The v2.15.6 Windows release build was opened at 1180 × 760. Settings content sc
 
 A v2.15.7 build was rendered at 1180 × 760 with the Optimaxer rail collapsed. The overview screenshot was visually checked, and the Network page accessibility tree exposed full navigation names. Settings serialization tests cover the saved collapse choice and the default for older settings files; toggle persistence across an ordinary app restart still needs a manual check.
 
+The developer screenshot override sets the restart reminder without changing saved settings. This Windows run exited without producing screenshots, so banner placement remains visually unverified. Unit tests cover reminder serialization, older-settings defaults and clearing after uptime resets. A real Windows reboot round trip has not been run.
+
 The v2.15.7 fake-system tests verify apply/undo history values, status and undo eligibility. The history store tests its 100-entry bound and refusal to overwrite corrupt data. No live system tweaks were run for this check.
 
 ## Failure and restoration rules
