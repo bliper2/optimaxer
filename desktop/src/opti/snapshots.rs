@@ -24,6 +24,89 @@ pub struct SystemSnapshot {
     pub uptime_seconds: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SnapshotDifference {
+    pub label: &'static str,
+    pub earlier: String,
+    pub latest: String,
+}
+
+/// Compare the two most recent captures, omitting fields that did not change.
+pub fn compare_latest(snapshots: &[SystemSnapshot]) -> Vec<SnapshotDifference> {
+    if snapshots.len() < 2 {
+        return Vec::new();
+    }
+    let earlier = &snapshots[snapshots.len() - 2];
+    let latest = &snapshots[snapshots.len() - 1];
+    let mut differences = Vec::new();
+    macro_rules! compare {
+        ($label:literal, $before:expr, $after:expr) => {{
+            let before = $before;
+            let after = $after;
+            if before != after {
+                differences.push(SnapshotDifference {
+                    label: $label,
+                    earlier: before,
+                    latest: after,
+                });
+            }
+        }};
+    }
+    compare!(
+        "Windows",
+        display_text(&earlier.operating_system),
+        display_text(&latest.operating_system)
+    );
+    compare!(
+        "Processor",
+        display_text(&earlier.processor),
+        display_text(&latest.processor)
+    );
+    compare!(
+        "Graphics",
+        display_text(&earlier.graphics.join(", ")),
+        display_text(&latest.graphics.join(", "))
+    );
+    compare!(
+        "Logical threads",
+        earlier.logical_threads.to_string(),
+        latest.logical_threads.to_string()
+    );
+    compare!(
+        "Memory capacity",
+        capacity(earlier.memory_total),
+        capacity(latest.memory_total)
+    );
+    compare!("System volume", volume(earlier), volume(latest));
+    differences
+}
+
+fn display_text(value: &str) -> String {
+    if value.is_empty() {
+        "Unavailable".into()
+    } else {
+        value.into()
+    }
+}
+
+fn capacity(value: Option<u64>) -> String {
+    value.map_or_else(
+        || "Unavailable".into(),
+        |bytes| crate::model::format_size(Some(bytes)),
+    )
+}
+
+fn volume(snapshot: &SystemSnapshot) -> String {
+    let Some(total) = snapshot.drive_total else {
+        return "Unavailable".into();
+    };
+    format!(
+        "{} · {} total",
+        display_text(&snapshot.system_drive),
+        crate::model::format_size(Some(total))
+    )
+}
+
 fn path() -> PathBuf {
     super::state::state_dir().join("snapshots.json")
 }
@@ -196,6 +279,47 @@ mod tests {
         assert_eq!(decoded, snapshot(0));
         assert_eq!(decoded.memory_total, None);
         assert_eq!(decoded.drive_total, None);
+    }
+
+    #[test]
+    fn comparison_reports_inventory_and_capacity_changes_but_ignores_live_usage() {
+        let earlier = SystemSnapshot {
+            captured_at: "earlier".into(),
+            processor: "CPU A".into(),
+            logical_threads: 8,
+            uptime_seconds: 100,
+            memory_used: Some(100),
+            memory_total: Some(1000),
+            drive_used: Some(100),
+            drive_total: Some(1000),
+            ..SystemSnapshot::default()
+        };
+        let latest = SystemSnapshot {
+            captured_at: "latest".into(),
+            processor: "CPU B".into(),
+            logical_threads: 8,
+            uptime_seconds: 200,
+            memory_used: Some(500),
+            memory_total: Some(1000),
+            drive_used: Some(500),
+            drive_total: Some(1000),
+            ..SystemSnapshot::default()
+        };
+        let changes = compare_latest(&[earlier.clone(), latest.clone()]);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].label, "Processor");
+        assert_eq!(
+            (changes[0].earlier.as_str(), changes[0].latest.as_str()),
+            ("CPU A", "CPU B")
+        );
+        assert!(compare_latest(&[snapshot(0)]).is_empty());
+
+        let changed_capacity = SystemSnapshot {
+            drive_total: Some(2000),
+            ..latest
+        };
+        let changes = compare_latest(&[earlier, changed_capacity]);
+        assert!(changes.iter().any(|change| change.label == "System volume"));
     }
 
     #[test]
