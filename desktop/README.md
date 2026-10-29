@@ -31,7 +31,7 @@ Unchanged from the original client. It loads `config.json`, `apps.json` and `mir
 
 ## Optimaxer pages
 
-Overview. Live gauges for processor, memory and the system drive, a 60 second history of CPU and memory, the processor, graphics, Windows edition, uptime and process count, and quick actions (Smart optimize, Free RAM, Scan for junk).
+Overview. Live gauges for processor, memory and the system drive, a 60 second history of CPU and memory, the processor, graphics, Windows edition, uptime and process count, quick actions, and the eight latest confirmed tweak batches. Expand a batch to inspect apply preview values, verification and undo availability. Undo entries identify saved-original counts; exact restored values remain in the existing undo store.
 
 Tweaks. 206 of the 217 Optimaxer tweaks (performance, gaming, network, privacy, AI and Copilot removal, interface). Each tweak writes its original values to disk before its first change, so it can be undone on its own, in any order. If a restore step fails, the record is kept and the log names the step. Presets are Auto-detect, Recommended, Gaming, Privacy, Remove AI and debloat, and Maximum; opt-in tweaks are in none of them. Tweaks that write the same setting (search box style, drive letters, taskbar grouping, All apps view, where Explorer opens) allow one choice per group.
 
