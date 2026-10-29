@@ -16,11 +16,12 @@ pub struct Shots {
 }
 
 /// (file name, seconds to wait after navigating before the capture)
-pub const STEPS: [(&str, f64); 13] = [
+pub const STEPS: [(&str, f64); 14] = [
     ("store", 9.0),
     ("store-detail", 3.0),
     ("optimaxer-overview", 14.0),
     ("optimaxer-performance", 4.0),
+    ("optimaxer-diagnostics", 4.0),
     ("optimaxer-processes", 4.0),
     ("optimaxer-gaming", 4.0),
     ("optimaxer-activity", 3.0),
@@ -108,7 +109,8 @@ mod tests {
     }
 
     #[test]
-    fn screenshot_walk_covers_gaming_page() {
+    fn screenshot_walk_covers_gaming_and_diagnostics_pages() {
         assert!(STEPS.iter().any(|(name, _)| *name == "optimaxer-gaming"));
+        assert!(STEPS.iter().any(|(name, _)| *name == "optimaxer-diagnostics"));
     }
 }

@@ -8,6 +8,7 @@ use crate::net::{self, Settings};
 use crate::opti::backend::{RegData, System, WinSystem};
 use crate::opti::catalog::{Catalog, Tweak};
 use crate::opti::cleaner::{self, Target};
+use crate::opti::diagnostics::{self, Check as DiagnosticCheck, Result as DiagnosticResult};
 use crate::opti::engine::{Change, Engine};
 use crate::opti::hw::{self, Traits};
 use crate::opti::history::{
@@ -36,6 +37,7 @@ const LOG_LINES: usize = 600;
 pub enum Page {
     Overview,
     Performance,
+    Diagnostics,
     Processes,
     Gaming,
     Activity,
@@ -48,9 +50,10 @@ pub enum Page {
 }
 
 impl Page {
-    const ALL: [Page; 11] = [
+    const ALL: [Page; 12] = [
         Page::Overview,
         Page::Performance,
+        Page::Diagnostics,
         Page::Processes,
         Page::Gaming,
         Page::Activity,
@@ -66,6 +69,7 @@ impl Page {
         match self {
             Page::Overview => '\u{E80F}',
             Page::Performance => '\u{E9D2}',
+            Page::Diagnostics => '\u{E72E}',
             Page::Processes => '\u{E9D9}',
             Page::Gaming => '\u{E7FC}',
             Page::Activity => '\u{E81C}',
@@ -82,6 +86,7 @@ impl Page {
         match self {
             Page::Overview => "Overview",
             Page::Performance => "Performance",
+            Page::Diagnostics => "Diagnostics",
             Page::Processes => "Processes",
             Page::Gaming => "Gaming",
             Page::Activity => "Activity",
@@ -154,6 +159,7 @@ enum Msg {
     OperationHistory(Result<Vec<OperationEntry>, String>),
     GameProfiles(Result<Vec<GameProfile>, String>),
     GameStates(HashMap<String, Result<ProfileState, String>>),
+    Diagnostic(DiagnosticCheck, DiagnosticResult),
     Processes(Result<(Vec<ProcessInfo>, CpuTimes), String>),
     RestartRequired,
 }
@@ -230,6 +236,7 @@ pub struct OptiUi {
     game_states: HashMap<String, Result<ProfileState, String>>,
     game_states_loaded: bool,
     game_status_loading: bool,
+    diagnostic_results: HashMap<DiagnosticCheck, DiagnosticResult>,
     profile_name: String,
     compare_profile_left: String,
     compare_profile_right: String,
@@ -645,6 +652,7 @@ impl OptiUi {
             game_states: HashMap::new(),
             game_states_loaded: false,
             game_status_loading: false,
+            diagnostic_results: HashMap::new(),
             profile_name: "My profile".into(),
             compare_profile_left: String::new(),
             compare_profile_right: String::new(),
@@ -843,6 +851,9 @@ impl OptiUi {
                     self.game_states = states;
                     self.game_states_loaded = true;
                     self.game_status_loading = false;
+                }
+                Msg::Diagnostic(check, result) => {
+                    self.diagnostic_results.insert(check, result);
                 }
                 Msg::Processes(Ok((rows, cpu_times))) => {
                     self.processes = rows;
@@ -1586,6 +1597,7 @@ impl OptiUi {
                 egui::ScrollArea::vertical().id_salt(("optimaxer-page", self.page.label())).auto_shrink([false, false]).show(ui, |ui| match self.page {
                     Page::Overview => self.overview_page(ui, ctx),
                     Page::Performance => self.performance_page(ui, ctx),
+                    Page::Diagnostics => self.diagnostics_page(ui, ctx),
                     Page::Processes => self.processes_page(ui, ctx),
                     Page::Gaming => self.gaming_page(ui, ctx),
                     Page::Activity => self.activity_page(ui, ctx),
@@ -2096,6 +2108,68 @@ impl OptiUi {
                     });
                 });
             });
+    }
+
+    fn run_diagnostic(&mut self, ctx: &egui::Context, check: DiagnosticCheck) {
+        let title = format!("Scan: {}", check.title());
+        self.spawn_recorded(ctx, &title, move |worker| {
+            worker.log(&format!("Running {} with read-only options.", check.executable()));
+            let result = diagnostics::run(&WinSystem, check);
+            for line in result.output.lines() {
+                worker.log(line);
+            }
+            worker.log(&format!("Exit code: {}", result.exit_code));
+            worker.send(Msg::Diagnostic(check, result));
+        });
+    }
+
+    fn diagnostics_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let t = tokens(ctx);
+        kit::page_header(ui, "Diagnostics", "Read-only Windows integrity scans. Review the command output; Optimaxer does not infer a system health score.");
+        ui.label(RichText::new("Both checks require administrator access. They may keep CPU and storage busy for several minutes. They do not repair files or change registry settings.").size(T_SMALL).color(t.muted));
+        ui.add_space(S3);
+
+        for check in [DiagnosticCheck::SystemFiles, DiagnosticCheck::ComponentStore] {
+            let result = self.diagnostic_results.get(&check).cloned();
+            let running = self.busy.as_deref() == Some(match check {
+                DiagnosticCheck::SystemFiles => "Scan: Windows system files",
+                DiagnosticCheck::ComponentStore => "Scan: Windows component store",
+            });
+            kit::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(check.title()).font(FontId::new(T_BODY, semibold())).color(t.text));
+                        let description = match check {
+                            DiagnosticCheck::SystemFiles => "SFC /verifyonly checks protected Windows system files without repairing them.",
+                            DiagnosticCheck::ComponentStore => "DISM /ScanHealth checks the component store without running RestoreHealth.",
+                        };
+                        ui.label(RichText::new(description).size(T_SMALL).color(t.muted));
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if !self.elevated {
+                            kit::chip(ui, "Administrator required", Tone::Warn);
+                        }
+                        if kit::primary(ui, if running { "Scanning…" } else { "Run scan" }, self.elevated && self.busy.is_none()).clicked() {
+                            self.run_diagnostic(ctx, check);
+                        }
+                    });
+                });
+                if let Some(result) = result {
+                    ui.add_space(S2);
+                    let status = if result.exit_code == 0 {
+                        "Completed; review the command output"
+                    } else {
+                        "Command failed; review the error output"
+                    };
+                    ui.label(RichText::new(format!("{status} · exit code {}", result.exit_code)).size(T_SMALL).color(if result.exit_code == 0 { t.muted } else { t.bad }));
+                    egui::ScrollArea::vertical().max_height(240.0).auto_shrink([false, true]).show(ui, |ui| {
+                        ui.add(egui::Label::new(RichText::new(result.output).monospace().size(T_SMALL).color(t.text)).wrap());
+                    });
+                }
+            });
+            ui.add_space(S2);
+        }
     }
 
     fn refresh_game_states(&mut self, ctx: &egui::Context) {
