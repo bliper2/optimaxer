@@ -76,11 +76,14 @@ pub fn data_dir() -> PathBuf {
 }
 
 /// Write via temp file + rename so a crash never leaves a half-written file behind.
-fn write_atomic(path: &Path, bytes: &[u8]) {
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let tmp = path.with_extension("tmp");
-    if fs::write(&tmp, bytes).is_ok() {
-        let _ = fs::rename(&tmp, path);
+    fs::write(&tmp, bytes).map_err(|e| format!("Could not stage {}: {e}", path.display()))?;
+    if let Err(error) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("Could not replace {}: {error}", path.display()));
     }
+    Ok(())
 }
 
 pub fn load_cache() -> Option<Catalog> {
@@ -89,7 +92,7 @@ pub fn load_cache() -> Option<Catalog> {
 
 pub fn save_cache(c: &Catalog) {
     if let Ok(b) = serde_json::to_vec(c) {
-        write_atomic(&data_dir().join("catalog.json"), &b);
+        let _ = write_atomic(&data_dir().join("catalog.json"), &b);
     }
 }
 
@@ -110,6 +113,10 @@ pub struct Settings {
     pub sidebar_collapsed: bool,
     /// Optimaxer: offer a System Restore point before applying tweaks.
     pub opti_restore_point: bool,
+    /// A confirmed tweak changed system state that needs a Windows restart.
+    pub opti_restart_required: bool,
+    /// System uptime when the restart reminder was recorded. A lower uptime means Windows rebooted.
+    pub opti_restart_uptime: u64,
     /// No transitions or pulses. Defaults to the Windows "animation effects" setting.
     pub reduce_motion: bool,
     /// Windows (Fluent), Classic or Material.
@@ -126,11 +133,22 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let dir = dirs::download_dir().unwrap_or_else(|| PathBuf::from(".")).join("Orion");
-        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), sidebar_collapsed: false, opti_restore_point: true, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, palette: crate::theme::Palette::System, custom_accent: crate::theme::hex_color(crate::theme::BRAND), auto_update: true }
+        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), sidebar_collapsed: false, opti_restore_point: true, opti_restart_required: false, opti_restart_uptime: 0, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, palette: crate::theme::Palette::System, custom_accent: crate::theme::hex_color(crate::theme::BRAND), auto_update: true }
     }
 }
 
 impl Settings {
+    /// Clear a pending restart reminder after the system uptime resets.
+    pub fn clear_restart_after_reboot(&mut self, uptime: u64) -> bool {
+        if self.opti_restart_required && uptime < self.opti_restart_uptime {
+            self.opti_restart_required = false;
+            self.opti_restart_uptime = 0;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Whether the app draws dark: the saved choice, or Windows' own setting when it follows the system.
     pub fn effective_dark(&self) -> bool {
         if let Some(dark) = self.palette.forced_dark() {
@@ -155,12 +173,15 @@ impl Settings {
         fs::read(data_dir().join("settings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
     }
     pub fn save(&self) {
+        let _ = self.save_checked();
+    }
+
+    pub fn save_checked(&self) -> Result<(), String> {
         if READ_ONLY.load(Ordering::Relaxed) {
-            return;
+            return Ok(());
         }
-        if let Ok(b) = serde_json::to_vec_pretty(self) {
-            write_atomic(&data_dir().join("settings.json"), &b);
-        }
+        let bytes = serde_json::to_vec_pretty(self).map_err(|e| format!("Could not encode settings: {e}"))?;
+        write_atomic(&data_dir().join("settings.json"), &bytes)
     }
 }
 
@@ -393,7 +414,38 @@ mod tests {
         assert_eq!(settings.palette, crate::theme::Palette::System);
         assert_eq!(settings.custom_accent, "#7478F8");
         assert!(!settings.sidebar_collapsed);
+        assert!(!settings.opti_restart_required);
+        assert_eq!(settings.opti_restart_uptime, 0);
         assert!(settings.effective_dark());
+    }
+
+    #[test]
+    fn restart_reminder_persists_until_uptime_resets() {
+        let mut settings = Settings {
+            opti_restart_required: true,
+            opti_restart_uptime: 900,
+            ..Settings::default()
+        };
+        let saved = serde_json::to_string(&settings).unwrap();
+        settings = serde_json::from_str(&saved).unwrap();
+        assert!(!settings.clear_restart_after_reboot(1_200));
+        assert!(settings.opti_restart_required);
+        assert!(settings.clear_restart_after_reboot(12));
+        assert!(!settings.opti_restart_required);
+        assert_eq!(settings.opti_restart_uptime, 0);
+    }
+
+    #[test]
+    fn atomic_settings_write_reports_replace_failure_and_removes_temp_file() {
+        let root = std::env::temp_dir().join(format!("orion-settings-write-{}", std::process::id()));
+        let target = root.join("settings.json");
+        fs::create_dir_all(&target).unwrap();
+
+        let error = write_atomic(&target, b"settings").unwrap_err();
+
+        assert!(error.starts_with("Could not replace "), "{error}");
+        assert!(!root.join("settings.tmp").exists());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -117,6 +117,7 @@ enum Msg {
     Adapters(Vec<String>),
     Bench(Vec<(String, Option<f64>)>),
     History(Result<Vec<HistoryEntry>, String>),
+    RestartRequired,
 }
 
 #[derive(Clone)]
@@ -158,6 +159,7 @@ pub struct OptiUi {
     log_expanded: bool,
     history: Vec<HistoryEntry>,
     history_error: Option<String>,
+    restart_pending: bool,
     pending: Option<Pending>,
     restore_first: bool,
     elevated: bool,
@@ -405,6 +407,7 @@ impl OptiUi {
             log_expanded: false,
             history,
             history_error,
+            restart_pending: false,
             pending: None,
             restore_first: true,
             elevated: hw::is_elevated(),
@@ -533,6 +536,7 @@ impl OptiUi {
                     self.history_error = None;
                 }
                 Msg::History(Err(error)) => self.history_error = Some(error),
+                Msg::RestartRequired => self.restart_pending = true,
             }
         }
     }
@@ -787,6 +791,7 @@ impl OptiUi {
             w.log(&format!("Finished: {ok} of {} tweak(s) verified.", ids.len()));
             if restart {
                 w.log("Restart Windows for all changes to take full effect.");
+                w.send(Msg::RestartRequired);
             }
             w.send(Msg::Status(now));
         });
@@ -928,6 +933,16 @@ impl OptiUi {
             settings.opti_restore_point = self.restore_first;
             settings.save();
         }
+        if self.restart_pending && !settings.opti_restart_required {
+            settings.opti_restart_required = true;
+            settings.opti_restart_uptime = crate::opti::sysmon::uptime_secs();
+            if let Err(error) = settings.save_checked() {
+                let message = format!("Restart reminder could not be saved: {error}");
+                self.say(&message);
+                self.events.push(OptiEvent::Toast(message));
+            }
+        }
+        self.restart_pending = self.restart_pending || settings.opti_restart_required;
     }
 
     pub fn central(&mut self, ui: &mut Ui, ctx: &egui::Context, suggestions: &[AppItem]) {
@@ -948,6 +963,15 @@ impl OptiUi {
                             }
                         }
                     });
+                });
+            });
+            ui.add_space(S3);
+        }
+        if self.restart_pending {
+            egui::Frame::new().fill(mix(t.canvas, t.warn, 0.11)).corner_radius(R_LG).inner_margin(Margin::symmetric(S4 as i8, S3 as i8)).show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    kit::chip(ui, "Restart required", Tone::Warn);
+                    ui.label(RichText::new("Restart Windows when convenient to finish applying system changes.").color(t.text));
                 });
             });
             ui.add_space(S3);

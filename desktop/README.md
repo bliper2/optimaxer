@@ -61,6 +61,8 @@ Undo records use the same JSON layout as Optimaxer's `state.json`. On first star
 
 Unreadable undo state blocks tweak changes until a valid backup is recovered. Failed undo operations retain their records for retry. Retrying a tweak preserves its first saved originals, and a failed command is reported even when other steps succeeded.
 
+When a tweak batch changes a setting that needs a Windows restart, Optimaxer saves one reminder in its settings and shows it across pages. The reminder clears after Windows uptime resets. If the settings write fails, the Activity log and a toast report the error.
+
 The verification scope and remaining integration checks are listed in [verification.md](../docs/verification.md).
 
 Nothing is downloaded or installed automatically, and Optimaxer never installs drivers. The vendor driver button only opens the maker's support page.
@@ -81,7 +83,7 @@ powershell -NoProfile -File tools\export-optimaxer.ps1
 
 ## Screenshots
 
-`ORION_SHOTS=<folder>` makes the app walk through its pages, save each one as a PNG of its own window, and exit. It uses egui's viewport screenshot, so only the app window is captured. Set `ORION_SHOTS_SIDEBAR_COLLAPSED=true` to capture the Optimaxer icon rail; screenshot mode never saves this override to settings.
+`ORION_SHOTS=<folder>` makes the app walk through its pages, save each one as a PNG of its own window, and exit. It uses egui's viewport screenshot, so only the app window is captured. Set `ORION_SHOTS_SIDEBAR_COLLAPSED=true` to capture the Optimaxer icon rail or `ORION_SHOTS_RESTART_REQUIRED=true` to capture the restart reminder; screenshot mode never saves these overrides to settings.
 
 ## License
 
