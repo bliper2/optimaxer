@@ -169,6 +169,18 @@ impl OrionApp {
             if let Ok(p) = std::env::var("ORION_SHOTS_PLATFORM") {
                 settings.platform = p;
             }
+            match std::env::var("ORION_SHOTS_DENSITY").as_deref() {
+                Ok("compact") => settings.density = theme::Density::Compact,
+                Ok("comfortable") => settings.density = theme::Density::Comfortable,
+                _ => {}
+            }
+            match std::env::var("ORION_SHOTS_SCALE").as_deref() {
+                Ok("90") => settings.ui_scale = theme::UiScale::Small,
+                Ok("100") => settings.ui_scale = theme::UiScale::Default,
+                Ok("110") => settings.ui_scale = theme::UiScale::Large,
+                Ok("125") => settings.ui_scale = theme::UiScale::Larger,
+                _ => {}
+            }
             match std::env::var("ORION_SHOTS_STYLE").as_deref() {
                 Ok("classic") => settings.style = theme::Style::Classic,
                 Ok("material") => settings.style = theme::Style::Material,
@@ -179,7 +191,7 @@ impl OrionApp {
         if settings.clear_restart_after_reboot(crate::opti::sysmon::uptime_secs()) {
             settings.save();
         }
-        theme::apply(&cc.egui_ctx, settings.effective_dark(), settings.reduce_motion, settings.style, settings.palette, settings.accent());
+        theme::apply(&cc.egui_ctx, settings.appearance());
         let catalog = net::load_cache().unwrap_or_else(net::embedded);
         let rx = spawn_refresh(&cc.egui_ctx);
         let (update_tx, update_rx) = channel();
@@ -232,7 +244,7 @@ impl OrionApp {
     }
 
     fn reapply_theme(&mut self, ctx: &egui::Context) {
-        theme::apply(ctx, self.settings.effective_dark(), self.settings.reduce_motion, self.settings.style, self.settings.palette, self.settings.accent());
+        theme::apply(ctx, self.settings.appearance());
         self.sys_look = (theme::system_dark(), theme::system_accent());
     }
 
@@ -855,16 +867,30 @@ impl OrionApp {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                     }
                     ui.add_space(S3);
-                    let command_label = if compact { "Commands" } else { "Commands  Ctrl+K" };
-                    if kit::ghost(ui, command_label, true).clicked() {
-                        self.open_command_palette();
-                    }
-                    if kit::ghost(ui, "Settings", true).clicked() {
-                        self.show_settings = !self.show_settings;
+                    if compact {
+                        if kit::toolbar_icon_button(ui, '\u{E721}', "K", "Commands (Ctrl+K)", false).clicked() {
+                            self.open_command_palette();
+                        }
+                        if kit::toolbar_icon_button(ui, '\u{E713}', "S", "Settings", self.show_settings).clicked() {
+                            self.show_settings = !self.show_settings;
+                        }
+                    } else {
+                        if kit::ghost(ui, "Commands  Ctrl+K", true).clicked() {
+                            self.open_command_palette();
+                        }
+                        if kit::ghost(ui, "Settings", true).clicked() {
+                            self.show_settings = !self.show_settings;
+                        }
                     }
                     let n = self.downloads.iter().filter(|d| matches!(d.status(), DlStatus::Running)).count();
                     let label = if n > 0 { format!("Downloads ({n})") } else { "Downloads".into() };
-                    let dl = if self.show_downloads { kit::secondary(ui, &label, true) } else { kit::ghost(ui, &label, true) };
+                    let dl = if compact {
+                        kit::toolbar_icon_button(ui, '\u{E896}', "D", &label, self.show_downloads)
+                    } else if self.show_downloads {
+                        kit::secondary(ui, &label, true)
+                    } else {
+                        kit::ghost(ui, &label, true)
+                    };
                     if dl.clicked() {
                         self.show_downloads = !self.show_downloads;
                     }
@@ -1319,6 +1345,44 @@ impl OrionApp {
                             self.settings.save();
                         }
                     });
+                    let mut density_index = theme::Density::ALL
+                        .iter()
+                        .position(|choice| *choice == self.settings.density)
+                        .unwrap_or(0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Density").color(t.muted));
+                        if kit::segmented(ui, &mut density_index, &["Comfortable", "Compact"]) {
+                            let previous = self.settings.density;
+                            self.settings.density = theme::Density::ALL[density_index];
+                            self.reapply_theme(ctx);
+                            if let Err(error) = self.settings.save_checked() {
+                                self.settings.density = previous;
+                                self.reapply_theme(ctx);
+                                self.toast = Some((format!("Density was not saved: {error}"), Instant::now()));
+                            }
+                        }
+                    });
+                    let mut scale_index = theme::UiScale::ALL
+                        .iter()
+                        .position(|choice| *choice == self.settings.ui_scale)
+                        .unwrap_or(1);
+                    let scale_labels = theme::UiScale::ALL.map(theme::UiScale::label);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Scale").color(t.muted));
+                        if kit::segmented(ui, &mut scale_index, &scale_labels)
+                        {
+                            let previous = self.settings.ui_scale;
+                            self.settings.ui_scale = theme::UiScale::ALL[scale_index];
+                            self.reapply_theme(ctx);
+                            if let Err(error) = self.settings.save_checked() {
+                                self.settings.ui_scale = previous;
+                                self.reapply_theme(ctx);
+                                self.toast = Some((format!("Interface scale was not saved: {error}"), Instant::now()));
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("Changes text and interface size across Store and Optimaxer.");
                     let mut palette = self.settings.palette;
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Palette").color(t.muted));
@@ -1370,7 +1434,7 @@ impl OrionApp {
                     {
                         ui.add(egui::Label::new(RichText::new(message).size(T_CAPTION).color(t.muted)).wrap());
                     }
-                    ui.add(egui::Label::new(RichText::new("Appearance files include theme, control style, palette, accent and motion preference. They do not change other app settings or Windows settings.").size(T_CAPTION).color(t.subtle)).wrap());
+                    ui.add(egui::Label::new(RichText::new("Appearance files include theme, control style, palette, accent, density, scale and motion preference. They do not change other app settings or Windows settings.").size(T_CAPTION).color(t.subtle)).wrap());
                 });
                 ui.add_space(S2);
                 kit::card(ui, |ui| {

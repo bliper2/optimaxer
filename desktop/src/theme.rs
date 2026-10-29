@@ -17,6 +17,60 @@ pub enum Style {
     Material,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Density {
+    Compact,
+    #[default]
+    Comfortable,
+}
+
+impl Density {
+    pub const ALL: [Self; 2] = [Self::Comfortable, Self::Compact];
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UiScale {
+    Small,
+    #[default]
+    Default,
+    Large,
+    Larger,
+}
+
+impl UiScale {
+    pub const ALL: [Self; 4] = [Self::Small, Self::Default, Self::Large, Self::Larger];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Small => "90%",
+            Self::Default => "100%",
+            Self::Large => "110%",
+            Self::Larger => "125%",
+        }
+    }
+
+    pub fn factor(self) -> f32 {
+        match self {
+            Self::Small => 0.9,
+            Self::Default => 1.0,
+            Self::Large => 1.1,
+            Self::Larger => 1.25,
+        }
+    }
+}
+
+pub struct Appearance {
+    pub dark: bool,
+    pub reduce_motion: bool,
+    pub style: Style,
+    pub palette: Palette,
+    pub accent: Color32,
+    pub density: Density,
+    pub scale: UiScale,
+}
+
 impl Style {
     pub const ALL: [Style; 3] = [Style::Windows, Style::Classic, Style::Material];
 }
@@ -727,7 +781,8 @@ pub fn install_fonts(ctx: &egui::Context) {
 
 /// Builds the whole egui style from the tokens: tonal surfaces, quiet strokes, rounded controls, a visible
 /// focus ring, floating scroll bars and the type scale.
-pub fn apply(ctx: &egui::Context, dark: bool, reduce_motion: bool, style: Style, palette: Palette, accent: Color32) {
+pub fn apply(ctx: &egui::Context, appearance: Appearance) {
+    let Appearance { dark, reduce_motion, style, palette, accent, density, scale } = appearance;
     let t = Tokens::of(dark, style, accent).with_palette(palette, accent);
     ctx.data_mut(|d| {
         d.insert_temp(motion_id(), reduce_motion);
@@ -786,11 +841,22 @@ pub fn apply(ctx: &egui::Context, dark: bool, reduce_motion: bool, style: Style,
 
     ctx.set_visuals(v);
     ctx.global_style_mut(|s| {
-        s.spacing.item_spacing = vec2(S2, S2);
-        s.spacing.button_padding = vec2(S3, 7.0);
-        s.spacing.interact_size = vec2(36.0, 32.0);
-        s.spacing.window_margin = egui::Margin::same(S4 as i8);
-        s.spacing.menu_margin = egui::Margin::same(S2 as i8);
+        match density {
+            Density::Comfortable => {
+                s.spacing.item_spacing = vec2(S2, S2);
+                s.spacing.button_padding = vec2(S3, 7.0);
+                s.spacing.interact_size = vec2(36.0, 32.0);
+                s.spacing.window_margin = egui::Margin::same(S4 as i8);
+                s.spacing.menu_margin = egui::Margin::same(S2 as i8);
+            }
+            Density::Compact => {
+                s.spacing.item_spacing = vec2(S1, S1);
+                s.spacing.button_padding = vec2(S2, 5.0);
+                s.spacing.interact_size = vec2(32.0, 28.0);
+                s.spacing.window_margin = egui::Margin::same(S3 as i8);
+                s.spacing.menu_margin = egui::Margin::same(S1 as i8);
+            }
+        }
         s.spacing.scroll = egui::style::ScrollStyle::floating();
         s.animation_time = Motion { reduce: reduce_motion }.base();
         s.text_styles = [
@@ -802,6 +868,7 @@ pub fn apply(ctx: &egui::Context, dark: bool, reduce_motion: bool, style: Style,
         ]
         .into();
     });
+    ctx.set_zoom_factor(scale.factor());
 }
 
 #[cfg(test)]
@@ -827,6 +894,43 @@ mod tests {
             v.push(Tokens::fluent(false, a));
         }
         v
+    }
+
+    #[test]
+    fn density_and_scale_update_the_global_egui_style() {
+        let ctx = egui::Context::default();
+        apply(
+            &ctx,
+            Appearance {
+                dark: true,
+                reduce_motion: false,
+                style: Style::Windows,
+                palette: Palette::Midnight,
+                accent: BRAND,
+                density: Density::Comfortable,
+                scale: UiScale::Default,
+            },
+        );
+        let comfortable_spacing = ctx.global_style().spacing.item_spacing;
+        apply(
+            &ctx,
+            Appearance {
+                dark: true,
+                reduce_motion: false,
+                style: Style::Windows,
+                palette: Palette::Midnight,
+                accent: BRAND,
+                density: Density::Compact,
+                scale: UiScale::Larger,
+            },
+        );
+        let compact_spacing = ctx.global_style().spacing.item_spacing;
+        assert!(compact_spacing.x < comfortable_spacing.x);
+        assert!(compact_spacing.y < comfortable_spacing.y);
+        assert_eq!(UiScale::Small.factor(), 0.9);
+        assert_eq!(UiScale::Default.factor(), 1.0);
+        assert_eq!(UiScale::Large.factor(), 1.1);
+        assert_eq!(UiScale::Larger.factor(), 1.25);
     }
 
     fn surfaces(t: &Tokens) -> [(&'static str, Color32); 5] {
