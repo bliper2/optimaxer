@@ -2239,6 +2239,28 @@ impl OptiUi {
             return;
         }
 
+        if self.snapshots.len() >= 2 {
+            let changes = snapshots::compare_latest(&self.snapshots);
+            ui.label(RichText::new("Changes since previous capture").font(FontId::new(T_BODY, semibold())).color(t.text));
+            ui.add_space(S1);
+            kit::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                if changes.is_empty() {
+                    ui.label(RichText::new("No inventory changes detected between the two newest captures.").size(T_SMALL).color(t.muted));
+                } else {
+                    for change in changes {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(change.label).size(T_SMALL).color(t.muted));
+                            ui.add(egui::Label::new(RichText::new(change.earlier).size(T_SMALL).color(t.text)).wrap());
+                            ui.label(RichText::new("→").size(T_SMALL).color(t.subtle));
+                            ui.add(egui::Label::new(RichText::new(change.latest).size(T_SMALL).color(t.text)).wrap());
+                        });
+                    }
+                }
+            });
+            ui.add_space(S2);
+        }
+
         for (index, snapshot) in self.snapshots.iter().enumerate() {
             let os = if snapshot.operating_system.is_empty() { "Operating system unavailable" } else { &snapshot.operating_system };
             egui::CollapsingHeader::new(format!("{} · {os}", snapshot.captured_at))
