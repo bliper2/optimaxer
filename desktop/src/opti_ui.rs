@@ -15,7 +15,7 @@ use crate::opti::services::{self, Data, DnsProvider, SvcRow};
 use crate::opti::startup;
 use crate::opti::state::{backup_dir, State};
 use crate::opti::tools::{self, Tool};
-use crate::theme::{self, mix, semibold, tokens, Tone, R_LG, R_MD, S1, S2, S3, S4, S5, T_BODY, T_CAPTION, T_HEADING, T_SMALL};
+use crate::theme::{self, mix, semibold, tokens, Tone, R_LG, R_MD, S1, S2, S3, S4, S5, T_BODY, T_CAPTION, T_HEADING, T_SMALL, T_TITLE};
 use egui::{Align, Color32, CornerRadius, FontId, Layout, Margin, RichText, Sense, Stroke, StrokeKind, Ui, vec2};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -153,6 +153,7 @@ pub struct OptiUi {
     rx: Receiver<Msg>,
     busy: Option<String>,
     log: Vec<String>,
+    log_expanded: bool,
     pending: Option<Pending>,
     restore_first: bool,
     elevated: bool,
@@ -190,6 +191,33 @@ fn risk_tone(risk: &str) -> Tone {
         "Advanced" => Tone::Bad,
         _ => Tone::Good,
     }
+}
+
+fn profile_summary(tr: &Traits) -> String {
+    let form = if tr.has("laptop") {
+        "Laptop"
+    } else if tr.has("desktop") {
+        "Desktop"
+    } else {
+        "Form factor unknown"
+    };
+    let storage = if tr.has("nvme") {
+        "NVMe SSD"
+    } else if tr.has("ssd") {
+        "SSD"
+    } else if tr.has("hdd") {
+        "Hard disk"
+    } else {
+        "Storage unknown"
+    };
+    let windows = if tr.has("win11") {
+        "Windows 11"
+    } else if tr.has("win10") {
+        "Windows 10"
+    } else {
+        "Windows version unknown"
+    };
+    [form, storage, windows].join(" · ")
 }
 
 fn tweak_notes(t: &Tweak) -> String {
@@ -356,6 +384,7 @@ impl OptiUi {
             rx,
             busy: None,
             log: Vec::new(),
+            log_expanded: false,
             pending: None,
             restore_first: true,
             elevated: hw::is_elevated(),
@@ -385,9 +414,13 @@ impl OptiUi {
         }
     }
 
+    pub fn start_transition(&mut self, ctx: &egui::Context) {
+        self.page_started = ctx.input(|i| i.time);
+    }
+
     fn set_page(&mut self, ctx: &egui::Context, p: Page) {
         self.page = p;
-        self.page_started = ctx.input(|i| i.time);
+        self.start_transition(ctx);
     }
 
     pub fn take_events(&mut self) -> Vec<OptiEvent> {
@@ -739,7 +772,7 @@ impl OptiUi {
                     self.say(&format!("  not ticked: {name} ({why})"));
                 }
                 self.tw_skip = plan.skipped.clone();
-                self.say(&format!("Auto-detect: {} tweak(s) selected for this PC ({}).", plan.ids.len(), tr.tags.join(", ")));
+                self.say(&format!("Auto-detect: {} tweak(s) selected for this PC ({}).", plan.ids.len(), profile_summary(&tr)));
                 if plan.ids.is_empty() {
                     self.events.push(OptiEvent::Toast("This PC is already optimized: every fitting tweak is applied.".into()));
                 }
@@ -770,38 +803,75 @@ impl OptiUi {
                 ui.add(egui::Label::new(RichText::new(g).size(T_SMALL).color(t.muted)).wrap());
             }
             ui.add_space(S1);
-            ui.add(egui::Label::new(RichText::new(tr.tags.join(", ")).size(T_CAPTION).color(t.subtle)).wrap());
+            ui.add(egui::Label::new(RichText::new(profile_summary(tr)).size(T_CAPTION).color(t.subtle)).wrap());
         }
     }
 
     pub fn log_panel(&mut self, root: &mut Ui) {
         let t = tokens(root.ctx());
-        egui::Panel::bottom("opti-log").resizable(true).default_size(96.0).max_size((root.available_height() * 0.25).max(80.0)).show_separator_line(false).frame(egui::Frame::new().fill(t.surface1).inner_margin(Margin::symmetric(S5 as i8, S3 as i8))).show(root, |ui| {
+        let max_height = (root.available_height() * 0.42).clamp(180.0, 320.0);
+        let collapsed = egui::Panel::bottom("opti-log-collapsed")
+            .resizable(true)
+            .exact_size(44.0)
+            .show_separator_line(false)
+            .frame(egui::Frame::new().fill(t.surface1).inner_margin(Margin::symmetric(S4 as i8, S1 as i8)));
+        let expanded = egui::Panel::bottom("opti-log-expanded")
+            .resizable(true)
+            .default_size(216.0)
+            .min_size(120.0)
+            .max_size(max_height)
+            .show_separator_line(false)
+            .frame(egui::Frame::new().fill(t.surface1).inner_margin(Margin::symmetric(S4 as i8, S1 as i8)));
+
+        let mut expansion_change = None;
+        egui::Panel::show_switched(root, &mut self.log_expanded, collapsed, expanded, |ui, is_expanded| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Activity").font(FontId::new(T_HEADING, semibold())).color(t.text));
+                ui.label(RichText::new("Activity").font(FontId::new(T_BODY, semibold())).color(t.text));
+                if !self.log.is_empty() {
+                    kit::chip(ui, &format!("{} entries", self.log.len()), Tone::Neutral);
+                }
                 if self.busy.is_some() {
                     ui.add(egui::Spinner::new().size(12.0).color(t.brand_text));
                 }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let has = !self.log.is_empty();
-                    if kit::ghost(ui, "Copy", has).clicked() {
-                        ui.ctx().copy_text(self.log.join("\n"));
-                    }
-                    if kit::ghost(ui, "Clear", has).clicked() {
-                        self.log.clear();
-                    }
-                });
-            });
-            if self.log.is_empty() {
-                ui.label(RichText::new("Output from the actions you run appears here.").size(T_SMALL).color(t.subtle));
-            }
-            egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
-                for l in &self.log {
-                    let color = if l.contains("WARN") || l.contains("failed") { t.warn } else if l.starts_with("==") { t.brand_text } else { t.muted };
-                    ui.label(RichText::new(l).monospace().size(T_CAPTION).color(color));
+                if is_expanded {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if kit::ghost(ui, "Hide", true).clicked() {
+                            expansion_change = Some(false);
+                        }
+                        let has = !self.log.is_empty();
+                        if kit::ghost(ui, "Copy", has).clicked() {
+                            ui.ctx().copy_text(self.log.join("\n"));
+                        }
+                        if kit::ghost(ui, "Clear", has).clicked() {
+                            self.log.clear();
+                        }
+                    });
+                } else {
+                    let latest = self.log.last().map(String::as_str).unwrap_or("No recent activity");
+                    let color = if latest.contains("WARN") || latest.contains("failed") { t.warn } else { t.subtle };
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if kit::ghost(ui, "Show", true).clicked() {
+                            expansion_change = Some(true);
+                        }
+                        ui.add(egui::Label::new(RichText::new(latest).size(T_CAPTION).color(color)).truncate());
+                    });
                 }
             });
+            if is_expanded {
+                if self.log.is_empty() {
+                    ui.label(RichText::new("Output from the actions you run appears here.").size(T_SMALL).color(t.subtle));
+                }
+                egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
+                    for l in &self.log {
+                        let color = if l.contains("WARN") || l.contains("failed") { t.warn } else if l.starts_with("==") { t.brand_text } else { t.muted };
+                        ui.label(RichText::new(l).monospace().size(T_CAPTION).color(color));
+                    }
+                });
+            }
         });
+        if let Some(expanded) = expansion_change {
+            self.log_expanded = expanded;
+        }
     }
 
     /// Runs every frame, whichever section is showing: collects worker results, draws the confirmation window and
@@ -934,9 +1004,28 @@ impl OptiUi {
         kit::page_header(ui, "Overview", "Live readings from this PC, and the quickest ways to tune it.");
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let gap = S3;
-            let w3 = ((ui.available_width() - 2.0 * gap) / 3.0 - 1.0).floor();
-            let gauge_size = (w3 - 2.0 * S4 - 4.0).clamp(130.0, 190.0);
             ui.spacing_mut().item_spacing = vec2(gap, gap);
+            ui.horizontal(|ui| {
+                let ready = self.busy.is_none() && self.traits.is_some();
+                if kit::primary(ui, "Smart optimize", ready).on_hover_text("Reads your hardware and selects only the tweaks that fit this PC").clicked() {
+                    self.select_preset("auto");
+                    if !self.selected.is_empty() {
+                        self.set_page(ctx, Page::Tweaks);
+                        self.preview_apply(ctx);
+                    }
+                }
+                if kit::secondary(ui, "Free RAM", self.busy.is_none()).clicked() && self.need_admin() {
+                    self.pending = Some(Pending { title: "Free RAM now".into(), intro: "Clears every RAM cache Windows allows: process and system working sets, the file cache, the modified and standby lists, identical pages and the registry cache. Windows refills the file cache as you open files again.".into(), lines: vec![], action: Action::RunTool(Tool::FreeRam), restore_option: false, ok_label: "Free RAM".into() });
+                }
+                if kit::secondary(ui, "Scan for junk", self.busy.is_none()).clicked() {
+                    self.set_page(ctx, Page::Cleaner);
+                    self.scan_cleaner(ctx);
+                }
+            });
+            ui.add_space(S1);
+            let width = ui.available_width();
+            let compact = width < 720.0;
+            let w3 = ((width - 2.0 * gap) / 3.0 - 1.0).floor();
             ui.horizontal_top(|ui| {
                 let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
                 let cards = [
@@ -945,14 +1034,27 @@ impl OptiUi {
                     ("Storage", s.disk_fraction(), format!("{:.0}%", s.disk_fraction() * 100.0), format!("{drive} {} of {}", format_size(Some(s.disk_used)), format_size(Some(s.disk_total))), kit::load_color(&t, s.disk_fraction() * 100.0)),
                 ];
                 for (name, frac, value, sub, color) in cards {
-                    ui.allocate_ui_with_layout(vec2(w3, gauge_size + 84.0), Layout::top_down(Align::Center), |ui| {
+                    let card_height = if compact { 126.0 } else { 132.0 };
+                    ui.allocate_ui_with_layout(vec2(w3, card_height), Layout::top_down(Align::Min), |ui| {
                         kit::card(ui, |ui| {
-                            ui.set_width(w3 - 2.0 * S4 - 2.0);
-                            ui.vertical_centered(|ui| {
-                                ui.label(RichText::new(name).font(FontId::new(T_BODY, semibold())).color(t.text));
-                                kit::gauge(ui, gauge_size, frac, color, &value, "in use");
-                                ui.add(egui::Label::new(RichText::new(sub).size(T_SMALL).color(t.muted)).truncate());
-                            });
+                            let inner_width = (w3 - 2.0 * S4 - 2.0).max(40.0);
+                            ui.set_width(inner_width);
+                            if compact {
+                                ui.label(RichText::new(name).font(FontId::new(T_SMALL, semibold())).color(t.text));
+                                ui.label(RichText::new(&value).font(FontId::new(T_TITLE, semibold())).color(t.text));
+                                ui.add(egui::ProgressBar::new(frac.clamp(0.0, 1.0)).fill(color).desired_height(6.0).corner_radius(3).desired_width(inner_width));
+                                ui.add(egui::Label::new(RichText::new(sub).size(T_CAPTION).color(t.muted)).truncate());
+                            } else {
+                                ui.horizontal(|ui| {
+                                    ui.allocate_ui_with_layout(vec2((inner_width - 104.0).max(80.0), 104.0), Layout::top_down(Align::Min), |ui| {
+                                        ui.add_space(S2);
+                                        ui.label(RichText::new(name).font(FontId::new(T_BODY, semibold())).color(t.text));
+                                        ui.add_space(S2);
+                                        ui.add(egui::Label::new(RichText::new(sub).size(T_SMALL).color(t.muted)).truncate());
+                                    });
+                                    kit::gauge(ui, 92.0, frac, color, &value, "in use");
+                                });
+                            }
                         });
                     });
                 }
@@ -986,28 +1088,11 @@ impl OptiUi {
                     row("Uptime", format_uptime(s.uptime));
                     row("Processes", s.processes.to_string());
                     if let Some(tr) = &self.traits {
-                        row("Detected", tr.tags.join(", "));
+                        row("Profile", profile_summary(tr));
                     }
                 });
             });
-            ui.horizontal(|ui| {
-                let ready = self.busy.is_none() && self.traits.is_some();
-                if kit::primary(ui, "Smart optimize", ready).on_hover_text("Reads your hardware and selects only the tweaks that fit this PC").clicked() {
-                    self.select_preset("auto");
-                    if !self.selected.is_empty() {
-                        self.set_page(ctx, Page::Tweaks);
-                        self.preview_apply(ctx);
-                    }
-                }
-                if kit::secondary(ui, "Free RAM", self.busy.is_none()).clicked() && self.need_admin() {
-                    self.pending = Some(Pending { title: "Free RAM now".into(), intro: "Clears every RAM cache Windows allows: process and system working sets, the file cache, the modified and standby lists, identical pages and the registry cache. Windows refills the file cache as you open files again.".into(), lines: vec![], action: Action::RunTool(Tool::FreeRam), restore_option: false, ok_label: "Free RAM".into() });
-                }
-                if kit::secondary(ui, "Scan for junk", self.busy.is_none()).clicked() {
-                    self.set_page(ctx, Page::Cleaner);
-                    self.scan_cleaner(ctx);
-                }
-            });
-            ui.add_space(S5);
+            ui.add_space(S3);
         });
     }
 
@@ -1701,5 +1786,17 @@ mod tests {
         assert_ne!(risk_tone("Safe"), risk_tone("Advanced"));
         assert_eq!(risk_tone(""), risk_tone("Safe"));
         assert_eq!(risk_tone("Moderate"), Tone::Warn);
+    }
+
+    #[test]
+    fn profile_summary_uses_readable_hardware_names() {
+        let summary = profile_summary(&tr(false));
+        assert_eq!(summary, "Desktop · NVMe SSD · Windows 11");
+        assert!(!summary.contains("ram32") && !summary.contains("dgpu"));
+    }
+
+    #[test]
+    fn profile_summary_reports_unknown_facts_explicitly() {
+        assert_eq!(profile_summary(&Traits::default()), "Form factor unknown · Storage unknown · Windows version unknown");
     }
 }

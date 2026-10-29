@@ -454,6 +454,9 @@ impl OrionApp {
     fn set_section(&mut self, ctx: &egui::Context, s: Section) {
         if self.section != s {
             self.bump(ctx);
+            if s == Section::Optimaxer {
+                self.opti.start_transition(ctx);
+            }
         }
         self.section = s;
         self.settings.section = if s == Section::Optimaxer { "Optimaxer" } else { "Store" }.into();
@@ -590,16 +593,17 @@ impl eframe::App for OrionApp {
         let t = tokens(ctx);
         // Windows 11 layering: the content area is one step lighter than the rail around it
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.canvas).inner_margin(Margin { left: S5 as i8, right: S5 as i8, top: S3 as i8, bottom: 0 })).show(root, |ui| {
-            let started = self.view_started;
-            kit::enter(ui, started, |ui| {
-                if self.section == Section::Optimaxer {
-                    self.opti.central(ui, ctx, &self.suggestions);
-                } else if self.detail.is_some() {
-                    self.detail_view(ctx, ui);
-                } else {
-                    self.store_view(ctx, ui);
-                }
-            });
+            if self.section == Section::Optimaxer {
+                self.opti.central(ui, ctx, &self.suggestions);
+            } else {
+                kit::enter(ui, self.view_started, |ui| {
+                    if self.detail.is_some() {
+                        self.detail_view(ctx, ui);
+                    } else {
+                        self.store_view(ctx, ui);
+                    }
+                });
+            }
         });
         if self.show_settings {
             self.settings_modal(ctx);
