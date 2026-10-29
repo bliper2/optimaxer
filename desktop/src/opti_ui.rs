@@ -342,15 +342,15 @@ fn run_batch(eng: &Engine, cat: &Catalog, ids: &[String], apply: bool, restore_p
     }
     for id in ids {
         let Some(t) = cat.find(id) else { continue };
-        let was_active = eng.test(t, st);
+        let planned_before = eng.plan(t);
         let details = if apply {
-            eng.plan(t).iter().map(Change::describe).collect()
+            planned_before.iter().map(Change::describe).collect()
         } else {
             st.records.get(id).map(|record| vec![format!("Saved originals: {} registry values, {} service settings, {} scheduled tasks", record.reg.len(), record.svc.len(), record.task.len())]).unwrap_or_default()
         };
         let (on, failed) = if apply { (eng.apply(t, st, log), Vec::new()) } else { eng.undo_checked(t, st, log) };
         let verified = on == apply && failed.is_empty();
-        let changed_state = was_active != eng.test(t, st);
+        let changed_state = planned_before != eng.plan(t);
         b.restart |= t.restart && changed_state;
         b.explorer |= t.explorer && verified && changed_state;
         if verified {
@@ -1847,28 +1847,34 @@ mod tests {
     }
 
     #[test]
-    fn failed_tweak_does_not_restart_explorer_or_claim_a_state_change() {
+    fn partial_tweak_change_requests_restart_without_restarting_explorer() {
         use crate::opti::catalog::{RegItem, RegVal};
-        let path = r"HKCU:\Software\OptimaxerRestartFailureTest";
+        let denied_path = r"HKCU:\Software\OptimaxerRestartFailureTestDenied";
+        let writable_path = r"HKCU:\Software\OptimaxerRestartFailureTestWritable";
         let tweak = Tweak {
             id: "restart-failure-test".into(),
             name: "Restart failure test".into(),
-            reg: vec![RegItem { p: path.into(), n: "Enabled".into(), v: RegVal::Num(1), t: "DWord".into() }],
+            reg: vec![
+                RegItem { p: denied_path.into(), n: "Enabled".into(), v: RegVal::Num(1), t: "DWord".into() },
+                RegItem { p: writable_path.into(), n: "Enabled".into(), v: RegVal::Num(1), t: "DWord".into() },
+            ],
             restart: true,
             explorer: true,
             ..Default::default()
         };
         let cat = Catalog { tweaks: vec![tweak], ..Default::default() };
         let sys = FakeSystem::default();
-        sys.put(path, "Enabled", RegData::Dword(0));
-        sys.deny_writes.borrow_mut().insert(path.to_lowercase());
+        sys.put(denied_path, "Enabled", RegData::Dword(0));
+        sys.put(writable_path, "Enabled", RegData::Dword(0));
+        sys.deny_writes.borrow_mut().insert(denied_path.to_lowercase());
         let dir = std::env::temp_dir().join(format!("opti-restart-failure-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut state = State::load_from(dir.join("state.json"), None);
         let engine = Engine::new(&sys, PathBuf::new());
 
         let failed = run_batch(&engine, &cat, &["restart-failure-test".into()], true, false, &mut state, &mut |_| {});
-        assert!(!failed.changes[0].verified && !failed.restart && !failed.explorer);
+        assert!(!failed.changes[0].verified && failed.restart && !failed.explorer);
+        assert_eq!(sys.reg_get(writable_path, "Enabled"), Some(RegData::Dword(1)));
         assert!(!sys.ran("taskkill.exe"));
         std::fs::remove_dir_all(dir).unwrap();
     }
