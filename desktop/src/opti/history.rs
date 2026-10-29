@@ -11,6 +11,7 @@ const MAX_OPERATIONS: usize = 100;
 const MAX_OPERATION_FILE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_OPERATION_DETAILS: usize = 16;
 const MAX_OPERATION_LINE_CHARS: usize = 1024;
+const OPERATION_DETAILS_OMITTED: &str = "Additional output omitted from saved activity record.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -96,6 +97,17 @@ pub fn append_operation(entry: OperationEntry) -> Result<Vec<OperationEntry>, St
     append_operation_to(&operation_path(), entry)
 }
 
+pub fn capture_operation_detail(details: &mut Vec<String>, line: &str) {
+    if details.len() >= MAX_OPERATION_DETAILS {
+        return;
+    }
+    if details.len() == MAX_OPERATION_DETAILS - 1 {
+        details.push(OPERATION_DETAILS_OMITTED.into());
+    } else {
+        details.push(bound_operation_line(line));
+    }
+}
+
 fn load_operations_from(path: &Path) -> Result<Vec<OperationEntry>, String> {
     if !path.exists() {
         return Ok(Vec::new());
@@ -129,18 +141,12 @@ fn append_operation_to(
         return Err("Operation history title cannot be empty".into());
     }
     entry.title = entry.title.chars().take(256).collect();
-    if entry.details.len() > MAX_OPERATION_DETAILS {
+    if entry.details.len() >= MAX_OPERATION_DETAILS {
         entry.details.truncate(MAX_OPERATION_DETAILS - 1);
-        entry.details.push("Additional output omitted from saved activity record.".into());
+        entry.details.push(OPERATION_DETAILS_OMITTED.into());
     }
     for line in &mut entry.details {
-        if line.chars().count() > MAX_OPERATION_LINE_CHARS {
-            *line = line
-                .chars()
-                .take(MAX_OPERATION_LINE_CHARS - 1)
-                .chain(std::iter::once('…'))
-                .collect();
-        }
+        *line = bound_operation_line(line);
     }
     let mut entries = load_operations_from(path)?;
     entries.push(entry);
@@ -171,6 +177,17 @@ fn append_operation_to(
         return Err(format!("Could not save operation history: {error}"));
     }
     Ok(entries)
+}
+
+fn bound_operation_line(line: &str) -> String {
+    if line.chars().count() <= MAX_OPERATION_LINE_CHARS {
+        line.to_owned()
+    } else {
+        line.chars()
+            .take(MAX_OPERATION_LINE_CHARS - 1)
+            .chain(std::iter::once('…'))
+            .collect()
+    }
 }
 
 #[cfg(windows)]
@@ -345,6 +362,17 @@ mod tests {
             MAX_OPERATION_LINE_CHARS
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn operation_capture_is_bounded_before_persistence() {
+        let mut details = Vec::new();
+        for _ in 0..(MAX_OPERATION_DETAILS * 4) {
+            capture_operation_detail(&mut details, &"x".repeat(MAX_OPERATION_LINE_CHARS + 10));
+        }
+        assert_eq!(details.len(), MAX_OPERATION_DETAILS);
+        assert_eq!(details.last().unwrap(), OPERATION_DETAILS_OMITTED);
+        assert_eq!(details[0].chars().count(), MAX_OPERATION_LINE_CHARS);
     }
 
     #[test]

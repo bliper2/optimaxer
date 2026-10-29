@@ -159,7 +159,7 @@ impl Worker {
     fn log(&self, s: &str) {
         if let Some(details) = &self.operation_details {
             match details.lock() {
-                Ok(mut details) => details.push(s.to_string()),
+                Ok(mut details) => history::capture_operation_detail(&mut details, s),
                 Err(_) => self.send(Msg::Log(
                     "WARN Operation output could not be captured because its log buffer was unavailable.".into(),
                 )),
