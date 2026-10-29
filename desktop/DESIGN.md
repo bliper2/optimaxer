@@ -6,7 +6,7 @@ How the desktop app looks and moves, and where each decision lives in the code. 
 
 A calm tool surface. Surfaces step in tone instead of being drawn with lines, one accent marks selection and focus, and one colour marks the main action of a view. Nothing glows, nothing has a shadow at rest, and motion only answers what you just did.
 
-The brand colours stay: indigo `#7478F8` for selection, focus and navigation, lime `#A3E635` for the one primary action per view (Download, Smart optimize, Apply, Clean).
+The System palette keeps Optimaxer's indigo `#7478F8` for selection, focus and navigation, with lime `#A3E635` for the one primary action per view. Named palettes use their own restrained accent for selection and primary actions.
 
 ## Colour
 
@@ -25,9 +25,11 @@ The brand colours stay: indigo `#7478F8` for selection, focus and navigation, li
 
 Every text colour is tested against every surface it can sit on (`cargo test`, module `theme`): body text at 7:1 or better, muted and subtle at 4.5:1, status tones at 4.5:1 on their tinted chips, the focus ring at 3:1.
 
+Settings offers 16 named palettes: Midnight, OLED, Graphite, Nebula, Nord, Arctic, Fluent dark/light, Material dark/light, Emerald, Crimson, Solarized, Porcelain, Cyberpunk and Custom accent. System remains the default and follows Windows when using the Windows style. Other palettes adapt to the selected light or dark mode, except the four explicitly labeled dark/light palettes, which lock their mode. Palette colors do not change control shape. Custom accent changes the accent only; editable surfaces, density, font and corner radius are not part of this editor. Contrast tests cover each palette with all three control styles.
+
 ## Windows style (default)
 
-Follows Windows 11: the Windows light or dark mode and your accent colour (read from personalization, re-read every couple of seconds, with a fallback to the stock blue when the registry holds none), the content area one tonal step above the rail around it, 4 px controls and 8 px cards, and Segoe Fluent Icons in the sidebar. The accent is adjusted until text in it reads at 4.5:1 on every surface, and button text switches between white and near-black (or the fill darkens) for the same reason. The contrast tests run against eight sample Windows accents in both themes.
+Follows Windows 11: the Windows light or dark mode and your accent colour (read from personalization, re-read every couple of seconds, with a fallback to the stock blue when the registry holds none) while System palette is selected; the content area one tonal step above the rail around it, 4 px controls and 8 px cards, and Segoe Fluent Icons in the sidebar. The accent is adjusted until text in it reads at 4.5:1 on every surface, and button text switches between white and near-black (or the fill darkens) for the same reason. The contrast tests run against eight sample Windows accents in both themes.
 
 ## Material option
 

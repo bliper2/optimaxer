@@ -21,6 +21,100 @@ impl Style {
     pub const ALL: [Style; 3] = [Style::Windows, Style::Classic, Style::Material];
 }
 
+/// Colour palette is independent of control shape, so users can combine it with any style.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Palette {
+    #[default]
+    System,
+    Midnight,
+    Oled,
+    Graphite,
+    Nebula,
+    Nord,
+    Arctic,
+    FluentDark,
+    FluentLight,
+    MaterialDark,
+    MaterialLight,
+    Emerald,
+    Crimson,
+    Solarized,
+    Porcelain,
+    Cyberpunk,
+    Custom,
+}
+
+impl Palette {
+    pub const ALL: [Palette; 17] = [
+        Palette::System, Palette::Midnight, Palette::Oled, Palette::Graphite, Palette::Nebula,
+        Palette::Nord, Palette::Arctic, Palette::FluentDark, Palette::FluentLight,
+        Palette::MaterialDark, Palette::MaterialLight, Palette::Emerald, Palette::Crimson,
+        Palette::Solarized, Palette::Porcelain, Palette::Cyberpunk, Palette::Custom,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Palette::System => "System",
+            Palette::Midnight => "Midnight",
+            Palette::Oled => "OLED",
+            Palette::Graphite => "Graphite",
+            Palette::Nebula => "Nebula",
+            Palette::Nord => "Nord",
+            Palette::Arctic => "Arctic",
+            Palette::FluentDark => "Fluent dark",
+            Palette::FluentLight => "Fluent light",
+            Palette::MaterialDark => "Material dark",
+            Palette::MaterialLight => "Material light",
+            Palette::Emerald => "Emerald",
+            Palette::Crimson => "Crimson",
+            Palette::Solarized => "Solarized",
+            Palette::Porcelain => "Porcelain",
+            Palette::Cyberpunk => "Cyberpunk",
+            Palette::Custom => "Custom accent",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        match key {
+            "system" => Some(Palette::System),
+            "midnight" => Some(Palette::Midnight),
+            "oled" => Some(Palette::Oled),
+            "graphite" => Some(Palette::Graphite),
+            "nebula" => Some(Palette::Nebula),
+            "nord" => Some(Palette::Nord),
+            "arctic" => Some(Palette::Arctic),
+            "fluent_dark" => Some(Palette::FluentDark),
+            "fluent_light" => Some(Palette::FluentLight),
+            "material_dark" => Some(Palette::MaterialDark),
+            "material_light" => Some(Palette::MaterialLight),
+            "emerald" => Some(Palette::Emerald),
+            "crimson" => Some(Palette::Crimson),
+            "solarized" => Some(Palette::Solarized),
+            "porcelain" => Some(Palette::Porcelain),
+            "cyberpunk" => Some(Palette::Cyberpunk),
+            "custom" => Some(Palette::Custom),
+            _ => None,
+        }
+    }
+
+    pub fn forced_dark(self) -> Option<bool> {
+        match self {
+            Palette::FluentDark | Palette::MaterialDark => Some(true),
+            Palette::FluentLight | Palette::MaterialLight => Some(false),
+            _ => None,
+        }
+    }
+}
+
+pub fn deserialize_palette<'de, D>(deserializer: D) -> Result<Palette, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let key = String::deserialize(deserializer)?;
+    Ok(Palette::from_key(&key).unwrap_or_default())
+}
+
 /// The accent Windows ships with, used when the registry has none.
 pub const DEFAULT_ACCENT: Color32 = Color32::from_rgb(0x00, 0x78, 0xD4);
 
@@ -195,6 +289,34 @@ impl Tokens {
         }
     }
 
+    pub fn with_palette(mut self, palette: Palette, accent: Color32) -> Tokens {
+        let colors = match palette {
+            Palette::System => return self,
+            Palette::Custom => return recolor(self, accent),
+            Palette::FluentDark => Tokens::fluent(true, accent),
+            Palette::FluentLight => Tokens::fluent(false, accent),
+            Palette::MaterialDark => Tokens::MATERIAL_DARK,
+            Palette::MaterialLight => Tokens::MATERIAL_LIGHT,
+            _ => {
+                let colors = palette_color_set(palette, self.dark);
+                self.canvas = colors.canvas;
+                self.rail = colors.rail;
+                self.surface1 = colors.surface1;
+                self.surface2 = colors.surface2;
+                self.surface3 = colors.surface3;
+                self.hairline = colors.hairline;
+                return recolor(self, colors.brand);
+            }
+        };
+        self.canvas = colors.canvas;
+        self.rail = colors.rail;
+        self.surface1 = colors.surface1;
+        self.surface2 = colors.surface2;
+        self.surface3 = colors.surface3;
+        self.hairline = colors.hairline;
+        recolor(self, colors.brand)
+    }
+
     /// How far the primary button moves on hover: a light state layer for Material and Windows, a stronger lift for lime.
     pub fn hover_lift(&self) -> f32 {
         if self.pill || self.fluent { 0.08 } else { 0.18 }
@@ -269,6 +391,147 @@ impl Tokens {
     }
 }
 
+fn recolor(mut t: Tokens, brand: Color32) -> Tokens {
+    let surfaces = [t.canvas, t.rail, t.surface1, t.surface2, t.surface3];
+    t.text = readable_color(t.text, &surfaces, t.dark, 7.0);
+    t.muted = readable_accent(t.muted, &surfaces, t.dark);
+    t.subtle = readable_accent(t.subtle, &[t.canvas, t.rail, t.surface1, t.surface2], t.dark);
+    t.brand = brand;
+    t.brand_text = readable_accent(brand, &[t.canvas, t.rail, t.surface1, t.surface2], t.dark);
+    (t.action, t.on_action) = action_colors(brand);
+    t
+}
+
+struct PaletteColors {
+    canvas: Color32,
+    rail: Color32,
+    surface1: Color32,
+    surface2: Color32,
+    surface3: Color32,
+    hairline: Color32,
+    brand: Color32,
+}
+
+const fn palette_colors(
+    canvas: Color32,
+    rail: Color32,
+    surface1: Color32,
+    surface2: Color32,
+    surface3: Color32,
+    hairline: Color32,
+    brand: Color32,
+) -> PaletteColors {
+    PaletteColors { canvas, rail, surface1, surface2, surface3, hairline, brand }
+}
+
+fn palette_color_set(palette: Palette, dark: bool) -> PaletteColors {
+    use Palette as P;
+    match (palette, dark) {
+        (P::Midnight, true) => palette_colors(
+            c(0x10, 0x17, 0x27), c(0x0B, 0x10, 0x1C), c(0x18, 0x22, 0x36), c(0x20, 0x2D, 0x44),
+            c(0x2B, 0x3A, 0x54), c(0x35, 0x46, 0x60), c(0xA5, 0xB4, 0xFC),
+        ),
+        (P::Midnight, false) => palette_colors(
+            c(0xF4, 0xF6, 0xFC), c(0xE9, 0xED, 0xF7), c(0xFF, 0xFF, 0xFF), c(0xF0, 0xF2, 0xFA),
+            c(0xE3, 0xE7, 0xF2), c(0xD1, 0xD8, 0xE8), c(0x4F, 0x46, 0xE5),
+        ),
+        (P::Oled, true) => palette_colors(
+            c(0, 0, 0), c(0, 0, 0), c(0x08, 0x08, 0x08), c(0x12, 0x12, 0x12), c(0x1E, 0x1E, 0x1E),
+            c(0x32, 0x32, 0x32), c(0xBB, 0xA5, 0xFF),
+        ),
+        (P::Oled, false) => palette_colors(
+            c(0xFA, 0xFA, 0xFA), c(0xF1, 0xF1, 0xF1), c(0xFF, 0xFF, 0xFF), c(0xF2, 0xF2, 0xF2),
+            c(0xE6, 0xE6, 0xE6), c(0xD3, 0xD3, 0xD3), c(0x5B, 0x45, 0xB5),
+        ),
+        (P::Graphite, true) => palette_colors(
+            c(0x18, 0x19, 0x1B), c(0x12, 0x13, 0x15), c(0x20, 0x21, 0x24), c(0x2A, 0x2C, 0x30),
+            c(0x36, 0x38, 0x3D), c(0x48, 0x4A, 0x50), c(0xA6, 0xC8, 0xFF),
+        ),
+        (P::Graphite, false) => palette_colors(
+            c(0xF2, 0xF3, 0xF4), c(0xE8, 0xE9, 0xEA), c(0xFF, 0xFF, 0xFF), c(0xF1, 0xF2, 0xF3),
+            c(0xE3, 0xE5, 0xE7), c(0xD1, 0xD4, 0xD8), c(0x35, 0x5D, 0x8A),
+        ),
+        (P::Nebula, true) => palette_colors(
+            c(0x17, 0x15, 0x24), c(0x10, 0x0F, 0x1A), c(0x20, 0x1D, 0x30), c(0x2C, 0x28, 0x3D),
+            c(0x3A, 0x34, 0x4F), c(0x4B, 0x43, 0x60), c(0xC4, 0xA7, 0xFF),
+        ),
+        (P::Nebula, false) => palette_colors(
+            c(0xF6, 0xF3, 0xFB), c(0xEC, 0xE8, 0xF4), c(0xFF, 0xFF, 0xFF), c(0xF3, 0xEF, 0xF8),
+            c(0xE8, 0xE2, 0xF1), c(0xD7, 0xCF, 0xE3), c(0x68, 0x4A, 0x9C),
+        ),
+        (P::Nord, true) => palette_colors(
+            c(0x2E, 0x34, 0x40), c(0x27, 0x2D, 0x38), c(0x35, 0x3C, 0x4A), c(0x3E, 0x46, 0x55),
+            c(0x42, 0x4B, 0x5B), c(0x5A, 0x66, 0x78), c(0x88, 0xC0, 0xD0),
+        ),
+        (P::Nord, false) => palette_colors(
+            c(0xEC, 0xEF, 0xF4), c(0xE5, 0xE9, 0xF0), c(0xFF, 0xFF, 0xFF), c(0xF3, 0xF5, 0xF8),
+            c(0xE5, 0xE9, 0xF0), c(0xD1, 0xD7, 0xE2), c(0x4C, 0x73, 0x8A),
+        ),
+        (P::Arctic, true) => palette_colors(
+            c(0x12, 0x1D, 0x28), c(0x0C, 0x15, 0x1E), c(0x1A, 0x28, 0x36), c(0x22, 0x34, 0x44),
+            c(0x30, 0x45, 0x57), c(0x40, 0x57, 0x69), c(0x8F, 0xC9, 0xE8),
+        ),
+        (P::Arctic, false) => palette_colors(
+            c(0xF1, 0xF7, 0xFA), c(0xE5, 0xEF, 0xF4), c(0xFF, 0xFF, 0xFF), c(0xEF, 0xF5, 0xF8),
+            c(0xDE, 0xEA, 0xF0), c(0xC8, 0xD8, 0xE2), c(0x2D, 0x68, 0x85),
+        ),
+        (P::Emerald, true) => palette_colors(
+            c(0x12, 0x1D, 0x18), c(0x0B, 0x15, 0x10), c(0x1A, 0x29, 0x21), c(0x23, 0x36, 0x2B),
+            c(0x31, 0x48, 0x39), c(0x42, 0x5D, 0x4A), c(0x77, 0xD6, 0xA3),
+        ),
+        (P::Emerald, false) => palette_colors(
+            c(0xF1, 0xF7, 0xF3), c(0xE5, 0xEF, 0xE8), c(0xFF, 0xFF, 0xFF), c(0xEF, 0xF5, 0xF1),
+            c(0xDE, 0xEB, 0xE2), c(0xC7, 0xD9, 0xCD), c(0x24, 0x6A, 0x45),
+        ),
+        (P::Crimson, true) => palette_colors(
+            c(0x20, 0x15, 0x18), c(0x17, 0x0D, 0x10), c(0x2B, 0x1C, 0x20), c(0x3A, 0x24, 0x29),
+            c(0x4A, 0x2D, 0x33), c(0x5E, 0x3A, 0x41), c(0xF0, 0x9A, 0xA4),
+        ),
+        (P::Crimson, false) => palette_colors(
+            c(0xFA, 0xF2, 0xF3), c(0xF1, 0xE6, 0xE8), c(0xFF, 0xFF, 0xFF), c(0xF7, 0xEC, 0xED),
+            c(0xEC, 0xDD, 0xDF), c(0xD9, 0xC7, 0xCA), c(0x9B, 0x32, 0x42),
+        ),
+        (P::Solarized, true) => palette_colors(
+            c(0x00, 0x2B, 0x36), c(0x00, 0x22, 0x2B), c(0x07, 0x36, 0x42), c(0x0B, 0x3F, 0x4B),
+            c(0x16, 0x50, 0x5B), c(0x2A, 0x5B, 0x64), c(0x26, 0x8B, 0xD2),
+        ),
+        (P::Solarized, false) => palette_colors(
+            c(0xFD, 0xF6, 0xE3), c(0xF5, 0xEF, 0xDC), c(0xFF, 0xFB, 0xEF), c(0xF5, 0xEF, 0xDC),
+            c(0xEE, 0xE8, 0xD5), c(0xD8, 0xD1, 0xBF), c(0x26, 0x8B, 0xD2),
+        ),
+        (P::Porcelain, true) => palette_colors(
+            c(0x20, 0x20, 0x20), c(0x17, 0x17, 0x17), c(0x2A, 0x2A, 0x2A), c(0x36, 0x36, 0x36),
+            c(0x44, 0x44, 0x44), c(0x57, 0x57, 0x57), c(0xD8, 0xC6, 0xA4),
+        ),
+        (P::Porcelain, false) => palette_colors(
+            c(0xF7, 0xF6, 0xF2), c(0xED, 0xEC, 0xE7), c(0xFF, 0xFF, 0xFC), c(0xF3, 0xF2, 0xED),
+            c(0xE8, 0xE7, 0xE0), c(0xD5, 0xD4, 0xCD), c(0x6D, 0x5D, 0x46),
+        ),
+        (P::Cyberpunk, true) => palette_colors(
+            c(0x1C, 0x16, 0x23), c(0x13, 0x0F, 0x19), c(0x25, 0x1C, 0x2D), c(0x32, 0x24, 0x3B),
+            c(0x42, 0x2D, 0x4B), c(0x56, 0x3D, 0x60), c(0xE0, 0x9A, 0xCE),
+        ),
+        (P::Cyberpunk, false) => palette_colors(
+            c(0xF8, 0xF2, 0xF8), c(0xEF, 0xE7, 0xF0), c(0xFF, 0xFC, 0xFF), c(0xF5, 0xEC, 0xF5),
+            c(0xEA, 0xDE, 0xEB), c(0xD9, 0xC9, 0xDC), c(0x8A, 0x3F, 0x79),
+        ),
+        _ => unreachable!("palette has no variable color set"),
+    }
+}
+
+pub fn parse_hex_color(value: &str) -> Option<Color32> {
+    let hex = value.trim().strip_prefix('#')?;
+    if hex.len() != 6 || !hex.is_ascii() { return None; }
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    Some(Color32::from_rgb(r, g, b))
+}
+
+pub fn hex_color(color: Color32) -> String {
+    format!("#{:02X}{:02X}{:02X}", color.r(), color.g(), color.b())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tone {
     Neutral,
@@ -301,8 +564,12 @@ pub fn contrast_ratio(a: Color32, b: Color32) -> f32 {
 
 /// Moves an accent colour toward white (dark theme) or black (light theme) until it reads as text on every surface in `bgs`.
 pub fn readable_accent(accent: Color32, bgs: &[Color32], dark: bool) -> Color32 {
+    readable_color(accent, bgs, dark, 4.5)
+}
+
+fn readable_color(accent: Color32, bgs: &[Color32], dark: bool, minimum: f32) -> Color32 {
     let toward = if dark { Color32::WHITE } else { Color32::BLACK };
-    (0..=20).map(|i| mix(accent, toward, i as f32 * 0.05)).find(|c| bgs.iter().all(|bg| contrast_ratio(*c, *bg) >= 4.5)).unwrap_or(toward)
+    (0..=20).map(|i| mix(accent, toward, i as f32 * 0.05)).find(|c| bgs.iter().all(|bg| contrast_ratio(*c, *bg) >= minimum)).unwrap_or(toward)
 }
 
 /// Fill and text colour for a button in the accent colour: white or near-black text, whichever reads at 4.5:1, and
@@ -327,11 +594,16 @@ fn accent_id() -> egui::Id {
     egui::Id::unique("orion-accent")
 }
 
+fn palette_id() -> egui::Id {
+    egui::Id::unique("orion-palette")
+}
+
 /// Tokens for the running theme.
 pub fn tokens(ctx: &egui::Context) -> Tokens {
     let style = ctx.data(|d| d.get_temp::<Style>(style_id())).unwrap_or_default();
     let accent = ctx.data(|d| d.get_temp::<Color32>(accent_id())).unwrap_or(DEFAULT_ACCENT);
-    Tokens::of(ctx.global_style().visuals.dark_mode, style, accent)
+    let palette = ctx.data(|d| d.get_temp::<Palette>(palette_id())).unwrap_or_default();
+    Tokens::of(ctx.global_style().visuals.dark_mode, style, accent).with_palette(palette, accent)
 }
 
 // region Windows settings
@@ -455,12 +727,13 @@ pub fn install_fonts(ctx: &egui::Context) {
 
 /// Builds the whole egui style from the tokens: tonal surfaces, quiet strokes, rounded controls, a visible
 /// focus ring, floating scroll bars and the type scale.
-pub fn apply(ctx: &egui::Context, dark: bool, reduce_motion: bool, style: Style, accent: Color32) {
-    let t = Tokens::of(dark, style, accent);
+pub fn apply(ctx: &egui::Context, dark: bool, reduce_motion: bool, style: Style, palette: Palette, accent: Color32) {
+    let t = Tokens::of(dark, style, accent).with_palette(palette, accent);
     ctx.data_mut(|d| {
         d.insert_temp(motion_id(), reduce_motion);
         d.insert_temp(style_id(), style);
         d.insert_temp(accent_id(), accent);
+        d.insert_temp(palette_id(), palette);
     });
     let mut v = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
     v.panel_fill = if t.fluent { t.rail } else { t.canvas };
@@ -629,6 +902,67 @@ mod tests {
         assert!(Tokens::MATERIAL_DARK.ctl_radius() > Tokens::DARK.ctl_radius());
         let f = Tokens::of(true, Style::Windows, DEFAULT_ACCENT);
         assert!(f.fluent && f.ctl_radius() == 4 && f.card_radius() == 8 && f.brand == DEFAULT_ACCENT);
+    }
+
+    #[test]
+    fn every_named_palette_keeps_text_and_focus_contrast() {
+        for palette in Palette::ALL {
+            for requested_dark in [true, false] {
+                let dark = palette.forced_dark().unwrap_or(requested_dark);
+                for style in Style::ALL {
+                    let shape = Tokens::of(dark, style, DEFAULT_ACCENT);
+                    let t = shape.with_palette(palette, DEFAULT_ACCENT);
+                    assert_eq!(t.fluent, shape.fluent, "{} changed Fluent shape", palette.label());
+                    assert_eq!(t.pill, shape.pill, "{} changed pill shape", palette.label());
+                    for (name, surface) in surfaces(&t) {
+                        assert!(contrast_ratio(t.text, surface) >= 7.0, "{} text on {name}: {:.2}", palette.label(), contrast_ratio(t.text, surface));
+                        assert!(contrast_ratio(t.muted, surface) >= AA, "{} muted on {name}: {:.2}", palette.label(), contrast_ratio(t.muted, surface));
+                    }
+                    for surface in [t.canvas, t.surface1, t.surface2] {
+                        assert!(contrast_ratio(t.brand_text, surface) >= AA, "{} brand text: {:.2}", palette.label(), contrast_ratio(t.brand_text, surface));
+                        assert!(contrast_ratio(t.ring(), surface) >= 3.0, "{} focus ring: {:.2}", palette.label(), contrast_ratio(t.ring(), surface));
+                    }
+                    assert!(contrast_ratio(t.on_action, t.action) >= AA, "{} action text: {:.2}", palette.label(), contrast_ratio(t.on_action, t.action));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn named_palettes_keep_tonal_surface_order() {
+        for palette in Palette::ALL {
+            for requested_dark in [true, false] {
+                let dark = palette.forced_dark().unwrap_or(requested_dark);
+                let t = Tokens::of(dark, Style::Classic, DEFAULT_ACCENT).with_palette(palette, DEFAULT_ACCENT);
+                let (rail, canvas, s1, s2, s3) = (luminance(t.rail), luminance(t.canvas), luminance(t.surface1), luminance(t.surface2), luminance(t.surface3));
+                if palette == Palette::MaterialLight {
+                    assert!(rail < s1 && s1 < canvas && s1 > s2 && s2 > s3, "{} tonal containers", palette.label());
+                } else if dark {
+                    assert!(rail <= canvas && canvas < s1 && s1 < s2 && s2 < s3, "{} dark surfaces", palette.label());
+                } else {
+                    assert!(rail < canvas && canvas < s1 && s1 > s2 && s2 > s3, "{} light surfaces", palette.label());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fixed_palette_variants_select_their_named_mode() {
+        assert_eq!(Palette::FluentDark.forced_dark(), Some(true));
+        assert_eq!(Palette::FluentLight.forced_dark(), Some(false));
+        assert_eq!(Palette::MaterialDark.forced_dark(), Some(true));
+        assert_eq!(Palette::MaterialLight.forced_dark(), Some(false));
+        assert_eq!(Palette::Nord.forced_dark(), None);
+    }
+
+    #[test]
+    fn custom_accent_hex_round_trips_and_rejects_invalid_input() {
+        let color = Color32::from_rgb(0x12, 0xAB, 0xEF);
+        assert_eq!(hex_color(color), "#12ABEF");
+        assert_eq!(parse_hex_color("#12abef"), Some(color));
+        assert_eq!(parse_hex_color("12abef"), None);
+        assert_eq!(parse_hex_color("#12ab"), None);
+        assert_eq!(parse_hex_color("#12aéef"), None);
     }
 
     #[test]
