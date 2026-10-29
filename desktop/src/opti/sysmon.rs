@@ -1,6 +1,6 @@
-//! Live readings for the Overview page: CPU load from GetSystemTimes, memory, system drive, uptime and process
-//! count, sampled once a second with a short history for the sparklines. Everything here is read-only and cheap
-//! enough to run on the UI thread.
+//! Live readings for Overview and Performance: CPU load, memory, system-drive capacity, uptime, process count,
+//! aggregate physical-disk throughput and adapter traffic. Samples are read-only, taken once a second and kept in
+//! bounded histories for the charts.
 
 use super::backend::{RegData, System};
 use super::hw;
@@ -13,6 +13,11 @@ use windows_sys::Win32::NetworkManagement::IpHelper::{
 use windows_sys::Win32::NetworkManagement::Ndis::NET_IF_OPER_STATUS_UP;
 use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 use windows_sys::Win32::System::ProcessStatus::EnumProcesses;
+use windows_sys::Win32::System::Performance::{
+    PDH_CSTATUS_NEW_DATA, PDH_CSTATUS_VALID_DATA, PDH_FMT_COUNTERVALUE, PDH_FMT_DOUBLE,
+    PDH_HCOUNTER, PDH_HQUERY, PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData,
+    PdhGetFormattedCounterValue, PdhOpenQueryW,
+};
 use windows_sys::Win32::System::SystemInformation::{GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX};
 use windows_sys::Win32::System::Threading::GetSystemTimes;
 
@@ -39,6 +44,8 @@ pub struct Snapshot {
     pub processes: u32,
     pub network: Option<NetworkSample>,
     pub network_available: bool,
+    pub disk_activity: Option<f32>,
+    pub disk_counter_available: bool,
 }
 
 impl Snapshot {
@@ -122,6 +129,66 @@ pub struct Sampler {
     pub ram_history: VecDeque<Option<f32>>,
     pub network_history: VecDeque<Option<NetworkSample>>,
     last_network_totals: Option<(u64, u64)>,
+    disk_counter: Option<DiskCounter>,
+    pub disk_history: VecDeque<Option<f32>>,
+}
+
+struct DiskCounter {
+    query: PDH_HQUERY,
+    counter: PDH_HCOUNTER,
+}
+
+impl DiskCounter {
+    fn new() -> Option<Self> {
+        let mut query = std::ptr::null_mut();
+        // SAFETY: query is a valid out-pointer; a null data source opens a live query.
+        if unsafe { PdhOpenQueryW(std::ptr::null(), 0, &mut query) } != 0 {
+            return None;
+        }
+        let path: Vec<u16> = r"\PhysicalDisk(_Total)\Disk Bytes/sec"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut counter = std::ptr::null_mut();
+        // SAFETY: query is open and path/counter are valid; the English API resolves the counter on localized Windows.
+        if unsafe { PdhAddEnglishCounterW(query, path.as_ptr(), 0, &mut counter) } != 0 {
+            // SAFETY: query was returned successfully by PdhOpenQueryW.
+            unsafe { PdhCloseQuery(query) };
+            return None;
+        }
+        let this = Self { query, counter };
+        this.collect();
+        Some(this)
+    }
+
+    fn collect(&self) -> bool {
+        // SAFETY: self.query is owned until Drop and contains the registered counter.
+        unsafe { PdhCollectQueryData(self.query) == 0 }
+    }
+
+    fn sample(&self) -> Option<f32> {
+        if !self.collect() {
+            return None;
+        }
+        let mut value = PDH_FMT_COUNTERVALUE::default();
+        // SAFETY: counter belongs to the live query and value is a valid output structure.
+        if unsafe { PdhGetFormattedCounterValue(self.counter, PDH_FMT_DOUBLE, std::ptr::null_mut(), &mut value) } != 0 {
+            return None;
+        }
+        if !matches!(value.CStatus, PDH_CSTATUS_VALID_DATA | PDH_CSTATUS_NEW_DATA) {
+            return None;
+        }
+        // SAFETY: PDH_FMT_DOUBLE requests that this union member be written.
+        let rate = unsafe { value.Anonymous.doubleValue };
+        (rate.is_finite() && rate >= 0.0).then_some(rate.min(f32::MAX as f64) as f32)
+    }
+}
+
+impl Drop for DiskCounter {
+    fn drop(&mut self) {
+        // SAFETY: this query was opened by new and is closed exactly once.
+        unsafe { PdhCloseQuery(self.query) };
+    }
 }
 
 impl Sampler {
@@ -134,6 +201,8 @@ impl Sampler {
             ram_history: VecDeque::new(),
             network_history: VecDeque::new(),
             last_network_totals: read_network_totals(),
+            disk_counter: DiskCounter::new(),
+            disk_history: VecDeque::new(),
         }
     }
 
@@ -163,10 +232,13 @@ impl Sampler {
         if let Some(totals) = network_totals {
             self.last_network_totals = Some(totals);
         }
+        let disk_activity = self.disk_counter.as_ref().and_then(DiskCounter::sample);
         self.latest = Snapshot {
             cpu, cpu_available, ram_used, ram_total, ram_available, disk_used, disk_total, disk_available,
             uptime: uptime_secs(), processes: process_count(),
             network, network_available: network_totals.is_some(),
+            disk_activity,
+            disk_counter_available: self.disk_counter.is_some(),
         };
         push(&mut self.cpu_history, cpu_available.then_some(cpu));
         push(
@@ -174,6 +246,7 @@ impl Sampler {
             ram_available.then_some(self.latest.ram_fraction() * 100.0),
         );
         push_network(&mut self.network_history, network);
+        push(&mut self.disk_history, disk_activity);
         true
     }
 
@@ -186,9 +259,14 @@ impl Sampler {
         self.latest.disk_available = false;
         self.latest.network = None;
         self.latest.network_available = false;
+        self.latest.disk_activity = None;
         self.cpu_history.clear();
         self.ram_history.clear();
         self.network_history.clear();
+        self.disk_history.clear();
+        if let Some(counter) = self.disk_counter.as_ref() {
+            counter.collect();
+        }
         self.last_network_totals = read_network_totals();
     }
 }
@@ -256,7 +334,7 @@ pub fn network_rate(
     })
 }
 
-pub fn format_network_rate(bytes_per_sec: f32) -> String {
+pub fn format_bytes_per_second(bytes_per_sec: f32) -> String {
     if !bytes_per_sec.is_finite() || bytes_per_sec <= 0.0 {
         return "0 B/s".into();
     }
@@ -348,11 +426,11 @@ mod tests {
     }
 
     #[test]
-    fn network_rate_format_uses_byte_units() {
-        assert_eq!(format_network_rate(0.0), "0 B/s");
-        assert_eq!(format_network_rate(512.0), "512 B/s");
-        assert_eq!(format_network_rate(1_536.0), "1.5 KiB/s");
-        assert_eq!(format_network_rate(f32::INFINITY), "0 B/s");
+    fn bytes_per_second_format_uses_byte_units() {
+        assert_eq!(format_bytes_per_second(0.0), "0 B/s");
+        assert_eq!(format_bytes_per_second(512.0), "512 B/s");
+        assert_eq!(format_bytes_per_second(1_536.0), "1.5 KiB/s");
+        assert_eq!(format_bytes_per_second(f32::INFINITY), "0 B/s");
     }
 
     #[test]
@@ -366,16 +444,29 @@ mod tests {
     }
 
     #[test]
+    fn disk_history_is_bounded_and_keeps_unavailable_samples() {
+        let mut history = VecDeque::new();
+        for _ in 0..=HISTORY {
+            push(&mut history, None);
+        }
+        assert_eq!(history.len(), HISTORY);
+        assert!(history.iter().all(Option::is_none));
+    }
+
+    #[test]
     fn reset_window_discards_samples_from_hidden_time() {
         let mut sampler = Sampler::new();
         push(&mut sampler.cpu_history, Some(42.0));
         push(&mut sampler.ram_history, Some(37.0));
         push_network(&mut sampler.network_history, None);
+        push(&mut sampler.disk_history, Some(12.0));
         sampler.reset_window();
         assert!(sampler.cpu_history.is_empty());
         assert!(sampler.ram_history.is_empty());
         assert!(sampler.network_history.is_empty());
+        assert!(sampler.disk_history.is_empty());
         assert!(sampler.latest.network.is_none());
+        assert!(sampler.latest.disk_activity.is_none());
         assert!(sampler.last_at.is_none());
     }
 
@@ -411,5 +502,6 @@ mod tests {
             assert!(network.received_bytes_per_sec.is_finite() && network.received_bytes_per_sec >= 0.0);
             assert!(network.sent_bytes_per_sec.is_finite() && network.sent_bytes_per_sec >= 0.0);
         }
+        assert!(n.disk_activity.is_none_or(|rate| rate.is_finite() && rate >= 0.0));
     }
 }

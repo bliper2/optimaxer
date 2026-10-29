@@ -502,6 +502,53 @@ pub fn network_chart(
         previous = current;
     }
 }
+
+/// Single-series bytes-per-second chart. The scale follows the visible 60-second sample window.
+pub fn rate_chart(
+    ui: &mut Ui,
+    size: egui::Vec2,
+    data: &std::collections::VecDeque<Option<f32>>,
+    color: Color32,
+) {
+    let t = tokens(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let painter = ui.painter();
+    painter.rect_filled(rect, CornerRadius::same(t.ctl_radius().min(8)), t.surface2);
+    for fraction in [0.25, 0.5, 0.75] {
+        let y = rect.bottom() - rect.height() * fraction;
+        painter.line_segment(
+            [egui::pos2(rect.left() + 6.0, y), egui::pos2(rect.right() - 6.0, y)],
+            Stroke::new(1.0, mix(t.surface2, t.hairline, 0.7)),
+        );
+    }
+    let peak = data.iter().flatten().copied().filter(|rate| rate.is_finite()).fold(0.0_f32, f32::max).max(1.0);
+    if data.len() < 2 {
+        return;
+    }
+    let inner = rect.shrink2(vec2(6.0, 6.0));
+    let step = inner.width() / (crate::opti::sysmon::HISTORY as f32 - 1.0);
+    let x0 = inner.right() - step * (data.len() as f32 - 1.0);
+    let points: Vec<Option<egui::Pos2>> = data
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            value.map(|rate| {
+                egui::pos2(
+                    x0 + step * index as f32,
+                    inner.bottom() - inner.height() * (rate / peak).clamp(0.0, 1.0),
+                )
+            })
+        })
+        .collect();
+    for pair in points.windows(2) {
+        if let [Some(start), Some(end)] = pair {
+            painter.line_segment([*start, *end], Stroke::new(2.0, color));
+        }
+    }
+}
 // endregion
 
 /// A window caption button (minimize, maximize, restore, close): a Segoe Fluent glyph, or a plain character when

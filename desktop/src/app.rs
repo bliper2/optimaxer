@@ -46,7 +46,7 @@ enum PaletteCommand {
 
 const PALETTE_COMMANDS: [(&str, &str, PaletteCommand); 16] = [
     ("Overview", "Optimaxer page", PaletteCommand::Page("Overview")),
-    ("Performance", "Live CPU, memory and adapter traffic", PaletteCommand::Page("Performance")),
+    ("Performance", "Live CPU, memory, disk and adapter traffic", PaletteCommand::Page("Performance")),
     ("Diagnostics", "Read-only Windows integrity checks", PaletteCommand::Page("Diagnostics")),
     ("Processes", "Read-only process explorer", PaletteCommand::Page("Processes")),
     ("Gaming", "Review reversible Windows gaming settings", PaletteCommand::Page("Gaming")),

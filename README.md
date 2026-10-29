@@ -15,6 +15,7 @@ Windows 10/11 performance, privacy, debloat and app-install toolkit. WPF GUI in 
 | ![Overview with live gauges](docs/screenshots/desktop-overview.png) | ![Overview, light theme](docs/screenshots/desktop-overview-light.png) |
 | ![The Orion app store](docs/screenshots/desktop-store.png) | ![Hardware-aware tweaks and portable profiles](docs/screenshots/desktop-tweaks.png) |
 | ![Read-only Process Explorer](docs/screenshots/desktop-processes.png) | ![Activity search](docs/screenshots/desktop-activity.png) |
+| ![Live performance charts including disk activity](docs/screenshots/desktop-performance.png) | ![Read-only Windows diagnostics](docs/screenshots/desktop-diagnostics.png) |
 | ![Cleaner scan](docs/screenshots/desktop-cleaner.png) | |
 
 **Optimaxer for PowerShell** (WPF, Windows 10 and 11):
