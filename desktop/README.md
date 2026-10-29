@@ -63,6 +63,8 @@ Unreadable undo state blocks tweak changes until a valid backup is recovered. Fa
 
 When a tweak batch changes a setting that needs a Windows restart, Optimaxer saves one reminder in its settings and shows it across pages. The reminder clears after Windows uptime resets. If the settings write fails, the Activity log and a toast report the error.
 
+The Processes page reads process CPU time, working-set memory and image paths on a background worker. CPU is an estimate over the three-second sample interval, normalized to total logical processor capacity. Windows-denied fields show as unavailable; the page never terminates processes. Publisher, GPU, temperature, disk-activity and network-throughput measurements are not included.
+
 The verification scope and remaining integration checks are listed in [verification.md](../docs/verification.md).
 
 Nothing is downloaded or installed automatically, and Optimaxer never installs drivers. The vendor driver button only opens the maker's support page.
