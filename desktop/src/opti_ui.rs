@@ -10,7 +10,10 @@ use crate::opti::catalog::{Catalog, Tweak};
 use crate::opti::cleaner::{self, Target};
 use crate::opti::engine::{Change, Engine};
 use crate::opti::hw::{self, Traits};
-use crate::opti::history::{self, Action as HistoryAction, Change as HistoryChange, Entry as HistoryEntry};
+use crate::opti::history::{
+    self, Action as HistoryAction, Change as HistoryChange, Entry as HistoryEntry,
+    OperationEntry,
+};
 use crate::opti::network;
 use crate::opti::processes::{self, CpuTimes, ProcessInfo};
 use crate::opti::profiles::{self, Profile};
@@ -23,7 +26,7 @@ use egui::{Align, Color32, CornerRadius, FontId, Layout, Margin, RichText, Sense
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const LOG_LINES: usize = 600;
@@ -136,6 +139,7 @@ enum Msg {
     Adapters(Vec<String>),
     Bench(Vec<(String, Option<f64>)>),
     History(Result<Vec<HistoryEntry>, String>),
+    OperationHistory(Result<Vec<OperationEntry>, String>),
     Processes(Result<(Vec<ProcessInfo>, CpuTimes), String>),
     RestartRequired,
 }
@@ -144,6 +148,7 @@ enum Msg {
 struct Worker {
     tx: Sender<Msg>,
     ctx: egui::Context,
+    operation_details: Option<Arc<Mutex<Vec<String>>>>,
 }
 
 impl Worker {
@@ -152,6 +157,14 @@ impl Worker {
         self.ctx.request_repaint();
     }
     fn log(&self, s: &str) {
+        if let Some(details) = &self.operation_details {
+            match details.lock() {
+                Ok(mut details) => details.push(s.to_string()),
+                Err(_) => self.send(Msg::Log(
+                    "WARN Operation output could not be captured because its log buffer was unavailable.".into(),
+                )),
+            }
+        }
         self.send(Msg::Log(s.to_string()));
     }
 }
@@ -179,6 +192,8 @@ pub struct OptiUi {
     log_expanded: bool,
     history: Vec<HistoryEntry>,
     history_error: Option<String>,
+    operations: Vec<OperationEntry>,
+    operations_error: Option<String>,
     history_search: String,
     profiles: Vec<Profile>,
     profiles_error: Option<String>,
@@ -277,6 +292,37 @@ fn history_entry_matches(entry: &HistoryEntry, query: &str) -> bool {
                     .iter()
                     .any(|detail| detail.to_lowercase().contains(&query))
         })
+}
+
+fn operation_entry_matches(entry: &OperationEntry, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    query.is_empty()
+        || entry.time.to_lowercase().contains(&query)
+        || entry.title.to_lowercase().contains(&query)
+        || entry.details.iter().any(|detail| detail.to_lowercase().contains(&query))
+}
+
+#[cfg(test)]
+mod operation_history_tests {
+    use super::*;
+
+    fn entry() -> OperationEntry {
+        OperationEntry {
+            time: "2026-10-29T12:30:00Z".into(),
+            title: "Reset network stack".into(),
+            details: vec!["DNS cache flushed".into()],
+        }
+    }
+
+    #[test]
+    fn operation_search_matches_title_timestamp_and_output_case_insensitively() {
+        let entry = entry();
+        assert!(operation_entry_matches(&entry, "NETWORK"));
+        assert!(operation_entry_matches(&entry, "12:30"));
+        assert!(operation_entry_matches(&entry, "flushed"));
+        assert!(!operation_entry_matches(&entry, "installer"));
+        assert!(operation_entry_matches(&entry, "  "));
+    }
 }
 
 fn draw_profile_difference(
@@ -469,6 +515,10 @@ impl OptiUi {
             Ok(entries) => (entries, None),
             Err(error) => (Vec::new(), Some(error)),
         };
+        let (operations, operations_error) = match history::load_operations() {
+            Ok(entries) => (entries, None),
+            Err(error) => (Vec::new(), Some(error)),
+        };
         let (profiles, profiles_error) = match profiles::load_store(&net::data_dir().join("profiles.json")) {
             Ok(profiles) => (profiles, None),
             Err(error) => (Vec::new(), Some(error)),
@@ -492,6 +542,8 @@ impl OptiUi {
             log_expanded: false,
             history,
             history_error,
+            operations,
+            operations_error,
             history_search: String::new(),
             profiles,
             profiles_error,
@@ -573,20 +625,52 @@ impl OptiUi {
     }
 
     fn worker(&self, ctx: &egui::Context) -> Worker {
-        Worker { tx: self.tx.clone(), ctx: ctx.clone() }
+        Worker { tx: self.tx.clone(), ctx: ctx.clone(), operation_details: None }
     }
 
     /// Starts a background job. One job at a time, like the PowerShell edition.
     fn spawn(&mut self, ctx: &egui::Context, title: &str, job: impl FnOnce(&Worker) + Send + 'static) -> bool {
+        self.spawn_inner(ctx, title, false, job)
+    }
+
+    fn spawn_recorded(&mut self, ctx: &egui::Context, title: &str, job: impl FnOnce(&Worker) + Send + 'static) -> bool {
+        self.spawn_inner(ctx, title, true, job)
+    }
+
+    fn spawn_inner(&mut self, ctx: &egui::Context, title: &str, record: bool, job: impl FnOnce(&Worker) + Send + 'static) -> bool {
         if self.busy.is_some() {
             self.events.push(OptiEvent::Toast("Another task is running, please wait.".into()));
             return false;
         }
         self.busy = Some(title.to_string());
         self.say(&format!("== {title}"));
-        let w = self.worker(ctx);
+        let operation_details = record.then(|| Arc::new(Mutex::new(Vec::new())));
+        let w = Worker {
+            tx: self.tx.clone(),
+            ctx: ctx.clone(),
+            operation_details: operation_details.clone(),
+        };
+        let title = title.to_owned();
         std::thread::spawn(move || {
             job(&w);
+            if let Some(details) = operation_details {
+                let details = match details.lock() {
+                    Ok(lines) => lines.clone(),
+                    Err(_) => {
+                        w.log("WARN Operation output could not be captured because its log buffer was unavailable.");
+                        Vec::new()
+                    }
+                };
+                let entry = OperationEntry {
+                    time: format!("{}Z", crate::opti::now_iso()),
+                    title,
+                    details,
+                };
+                match history::append_operation(entry) {
+                    Ok(entries) => w.send(Msg::OperationHistory(Ok(entries))),
+                    Err(error) => w.log(&format!("WARN Operation ran, but its activity record could not be saved: {error}")),
+                }
+            }
             w.send(Msg::Idle);
         });
         true
@@ -634,6 +718,11 @@ impl OptiUi {
                     self.history_error = None;
                 }
                 Msg::History(Err(error)) => self.history_error = Some(error),
+                Msg::OperationHistory(Ok(entries)) => {
+                    self.operations = entries;
+                    self.operations_error = None;
+                }
+                Msg::OperationHistory(Err(error)) => self.operations_error = Some(error),
                 Msg::Processes(Ok((rows, cpu_times))) => {
                     self.processes = rows;
                     self.process_cpu = cpu_times;
@@ -777,7 +866,7 @@ impl OptiUi {
             Action::ApplyWithoutRestore(ids) => self.run_tweaks(ctx, ids, true, false),
             Action::UndoAll => {
                 let cat = self.cat.clone();
-                self.spawn(ctx, "Undo all Optimaxer tweaks", move |w| {
+                self.spawn_recorded(ctx, "Undo all Optimaxer tweaks", move |w| {
                     let sys = WinSystem;
                     let mut st = State::load();
                     let eng = Engine::new(&sys, backup_dir());
@@ -805,7 +894,7 @@ impl OptiUi {
             }
             Action::SetServices { names, start } => {
                 let data = self.data.clone();
-                self.spawn(ctx, "Changing services", move |w| {
+                self.spawn_recorded(ctx, "Changing services", move |w| {
                     let n = services::set_start(&WinSystem, &data, &names, start, &backup_dir(), &mut |l| w.log(l));
                     w.log(&format!("{n} service(s) changed."));
                     w.send(Msg::Services(services::list(&WinSystem, &data)));
@@ -813,13 +902,13 @@ impl OptiUi {
             }
             Action::RestoreServices => {
                 let data = self.data.clone();
-                self.spawn(ctx, "Restoring services", move |w| {
+                self.spawn_recorded(ctx, "Restoring services", move |w| {
                     services::restore_latest(&WinSystem, &backup_dir(), &mut |l| w.log(l));
                     w.send(Msg::Services(services::list(&WinSystem, &data)));
                 });
             }
             Action::SetStartup { items, enable } => {
-                self.spawn(ctx, if enable { "Enabling startup items" } else { "Disabling startup items" }, move |w| {
+                self.spawn_recorded(ctx, if enable { "Enabling startup items" } else { "Disabling startup items" }, move |w| {
                     let sys = WinSystem;
                     for i in &items {
                         match startup::set_enabled(&sys, i, enable) {
@@ -831,7 +920,7 @@ impl OptiUi {
                 });
             }
             Action::Clean(ids) => {
-                self.spawn(ctx, "Cleaning", move |w| {
+                self.spawn_recorded(ctx, "Cleaning", move |w| {
                     let sys = WinSystem;
                     let mut sum = 0u64;
                     for id in &ids {
@@ -845,19 +934,20 @@ impl OptiUi {
                 });
             }
             Action::SetDns(provider) => {
-                self.spawn(ctx, &format!("DNS: {}", provider.name), move |w| {
+                self.spawn_recorded(ctx, &format!("DNS: {}", provider.name), move |w| {
                     let adapters = network::active_adapters();
                     network::apply_dns(&WinSystem, &adapters, &provider, &mut |l| w.log(l));
                 });
             }
             Action::ResetNetwork => {
-                self.spawn(ctx, "Reset network stack", move |w| network::reset_stack(&WinSystem, &mut |l| w.log(l)));
+                self.spawn_recorded(ctx, "Reset network stack", move |w| network::reset_stack(&WinSystem, &mut |l| w.log(l)));
             }
             Action::RunTool(tool) => {
-                self.spawn(ctx, "Running tool", move |w| tools::run(&WinSystem, tool, &backup_dir(), &mut |l| w.log(l)));
+                let title = tools::TOOLS.iter().find(|info| info.tool == tool).map_or("Running tool", |info| info.title);
+                self.spawn_recorded(ctx, title, move |w| tools::run(&WinSystem, tool, &backup_dir(), &mut |l| w.log(l)));
             }
             Action::RunInstaller(path) => {
-                self.spawn(ctx, "Restore point, then installer", move |w| {
+                self.spawn_recorded(ctx, "Restore point, then installer", move |w| {
                     let ok = tools::create_restore_point(&WinSystem, "Optimaxer - before installer", &mut |l| w.log(l));
                     if ok {
                         match open::that(&path) {
@@ -1542,7 +1632,7 @@ impl OptiUi {
 
     fn activity_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let t = tokens(ctx);
-        kit::page_header(ui, "Activity", "Search confirmed tweak apply and undo records. Other system operations are not included in this history.");
+        kit::page_header(ui, "Activity", "Search confirmed tweak changes and output from system actions. Read-only scans are not recorded.");
         ui.horizontal_wrapped(|ui| {
             ui.add_sized(
                 [280.0, 34.0],
@@ -1553,41 +1643,54 @@ impl OptiUi {
                 .history
                 .iter()
                 .filter(|entry| history_entry_matches(entry, &self.history_search))
-                .count();
+                .count()
+                + self
+                    .operations
+                    .iter()
+                    .filter(|entry| operation_entry_matches(entry, &self.history_search))
+                    .count();
             ui.label(
-                RichText::new(format!("{visible} of {} records", self.history.len()))
+                RichText::new(format!("{visible} matching records"))
                     .size(T_SMALL)
                     .color(t.muted),
             );
         });
         ui.add_space(S2);
         if let Some(error) = &self.history_error {
-            kit::empty_state(ui, "Activity history unavailable", error);
+            ui.label(RichText::new(format!("Tweak history unavailable: {error}"))
+                .size(T_SMALL).color(t.warn));
+        }
+        if let Some(error) = &self.operations_error {
+            ui.label(RichText::new(format!("System action history unavailable: {error}"))
+                .size(T_SMALL).color(t.warn));
+        }
+        if self.history.is_empty() && self.operations.is_empty() {
+            if self.history_error.is_none() && self.operations_error.is_none() {
+                kit::empty_state(ui, "No recorded activity", "Confirmed tweak changes and system-action output will appear here.");
+            }
             return;
         }
-        let matches: Vec<_> = self
+        let tweak_matches: Vec<_> = self
             .history
             .iter()
             .rev()
             .filter(|entry| history_entry_matches(entry, &self.history_search))
             .collect();
-        if matches.is_empty() {
-            kit::empty_state(
-                ui,
-                if self.history.is_empty() {
-                    "No recorded activity"
-                } else {
-                    "No matching activity"
-                },
-                if self.history.is_empty() {
-                    "Confirmed tweak apply and undo operations will appear here."
-                } else {
-                    "Try another search or clear the filter."
-                },
-            );
+        let operation_matches: Vec<_> = self
+            .operations
+            .iter()
+            .rev()
+            .filter(|entry| operation_entry_matches(entry, &self.history_search))
+            .collect();
+        if tweak_matches.is_empty() && operation_matches.is_empty() {
+            kit::empty_state(ui, "No matching activity", "Try another search or clear the filter.");
             return;
         }
-        for (index, entry) in matches.iter().enumerate() {
+        ui.label(RichText::new("Tweak changes").font(FontId::new(T_HEADING, semibold())).color(t.text));
+        if self.history_error.is_none() && tweak_matches.is_empty() {
+            ui.label(RichText::new("No matching tweak changes.").size(T_SMALL).color(t.subtle));
+        }
+        for (index, entry) in tweak_matches.iter().enumerate() {
             let verified = entry.changes.iter().filter(|change| change.verified).count();
             let undoable = entry.changes.iter().filter(|change| change.undo_available).count();
             let action = match entry.action {
@@ -1612,6 +1715,31 @@ impl OptiUi {
                         });
                         for detail in &change.details {
                             ui.add(egui::Label::new(RichText::new(detail).size(T_CAPTION).color(t.muted)).wrap());
+                        }
+                    }
+                });
+        }
+        ui.add_space(S3);
+        ui.label(RichText::new("System actions").font(FontId::new(T_HEADING, semibold())).color(t.text));
+        if self.operations_error.is_none() && operation_matches.is_empty() {
+            ui.label(RichText::new("No matching system actions.").size(T_SMALL).color(t.subtle));
+        }
+        for (index, entry) in operation_matches.iter().enumerate() {
+            egui::CollapsingHeader::new(format!("{} · {} output line(s)", entry.title, entry.details.len()))
+                .id_salt(("system-operation", index, &entry.time))
+                .show(ui, |ui| {
+                    ui.label(RichText::new(&entry.time).size(T_CAPTION).color(t.subtle));
+                    if entry.details.is_empty() {
+                        ui.label(RichText::new("No output was captured; completion is not verified by this record.")
+                            .size(T_CAPTION).color(t.warn));
+                    } else {
+                        for detail in &entry.details {
+                            let color = if detail.starts_with("WARN") || detail.contains("failed") {
+                                t.warn
+                            } else {
+                                t.muted
+                            };
+                            ui.add(egui::Label::new(RichText::new(detail).monospace().size(T_CAPTION).color(color)).wrap());
                         }
                     }
                 });
@@ -2155,7 +2283,7 @@ impl OptiUi {
                 });
             }
             if kit::secondary(ui, "Flush DNS cache", idle).clicked() {
-                self.spawn(ctx, "Flush DNS", |w| {
+                self.spawn_recorded(ctx, "Flush DNS", |w| {
                     let result = WinSystem.run("ipconfig.exe", &["/flushdns"]);
                     if result.code == 0 {
                         w.log("DNS cache flushed.");
@@ -2222,7 +2350,7 @@ impl OptiUi {
                             }
                         } else {
                             let tool = info.tool;
-                            self.spawn(ctx, info.title, move |w| tools::run(&WinSystem, tool, &backup_dir(), &mut |l| w.log(l)));
+                            self.spawn_recorded(ctx, info.title, move |w| tools::run(&WinSystem, tool, &backup_dir(), &mut |l| w.log(l)));
                         }
                     }
                 }
