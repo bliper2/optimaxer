@@ -154,6 +154,9 @@ impl OrionApp {
         if std::env::var_os("ORION_SHOTS").is_some() {
             // developer screenshots: nothing below may be written to the user's settings file
             net::READ_ONLY.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(collapsed) = std::env::var("ORION_SHOTS_SIDEBAR_COLLAPSED") {
+                settings.sidebar_collapsed = collapsed.eq_ignore_ascii_case("true");
+            }
             if let Ok(t) = std::env::var("ORION_SHOTS_THEME") {
                 settings.theme = t;
             }
@@ -907,10 +910,26 @@ impl OrionApp {
         let ctx = root.ctx().clone();
         let ctx = &ctx;
         let t = tokens(ctx);
-        egui::Panel::left("side").resizable(false).show_separator_line(false).exact_size(212.0).frame(egui::Frame::new().fill(t.rail).inner_margin(Margin::symmetric(S3 as i8, S2 as i8))).show(root, |ui| {
+        let compact = self.section == Section::Optimaxer && self.settings.sidebar_collapsed;
+        egui::Panel::left("side").resizable(false).show_separator_line(false).exact_size(if compact { 64.0 } else { 212.0 }).frame(egui::Frame::new().fill(t.rail).inner_margin(Margin::symmetric(S3 as i8, S2 as i8))).show(root, |ui| {
             if self.section == Section::Optimaxer {
                 egui::ScrollArea::vertical().id_salt("optimaxer-navigation").auto_shrink([false, false]).show(ui, |ui| {
-                    self.opti.side_panel(ui, ctx);
+                    ui.add_space(S2);
+                    let label = if self.settings.sidebar_collapsed { "Expand navigation" } else { "Collapse navigation" };
+                    let glyph = if self.settings.sidebar_collapsed { "›" } else { "‹" };
+                    let mut toggle_clicked = false;
+                    ui.horizontal(|ui| {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let toggle = ui.add_sized([30.0, 30.0], egui::Button::new(glyph).fill(t.surface2).stroke(egui::Stroke::new(1.0, t.hairline))).on_hover_text(label);
+                            toggle.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+                            toggle_clicked = toggle.clicked();
+                        });
+                    });
+                    if toggle_clicked {
+                        self.settings.sidebar_collapsed = !self.settings.sidebar_collapsed;
+                        self.settings.save();
+                    }
+                    self.opti.side_panel(ui, ctx, self.settings.sidebar_collapsed);
                 });
                 return;
             }

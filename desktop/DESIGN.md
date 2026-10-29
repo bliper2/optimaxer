@@ -49,6 +49,8 @@ Primary button: lime fill, dark text, one per view. Secondary: raised surface wi
 
 States: every control has rest, hover, pressed, disabled and keyboard focus. Focus draws a 2 px ring in the accent colour. Disabled controls drop to the subtle text colour on surface2.
 
+The Optimaxer sidebar can collapse to a 64 px icon rail. Labels stay available as tooltips and accessibility names; the detected PC summary returns when expanded. The choice persists in application settings. Store navigation remains expanded because its platform and category entries use text labels and counts.
+
 ## Motion
 
 Three lengths: fast 90 ms (hover, press), base 160 ms (selection, toggles), slow 260 ms (page enter). Everything eases out. Pages fade in with a 10 px rise when you switch view. The Store/Optimaxer thumb slides, toasts fade and rise in and fade out, and loading content pulses as skeleton rows. The activity dock uses the same global animation time when it opens or closes, including the reduced-motion setting.
