@@ -88,7 +88,7 @@ fn read_times() -> Option<(u64, u64, u64)> {
     (unsafe { GetSystemTimes(&mut i, &mut k, &mut u) } != 0).then(|| (ft(&i), ft(&k), ft(&u)))
 }
 
-fn read_memory() -> Option<(u64, u64)> {
+pub(crate) fn read_memory() -> Option<(u64, u64)> {
     let mut m: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
     m.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
     // SAFETY: dwLength is set and `m` is a valid out-pointer.
@@ -98,7 +98,7 @@ fn read_memory() -> Option<(u64, u64)> {
     Some((m.ullTotalPhys.saturating_sub(m.ullAvailPhys), m.ullTotalPhys))
 }
 
-fn read_disk() -> Option<(u64, u64)> {
+pub(crate) fn read_disk() -> Option<(u64, u64)> {
     let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
     let path: Vec<u16> = format!("{drive}\\").encode_utf16().chain(std::iter::once(0)).collect();
     let (mut free, mut total, mut total_free) = (0u64, 0u64, 0u64);
