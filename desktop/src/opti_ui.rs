@@ -12,6 +12,7 @@ use crate::opti::engine::{Change, Engine};
 use crate::opti::hw::{self, Traits};
 use crate::opti::history::{self, Action as HistoryAction, Change as HistoryChange, Entry as HistoryEntry};
 use crate::opti::network;
+use crate::opti::processes::{self, CpuTimes, ProcessInfo};
 use crate::opti::profiles::{self, Profile};
 use crate::opti::services::{self, Data, DnsProvider, SvcRow};
 use crate::opti::startup;
@@ -23,12 +24,15 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 const LOG_LINES: usize = 600;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Page {
     Overview,
+    Processes,
+    Activity,
     Tweaks,
     Services,
     Startup,
@@ -38,11 +42,23 @@ pub enum Page {
 }
 
 impl Page {
-    const ALL: [Page; 7] = [Page::Overview, Page::Tweaks, Page::Services, Page::Startup, Page::Cleaner, Page::Network, Page::Tools];
+    const ALL: [Page; 9] = [
+        Page::Overview,
+        Page::Processes,
+        Page::Activity,
+        Page::Tweaks,
+        Page::Services,
+        Page::Startup,
+        Page::Cleaner,
+        Page::Network,
+        Page::Tools,
+    ];
     /// Segoe Fluent Icons glyph shown in the sidebar.
     fn icon(self) -> char {
         match self {
             Page::Overview => '\u{E80F}',
+            Page::Processes => '\u{E9D9}',
+            Page::Activity => '\u{E81C}',
             Page::Tweaks => '\u{E9E9}',
             Page::Services => '\u{E9F5}',
             Page::Startup => '\u{E7E8}',
@@ -55,6 +71,8 @@ impl Page {
     fn label(self) -> &'static str {
         match self {
             Page::Overview => "Overview",
+            Page::Processes => "Processes",
+            Page::Activity => "Activity",
             Page::Tweaks => "Tweaks",
             Page::Services => "Services",
             Page::Startup => "Startup",
@@ -118,6 +136,7 @@ enum Msg {
     Adapters(Vec<String>),
     Bench(Vec<(String, Option<f64>)>),
     History(Result<Vec<HistoryEntry>, String>),
+    Processes(Result<(Vec<ProcessInfo>, CpuTimes), String>),
     RestartRequired,
 }
 
@@ -160,6 +179,7 @@ pub struct OptiUi {
     log_expanded: bool,
     history: Vec<HistoryEntry>,
     history_error: Option<String>,
+    history_search: String,
     profiles: Vec<Profile>,
     profiles_error: Option<String>,
     profile_name: String,
@@ -184,6 +204,13 @@ pub struct OptiUi {
     page_started: f64,
     sampler: crate::opti::sysmon::Sampler,
     info: Option<crate::opti::sysmon::SysInfo>,
+    processes: Vec<ProcessInfo>,
+    process_cpu: CpuTimes,
+    process_error: Option<String>,
+    process_loading: bool,
+    process_last_scan: Option<Instant>,
+    process_search: String,
+    process_sort: usize,
     services_loaded: bool,
     startup_loaded: bool,
 }
@@ -230,6 +257,26 @@ fn profile_summary(tr: &Traits) -> String {
         "Windows version unknown"
     };
     [form, storage, windows].join(" · ")
+}
+
+fn history_entry_matches(entry: &HistoryEntry, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    query.is_empty()
+        || entry.time.to_lowercase().contains(&query)
+        || match entry.action {
+            HistoryAction::Apply => {
+                "apply".contains(&query) || "applied".contains(&query)
+            }
+            HistoryAction::Undo => "undo".contains(&query) || "undid".contains(&query),
+        }
+        || entry.changes.iter().any(|change| {
+            change.id.to_lowercase().contains(&query)
+                || change.name.to_lowercase().contains(&query)
+                || change
+                    .details
+                    .iter()
+                    .any(|detail| detail.to_lowercase().contains(&query))
+        })
 }
 
 fn draw_profile_difference(
@@ -445,6 +492,7 @@ impl OptiUi {
             log_expanded: false,
             history,
             history_error,
+            history_search: String::new(),
             profiles,
             profiles_error,
             profile_name: "My profile".into(),
@@ -468,6 +516,13 @@ impl OptiUi {
             page_started: 0.0,
             sampler: crate::opti::sysmon::Sampler::new(),
             info: None,
+            processes: Vec::new(),
+            process_cpu: CpuTimes::new(),
+            process_error: None,
+            process_loading: false,
+            process_last_scan: None,
+            process_search: String::new(),
+            process_sort: 0,
             services_loaded: false,
             startup_loaded: false,
         }
@@ -579,6 +634,16 @@ impl OptiUi {
                     self.history_error = None;
                 }
                 Msg::History(Err(error)) => self.history_error = Some(error),
+                Msg::Processes(Ok((rows, cpu_times))) => {
+                    self.processes = rows;
+                    self.process_cpu = cpu_times;
+                    self.process_error = None;
+                    self.process_loading = false;
+                }
+                Msg::Processes(Err(error)) => {
+                    self.process_error = Some(error);
+                    self.process_loading = false;
+                }
                 Msg::RestartRequired => self.restart_pending = true,
             }
         }
@@ -600,6 +665,20 @@ impl OptiUi {
                 w.log("Optimaxer ready.");
             }
         });
+    }
+
+    fn refresh_processes(&mut self, ctx: &egui::Context) {
+        if self.process_loading
+            || self.process_last_scan.is_some_and(|last| last.elapsed() < Duration::from_secs(3))
+        {
+            return;
+        }
+        self.process_loading = true;
+        self.process_last_scan = Some(Instant::now());
+        let previous = self.process_cpu.clone();
+        let cores = std::thread::available_parallelism().map(|count| count.get() as u32).unwrap_or(1);
+        let worker = self.worker(ctx);
+        std::thread::spawn(move || worker.send(Msg::Processes(processes::scan(&previous, cores))));
     }
 
     fn refresh_status(&mut self, ctx: &egui::Context) {
@@ -1241,6 +1320,8 @@ impl OptiUi {
             ui.add_enabled_ui(self.pending.is_none(), |ui| {
                 egui::ScrollArea::vertical().id_salt(("optimaxer-page", self.page.label())).auto_shrink([false, false]).show(ui, |ui| match self.page {
                     Page::Overview => self.overview_page(ui, ctx),
+                    Page::Processes => self.processes_page(ui, ctx),
+                    Page::Activity => self.activity_page(ui, ctx),
                     Page::Tweaks => self.tweaks_page(ui, ctx),
                     Page::Services => self.services_page(ui, ctx),
                     Page::Startup => self.startup_page(ui, ctx),
@@ -1457,6 +1538,183 @@ impl OptiUi {
             });
             ui.add_space(S3);
         });
+    }
+
+    fn activity_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let t = tokens(ctx);
+        kit::page_header(ui, "Activity", "Search confirmed tweak apply and undo records. Other system operations are not included in this history.");
+        ui.horizontal_wrapped(|ui| {
+            ui.add_sized(
+                [280.0, 34.0],
+                egui::TextEdit::singleline(&mut self.history_search)
+                    .hint_text("Search action, tweak or date"),
+            );
+            let visible = self
+                .history
+                .iter()
+                .filter(|entry| history_entry_matches(entry, &self.history_search))
+                .count();
+            ui.label(
+                RichText::new(format!("{visible} of {} records", self.history.len()))
+                    .size(T_SMALL)
+                    .color(t.muted),
+            );
+        });
+        ui.add_space(S2);
+        if let Some(error) = &self.history_error {
+            kit::empty_state(ui, "Activity history unavailable", error);
+            return;
+        }
+        let matches: Vec<_> = self
+            .history
+            .iter()
+            .rev()
+            .filter(|entry| history_entry_matches(entry, &self.history_search))
+            .collect();
+        if matches.is_empty() {
+            kit::empty_state(
+                ui,
+                if self.history.is_empty() {
+                    "No recorded activity"
+                } else {
+                    "No matching activity"
+                },
+                if self.history.is_empty() {
+                    "Confirmed tweak apply and undo operations will appear here."
+                } else {
+                    "Try another search or clear the filter."
+                },
+            );
+            return;
+        }
+        for (index, entry) in matches.iter().enumerate() {
+            let verified = entry.changes.iter().filter(|change| change.verified).count();
+            let undoable = entry.changes.iter().filter(|change| change.undo_available).count();
+            let action = match entry.action {
+                HistoryAction::Apply => "Applied",
+                HistoryAction::Undo => "Undid",
+            };
+            egui::CollapsingHeader::new(format!(
+                "{action} {} tweaks · {verified}/{} verified · {undoable} undoable",
+                entry.changes.len(),
+                entry.changes.len()
+            ))
+                .id_salt(("activity-record", index, &entry.time))
+                .show(ui, |ui| {
+                    ui.label(RichText::new(&entry.time).size(T_CAPTION).color(t.subtle));
+                    for change in &entry.changes {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(&change.name).size(T_SMALL).color(t.text));
+                            kit::chip(ui, if change.verified { "Verified" } else { "Incomplete" }, if change.verified { Tone::Good } else { Tone::Warn });
+                            if change.undo_available {
+                                kit::chip(ui, "Undo available", Tone::Neutral);
+                            }
+                        });
+                        for detail in &change.details {
+                            ui.add(egui::Label::new(RichText::new(detail).size(T_CAPTION).color(t.muted)).wrap());
+                        }
+                    }
+                });
+        }
+    }
+
+    fn processes_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        self.refresh_processes(ctx);
+        let t = tokens(ctx);
+        kit::page_header(ui, "Processes", "Read-only process list. CPU is sampled over time; Windows may restrict paths and memory details for protected processes.");
+        ui.horizontal_wrapped(|ui| {
+            ui.add_sized([260.0, 32.0], egui::TextEdit::singleline(&mut self.process_search).hint_text("Search process, PID or path"));
+            ui.label(RichText::new(format!("{} processes", self.processes.len())).size(T_SMALL).color(t.muted));
+            ui.label(RichText::new("Refreshes every 3 seconds while open").size(T_CAPTION).color(t.subtle));
+            if kit::ghost(ui, if self.process_loading { "Refreshing" } else { "Refresh" }, !self.process_loading).clicked() {
+                self.process_last_scan = None;
+            }
+            ui.label(RichText::new("Sort").size(T_SMALL).color(t.muted));
+            egui::ComboBox::from_id_salt("process-sort")
+                .selected_text(["CPU", "Memory", "Name"][self.process_sort.min(2)])
+                .show_ui(ui, |ui| {
+                    for (index, label) in ["CPU", "Memory", "Name"].iter().enumerate() {
+                        ui.selectable_value(&mut self.process_sort, index, *label);
+                    }
+                });
+        });
+        if let Some(error) = &self.process_error {
+            ui.label(RichText::new(format!("Process scan failed: {error}")).size(T_SMALL).color(t.warn));
+        }
+        if self.processes.is_empty() {
+            if self.process_loading {
+                kit::skeleton(ui, 6);
+            } else if self.process_error.is_some() {
+                kit::empty_state(ui, "Could not read processes", "Try Refresh after checking whether security software is blocking process queries.");
+            } else {
+                kit::empty_state(ui, "No processes returned", "Refresh to query the Windows process list.");
+            }
+            return;
+        }
+
+        let query = self.process_search.trim().to_lowercase();
+        let mut rows: Vec<&ProcessInfo> = self.processes.iter().filter(|process| {
+            query.is_empty()
+                || process.name.to_lowercase().contains(&query)
+                || process.pid.to_string().contains(&query)
+                || process.image_path.as_ref().is_some_and(|path| path.to_string_lossy().to_lowercase().contains(&query))
+        }).collect();
+        match self.process_sort.min(2) {
+            0 => rows.sort_by(|left, right| {
+                right.cpu_percent.unwrap_or(-1.0).total_cmp(&left.cpu_percent.unwrap_or(-1.0))
+                    .then(left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+            }),
+            1 => rows.sort_by(|left, right| {
+                right.working_set.is_some().cmp(&left.working_set.is_some())
+                    .then(right.working_set.unwrap_or(0).cmp(&left.working_set.unwrap_or(0)))
+                    .then(left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+            }),
+            _ => rows.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()).then(left.pid.cmp(&right.pid))),
+        }
+        if rows.is_empty() {
+            kit::empty_state(ui, "No matching processes", "Try a shorter search or clear the filter.");
+            return;
+        }
+
+        egui_extras::TableBuilder::new(ui)
+            .striped(true)
+            .resizable(true)
+            .cell_layout(Layout::left_to_right(Align::Center))
+            .column(egui_extras::Column::initial(210.0).at_least(150.0).resizable(true))
+            .column(egui_extras::Column::initial(70.0).at_least(54.0).resizable(true))
+            .column(egui_extras::Column::initial(78.0).at_least(65.0).resizable(true))
+            .column(egui_extras::Column::initial(112.0).at_least(92.0).resizable(true))
+            .column(egui_extras::Column::remainder().at_least(200.0).resizable(true))
+            .header(30.0, |mut header| {
+                for label in ["Process", "PID", "CPU", "Working set", "Image path"] {
+                    header.col(|ui| {
+                        ui.label(RichText::new(label).font(FontId::new(T_SMALL, semibold())).color(t.muted));
+                    });
+                }
+            })
+            .body(|body| {
+                body.rows(29.0, rows.len(), |mut row| {
+                    let process = rows[row.index()];
+                    row.col(|ui| {
+                        ui.add(egui::Label::new(RichText::new(&process.name).size(T_SMALL).color(t.text)).truncate())
+                            .on_hover_text(&process.name);
+                    });
+                    row.col(|ui| { ui.label(RichText::new(process.pid.to_string()).size(T_CAPTION).monospace().color(t.muted)); });
+                    row.col(|ui| {
+                        let value = process.cpu_percent.map(|value| format!("{value:.1}%")).unwrap_or_else(|| "—".into());
+                        ui.label(RichText::new(value).size(T_SMALL).color(t.text));
+                    });
+                    row.col(|ui| {
+                        let value = process.working_set.map(|bytes| format_size(Some(bytes))).unwrap_or_else(|| "Unavailable".into());
+                        ui.label(RichText::new(value).size(T_SMALL).color(if process.working_set.is_some() { t.text } else { t.subtle }));
+                    });
+                    row.col(|ui| {
+                        let value = process.image_path.as_ref().map(|path| path.display().to_string()).unwrap_or_else(|| "Unavailable".into());
+                        ui.add(egui::Label::new(RichText::new(value).size(T_CAPTION).color(t.muted)).truncate())
+                            .on_hover_text(process.image_path.as_ref().map_or("Windows denied access to this image path.".to_owned(), |path| path.display().to_string()));
+                    });
+                });
+            });
     }
 
     fn tweaks_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
@@ -2052,6 +2310,32 @@ mod tests {
         assert_eq!(score(&cat, &t, &HashMap::new()).0, 0);
         let (_, laptop_total) = score(&cat, &tr(true), &HashMap::new());
         assert!(laptop_total <= total, "desktop-only tweaks must not count on a laptop");
+    }
+
+    #[test]
+    fn activity_search_matches_dates_actions_names_ids_and_change_details() {
+        let entry = HistoryEntry {
+            time: "2026-10-29T12:30:00Z".into(),
+            action: HistoryAction::Apply,
+            changes: vec![HistoryChange {
+                id: "disable-copilot".into(),
+                name: "Disable Copilot".into(),
+                verified: true,
+                undo_available: true,
+                details: vec!["registry value changed".into()],
+            }],
+        };
+        for query in [
+            "copilot",
+            "disable-copilot",
+            "2026-10-29",
+            "apply",
+            "registry value",
+        ] {
+            assert!(history_entry_matches(&entry, query), "should match {query}");
+        }
+        assert!(!history_entry_matches(&entry, "service"));
+        assert!(history_entry_matches(&entry, "  "));
     }
 
     #[test]
