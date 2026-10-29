@@ -393,7 +393,12 @@ pub fn gauge(ui: &mut Ui, size: f32, fraction: f32, color: Color32, value: &str,
 }
 
 /// Line chart of the last readings (0 to 100), newest on the right, with a faint fill under the line.
-pub fn sparkline(ui: &mut Ui, size: egui::Vec2, data: &std::collections::VecDeque<f32>, color: Color32) {
+pub fn sparkline(
+    ui: &mut Ui,
+    size: egui::Vec2,
+    data: &std::collections::VecDeque<Option<f32>>,
+    color: Color32,
+) {
     let t = tokens(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     if !ui.is_rect_visible(rect) {
@@ -411,21 +416,39 @@ pub fn sparkline(ui: &mut Ui, size: egui::Vec2, data: &std::collections::VecDequ
     let inner = rect.shrink2(vec2(6.0, 6.0));
     let step = inner.width() / (crate::opti::sysmon::HISTORY as f32 - 1.0);
     let x0 = inner.right() - step * (data.len() as f32 - 1.0);
-    let pts: Vec<Pos2> = data.iter().enumerate().map(|(i, v)| egui::pos2(x0 + step * i as f32, inner.bottom() - inner.height() * (v / 100.0).clamp(0.0, 1.0))).collect();
+    let points: Vec<Option<Pos2>> = data
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            value.map(|value| {
+                egui::pos2(
+                    x0 + step * index as f32,
+                    inner.bottom() - inner.height() * (value / 100.0).clamp(0.0, 1.0),
+                )
+            })
+        })
+        .collect();
     let mut mesh = egui::Mesh::default();
+    let mut segments = Vec::new();
     let fill = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 46);
-    for w in pts.windows(2) {
+    for pair in points.windows(2) {
+        let [Some(start), Some(end)] = pair else { continue };
         let base = mesh.vertices.len() as u32;
-        for (pos, _) in [(w[0], 0), (w[1], 0)] {
+        for pos in [*start, *end] {
             mesh.colored_vertex(pos, fill);
         }
-        mesh.colored_vertex(egui::pos2(w[1].x, inner.bottom()), fill);
-        mesh.colored_vertex(egui::pos2(w[0].x, inner.bottom()), fill);
+        mesh.colored_vertex(egui::pos2(end.x, inner.bottom()), fill);
+        mesh.colored_vertex(egui::pos2(start.x, inner.bottom()), fill);
         mesh.add_triangle(base, base + 1, base + 2);
         mesh.add_triangle(base, base + 2, base + 3);
+        segments.push([*start, *end]);
     }
-    p.add(Shape::mesh(mesh));
-    p.add(Shape::line(pts, Stroke::new(2.0, color)));
+    if !mesh.vertices.is_empty() {
+        p.add(Shape::mesh(mesh));
+    }
+    for segment in segments {
+        p.line_segment(segment, Stroke::new(2.0, color));
+    }
 }
 
 /// Dual-series adapter-rate chart. The scale follows the visible 60-second sample window.

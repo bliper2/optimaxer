@@ -44,8 +44,9 @@ enum PaletteCommand {
     Settings,
 }
 
-const PALETTE_COMMANDS: [(&str, &str, PaletteCommand); 13] = [
+const PALETTE_COMMANDS: [(&str, &str, PaletteCommand); 14] = [
     ("Overview", "Optimaxer page", PaletteCommand::Page("Overview")),
+    ("Performance", "Live CPU, memory and adapter traffic", PaletteCommand::Page("Performance")),
     ("Processes", "Read-only process explorer", PaletteCommand::Page("Processes")),
     ("Activity", "Search confirmed tweak changes", PaletteCommand::Page("Activity")),
     ("Tweaks", "Optimaxer page", PaletteCommand::Page("Tweaks")),
@@ -514,6 +515,8 @@ impl OrionApp {
             self.bump(ctx);
             if s == Section::Optimaxer {
                 self.opti.start_transition(ctx);
+            } else {
+                self.opti.suspend_telemetry();
             }
         }
         self.section = s;
@@ -1570,11 +1573,18 @@ fn resize_edges(ctx: &egui::Context) {
 
 #[cfg(test)]
 mod palette_tests {
-    use super::matching_palette_commands;
+    use super::{PaletteCommand, matching_palette_commands};
 
     #[test]
     fn palette_lists_all_commands_for_blank_query() {
-        assert_eq!(matching_palette_commands("  ").len(), 13);
+        assert_eq!(matching_palette_commands("  ").len(), 14);
+    }
+
+    #[test]
+    fn performance_command_navigates_to_its_page() {
+        let results = matching_palette_commands("performance");
+        assert_eq!(results.len(), 1);
+        assert!(matches!(results[0].2, PaletteCommand::Page("Performance")));
     }
 
     #[test]

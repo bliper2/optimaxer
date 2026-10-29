@@ -28,10 +28,13 @@ pub struct NetworkSample {
 pub struct Snapshot {
     /// 0 to 100
     pub cpu: f32,
+    pub cpu_available: bool,
     pub ram_used: u64,
     pub ram_total: u64,
+    pub ram_available: bool,
     pub disk_used: u64,
     pub disk_total: u64,
+    pub disk_available: bool,
     pub uptime: u64,
     pub processes: u32,
     pub network: Option<NetworkSample>,
@@ -78,25 +81,25 @@ fn read_times() -> Option<(u64, u64, u64)> {
     (unsafe { GetSystemTimes(&mut i, &mut k, &mut u) } != 0).then(|| (ft(&i), ft(&k), ft(&u)))
 }
 
-fn read_memory() -> (u64, u64) {
+fn read_memory() -> Option<(u64, u64)> {
     let mut m: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
     m.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
     // SAFETY: dwLength is set and `m` is a valid out-pointer.
     if unsafe { GlobalMemoryStatusEx(&mut m) } == 0 {
-        return (0, 0);
+        return None;
     }
-    (m.ullTotalPhys.saturating_sub(m.ullAvailPhys), m.ullTotalPhys)
+    Some((m.ullTotalPhys.saturating_sub(m.ullAvailPhys), m.ullTotalPhys))
 }
 
-fn read_disk() -> (u64, u64) {
+fn read_disk() -> Option<(u64, u64)> {
     let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
     let path: Vec<u16> = format!("{drive}\\").encode_utf16().chain(std::iter::once(0)).collect();
     let (mut free, mut total, mut total_free) = (0u64, 0u64, 0u64);
     // SAFETY: NUL-terminated path and three valid out-pointers.
     if unsafe { GetDiskFreeSpaceExW(path.as_ptr(), &mut free, &mut total, &mut total_free) } == 0 {
-        return (0, 0);
+        return None;
     }
-    (total.saturating_sub(total_free), total)
+    Some((total.saturating_sub(total_free), total))
 }
 
 fn process_count() -> u32 {
@@ -115,8 +118,8 @@ pub struct Sampler {
     last_times: Option<(u64, u64, u64)>,
     last_at: Option<Instant>,
     pub latest: Snapshot,
-    pub cpu_history: VecDeque<f32>,
-    pub ram_history: VecDeque<f32>,
+    pub cpu_history: VecDeque<Option<f32>>,
+    pub ram_history: VecDeque<Option<f32>>,
     pub network_history: VecDeque<Option<NetworkSample>>,
     last_network_totals: Option<(u64, u64)>,
 }
@@ -142,13 +145,17 @@ impl Sampler {
         let sample_elapsed = self.last_at.map(|at| at.elapsed().as_secs_f64()).unwrap_or(0.0);
         self.last_at = Some(Instant::now());
         let now = read_times();
-        let cpu = match (self.last_times, now) {
-            (Some(p), Some(n)) => cpu_percent(p, n),
-            _ => self.latest.cpu,
+        let (cpu, cpu_available) = match (self.last_times, now) {
+            (Some(p), Some(n)) => (cpu_percent(p, n), true),
+            _ => (self.latest.cpu, false),
         };
         self.last_times = now;
-        let (ram_used, ram_total) = read_memory();
-        let (disk_used, disk_total) = read_disk();
+        let (ram_used, ram_total, ram_available) = read_memory()
+            .map(|(used, total)| (used, total, true))
+            .unwrap_or((self.latest.ram_used, self.latest.ram_total, false));
+        let (disk_used, disk_total, disk_available) = read_disk()
+            .map(|(used, total)| (used, total, true))
+            .unwrap_or((self.latest.disk_used, self.latest.disk_total, false));
         let network_totals = read_network_totals();
         let network = network_totals
             .zip(self.last_network_totals)
@@ -157,11 +164,15 @@ impl Sampler {
             self.last_network_totals = Some(totals);
         }
         self.latest = Snapshot {
-            cpu, ram_used, ram_total, disk_used, disk_total, uptime: uptime_secs(), processes: process_count(),
+            cpu, cpu_available, ram_used, ram_total, ram_available, disk_used, disk_total, disk_available,
+            uptime: uptime_secs(), processes: process_count(),
             network, network_available: network_totals.is_some(),
         };
-        push(&mut self.cpu_history, cpu);
-        push(&mut self.ram_history, self.latest.ram_fraction() * 100.0);
+        push(&mut self.cpu_history, cpu_available.then_some(cpu));
+        push(
+            &mut self.ram_history,
+            ram_available.then_some(self.latest.ram_fraction() * 100.0),
+        );
         push_network(&mut self.network_history, network);
         true
     }
@@ -170,6 +181,9 @@ impl Sampler {
     pub fn reset_window(&mut self) {
         self.last_times = read_times();
         self.last_at = None;
+        self.latest.cpu_available = false;
+        self.latest.ram_available = false;
+        self.latest.disk_available = false;
         self.latest.network = None;
         self.latest.network_available = false;
         self.cpu_history.clear();
@@ -179,7 +193,7 @@ impl Sampler {
     }
 }
 
-fn push(h: &mut VecDeque<f32>, v: f32) {
+fn push(h: &mut VecDeque<Option<f32>>, v: Option<f32>) {
     if h.len() >= HISTORY {
         h.pop_front();
     }
@@ -315,11 +329,11 @@ mod tests {
     fn history_is_capped() {
         let mut h = VecDeque::new();
         for i in 0..(HISTORY + 20) {
-            push(&mut h, i as f32);
+            push(&mut h, Some(i as f32));
         }
         assert_eq!(h.len(), HISTORY);
-        assert_eq!(*h.front().unwrap(), 20.0);
-        assert_eq!(*h.back().unwrap(), (HISTORY + 19) as f32);
+        assert_eq!(*h.front().unwrap(), Some(20.0));
+        assert_eq!(*h.back().unwrap(), Some((HISTORY + 19) as f32));
     }
 
     #[test]
@@ -354,8 +368,8 @@ mod tests {
     #[test]
     fn reset_window_discards_samples_from_hidden_time() {
         let mut sampler = Sampler::new();
-        push(&mut sampler.cpu_history, 42.0);
-        push(&mut sampler.ram_history, 37.0);
+        push(&mut sampler.cpu_history, Some(42.0));
+        push(&mut sampler.ram_history, Some(37.0));
         push_network(&mut sampler.network_history, None);
         sampler.reset_window();
         assert!(sampler.cpu_history.is_empty());
@@ -384,6 +398,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(200));
         assert!(s.tick());
         let n = s.latest;
+        assert!(n.cpu_available && n.ram_available && n.disk_available);
         assert!(n.ram_total > 1 << 30 && n.ram_used <= n.ram_total);
         assert!(n.disk_total > 0 && n.disk_used <= n.disk_total);
         assert!(n.processes > 10 && n.uptime > 0);
