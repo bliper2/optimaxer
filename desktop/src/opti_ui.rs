@@ -20,6 +20,7 @@ use crate::opti::network;
 use crate::opti::processes::{self, CpuTimes, ProcessInfo};
 use crate::opti::profiles::{self, Profile};
 use crate::opti::services::{self, Data, DnsProvider, SvcRow};
+use crate::opti::snapshots::{self, SystemSnapshot};
 use crate::opti::startup;
 use crate::opti::state::{backup_dir, State};
 use crate::opti::tools::{self, Tool};
@@ -38,6 +39,7 @@ pub enum Page {
     Overview,
     Performance,
     Diagnostics,
+    Snapshots,
     Processes,
     Gaming,
     Activity,
@@ -50,10 +52,11 @@ pub enum Page {
 }
 
 impl Page {
-    const ALL: [Page; 12] = [
+    const ALL: [Page; 13] = [
         Page::Overview,
         Page::Performance,
         Page::Diagnostics,
+        Page::Snapshots,
         Page::Processes,
         Page::Gaming,
         Page::Activity,
@@ -70,6 +73,7 @@ impl Page {
             Page::Overview => '\u{E80F}',
             Page::Performance => '\u{E9D2}',
             Page::Diagnostics => '\u{E72E}',
+            Page::Snapshots => '\u{E8D4}',
             Page::Processes => '\u{E9D9}',
             Page::Gaming => '\u{E7FC}',
             Page::Activity => '\u{E81C}',
@@ -87,6 +91,7 @@ impl Page {
             Page::Overview => "Overview",
             Page::Performance => "Performance",
             Page::Diagnostics => "Diagnostics",
+            Page::Snapshots => "System Snapshot",
             Page::Processes => "Processes",
             Page::Gaming => "Gaming",
             Page::Activity => "Activity",
@@ -160,6 +165,7 @@ enum Msg {
     GameProfiles(Result<Vec<GameProfile>, String>),
     GameStates(HashMap<String, Result<ProfileState, String>>),
     Diagnostic(DiagnosticCheck, DiagnosticResult),
+    Snapshots(Result<Vec<SystemSnapshot>, String>),
     Processes(Result<(Vec<ProcessInfo>, CpuTimes), String>),
     RestartRequired,
 }
@@ -237,6 +243,8 @@ pub struct OptiUi {
     game_states_loaded: bool,
     game_status_loading: bool,
     diagnostic_results: HashMap<DiagnosticCheck, DiagnosticResult>,
+    snapshots: Vec<SystemSnapshot>,
+    snapshots_error: Option<String>,
     profile_name: String,
     compare_profile_left: String,
     compare_profile_right: String,
@@ -622,6 +630,10 @@ impl OptiUi {
             Ok(profiles) => (profiles, None),
             Err(error) => (Vec::new(), Some(error)),
         };
+        let (snapshots, snapshots_error) = match snapshots::load() {
+            Ok(entries) => (entries, None),
+            Err(error) => (Vec::new(), Some(error)),
+        };
         Self {
             page: Page::Overview,
             cat: Arc::new(Catalog::load()),
@@ -653,6 +665,8 @@ impl OptiUi {
             game_states_loaded: false,
             game_status_loading: false,
             diagnostic_results: HashMap::new(),
+            snapshots,
+            snapshots_error,
             profile_name: "My profile".into(),
             compare_profile_left: String::new(),
             compare_profile_right: String::new(),
@@ -855,6 +869,11 @@ impl OptiUi {
                 Msg::Diagnostic(check, result) => {
                     self.diagnostic_results.insert(check, result);
                 }
+                Msg::Snapshots(Ok(entries)) => {
+                    self.snapshots = entries;
+                    self.snapshots_error = None;
+                }
+                Msg::Snapshots(Err(error)) => self.snapshots_error = Some(error),
                 Msg::Processes(Ok((rows, cpu_times))) => {
                     self.processes = rows;
                     self.process_cpu = cpu_times;
@@ -1598,6 +1617,7 @@ impl OptiUi {
                     Page::Overview => self.overview_page(ui, ctx),
                     Page::Performance => self.performance_page(ui, ctx),
                     Page::Diagnostics => self.diagnostics_page(ui, ctx),
+                    Page::Snapshots => self.snapshots_page(ui, ctx),
                     Page::Processes => self.processes_page(ui, ctx),
                     Page::Gaming => self.gaming_page(ui, ctx),
                     Page::Activity => self.activity_page(ui, ctx),
@@ -2179,6 +2199,77 @@ impl OptiUi {
             worker.log(&format!("Exit code: {}", result.exit_code));
             worker.send(Msg::Diagnostic(check, result));
         });
+    }
+
+    fn capture_system_snapshot(&mut self, ctx: &egui::Context) {
+        self.spawn_recorded(ctx, "Capture system snapshot", |worker| {
+            let snapshot = snapshots::capture(&WinSystem);
+            let result = snapshots::append(snapshot);
+            match &result {
+                Ok(entries) => worker.log(&format!("Saved local inventory snapshot. {} snapshots retained.", entries.len())),
+                Err(error) => worker.log(&format!("ERROR Could not save system snapshot: {error}")),
+            }
+            worker.send(Msg::Snapshots(result));
+        });
+    }
+
+    fn snapshots_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let t = tokens(ctx);
+        kit::page_header(ui, "System Snapshot", "Capture and browse a local inventory of this PC. Snapshots are not backups and cannot restore Windows.");
+        ui.horizontal_wrapped(|ui| {
+            if kit::primary(ui, if self.busy.as_deref() == Some("Capture system snapshot") { "Capturing…" } else { "Capture snapshot" }, self.busy.is_none()).clicked() {
+                self.capture_system_snapshot(ctx);
+            }
+            ui.label(RichText::new("Stores OS, processor, graphics, memory and system-volume readings on this PC. Keeps the 30 newest captures.").size(T_SMALL).color(t.muted));
+        });
+        ui.add_space(S2);
+
+        if let Some(error) = &self.snapshots_error {
+            ui.label(RichText::new(error).size(T_SMALL).color(t.bad));
+            ui.add_space(S2);
+        }
+        if self.snapshots.is_empty() {
+            if self.snapshots_error.is_none() {
+                kit::card(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(RichText::new("No snapshots yet").font(FontId::new(T_BODY, semibold())).color(t.text));
+                    ui.label(RichText::new("Capture an inventory to record the current Windows build and detected hardware. No system settings are changed.").size(T_SMALL).color(t.muted));
+                });
+            }
+            return;
+        }
+
+        for (index, snapshot) in self.snapshots.iter().enumerate() {
+            let os = if snapshot.operating_system.is_empty() { "Operating system unavailable" } else { &snapshot.operating_system };
+            egui::CollapsingHeader::new(format!("{} · {os}", snapshot.captured_at))
+                .id_salt(("system-snapshot", index))
+                .default_open(index == 0)
+                .show(ui, |ui| {
+                    let processor = if snapshot.processor.is_empty() { "Unavailable" } else { &snapshot.processor };
+                    let graphics = if snapshot.graphics.is_empty() { "Unavailable".into() } else { snapshot.graphics.join(", ") };
+                    let memory = match (snapshot.memory_used, snapshot.memory_total) {
+                        (Some(used), Some(total)) => format!("{} used of {}", format_size(Some(used)), format_size(Some(total))),
+                        _ => "Unavailable".into(),
+                    };
+                    let drive = match (snapshot.drive_used, snapshot.drive_total) {
+                        (Some(used), Some(total)) => format!("{} used of {}", format_size(Some(used)), format_size(Some(total))),
+                        _ => "Unavailable".into(),
+                    };
+                    for (label, value) in [
+                        ("Processor", processor.to_owned()),
+                        ("Logical threads", snapshot.logical_threads.to_string()),
+                        ("Graphics", graphics),
+                        ("Memory", memory),
+                        ("System volume", if snapshot.system_drive.is_empty() { drive } else { format!("{} · {drive}", snapshot.system_drive) }),
+                        ("Uptime at capture", crate::opti::sysmon::format_uptime(snapshot.uptime_seconds)),
+                    ] {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(label).size(T_SMALL).color(t.muted));
+                            ui.add(egui::Label::new(RichText::new(value).size(T_SMALL).color(t.text)).wrap());
+                        });
+                    }
+                });
+        }
     }
 
     fn diagnostics_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {

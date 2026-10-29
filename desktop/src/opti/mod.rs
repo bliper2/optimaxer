@@ -12,6 +12,7 @@ pub mod network;
 pub mod processes;
 pub mod profiles;
 pub mod services;
+pub mod snapshots;
 pub mod special;
 pub mod startup;
 pub mod state;

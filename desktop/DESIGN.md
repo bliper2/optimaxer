@@ -51,6 +51,8 @@ States: every control has rest, hover, pressed, disabled and keyboard focus. Foc
 
 The Optimaxer sidebar can collapse to a 64 px icon rail. Labels stay available as tooltips and accessibility names; the detected PC summary returns when expanded. The choice persists in application settings. Store navigation remains expanded because its platform and category entries use text labels and counts.
 
+The System Snapshot page uses a compact, collapsible history because each capture is a point-in-time inventory rather than a live dashboard. It labels unavailable readings explicitly and states that local snapshots cannot restore Windows.
+
 ## Motion
 
 Three lengths: fast 90 ms (hover, press), base 160 ms (selection, toggles), slow 260 ms (page enter). Everything eases out. Pages fade in with a 10 px rise when you switch view. The Store/Optimaxer thumb slides, toasts fade and rise in and fade out, and loading content pulses as skeleton rows. The activity dock uses the same global animation time when it opens or closes, including the reduced-motion setting.
