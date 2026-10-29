@@ -7,7 +7,7 @@ Optimaxer has three implementations. A passing suite verifies its covered behavi
 | Edition | Command | Coverage |
 | --- | --- | --- |
 | PowerShell | `powershell -NoProfile -ExecutionPolicy Bypass -File tests/Optimaxer.Tests.ps1` | Catalog and preset rules, scratch-registry apply/undo, failure reporting, backup refusal, restoration, cleaner boundaries and selected tools. System-changing commands are stubbed. |
-| Rust desktop | `cargo test --locked` in `desktop/` | Fake-system engine tests, saved originals and retries, service/task restoration, cleaner boundaries, update staging, local HTTP download failures, catalog processing and UI batch behavior. Some updater tests use real Windows tools against temporary files. |
+| Rust desktop | `cargo test --locked` in `desktop/` | Fake-system engine tests, saved originals and retries, service/task restoration, cleaner boundaries, update staging, local HTTP download failures, catalog processing, UI batch behavior and command-palette filtering. Some updater tests use real Windows tools against temporary files. |
 | Rust desktop | `cargo clippy --locked --all-targets -- -D warnings` | Static checks for production and test targets. |
 | Rust desktop | `cargo build --release --locked` | Release executable build. |
 | Linux | `python -B -m unittest discover -s linux/tests` | Simulated Arch/Fedora packages, files, systemd and NetworkManager; state failures, exact service restoration, dry run, startup flags, cleanup and updater validation. Tk tests exercise real widgets when a display is available. |
@@ -20,6 +20,8 @@ GitHub Actions runs Windows checks and Linux tests on both Windows and Ubuntu. T
 The built-in screenshot modes render each page without pressing system-changing controls. The maintenance audit rendered all twelve PowerShell pages and all nine Rust screenshot steps. Rust checks include dark mode at 1180 × 760 and light mode at 760 × 520. Navigation and page content scroll in compact windows, and the store search moves below the title controls when needed.
 
 Rendering confirms that pages open and produce images. It does not verify every click, keyboard path, display scale or assistive technology.
+
+The v2.15.5 Windows release build was also opened interactively at 1180 × 760: Commands opened the palette, searching `Tweaks` returned one result, and Enter navigated to the Tweaks page. This is a focused smoke check, not full keyboard-only or accessibility testing.
 
 ## Failure and restoration rules
 
