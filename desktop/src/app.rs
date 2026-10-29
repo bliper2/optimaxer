@@ -179,7 +179,7 @@ impl OrionApp {
         if settings.clear_restart_after_reboot(crate::opti::sysmon::uptime_secs()) {
             settings.save();
         }
-        theme::apply(&cc.egui_ctx, settings.effective_dark(), settings.reduce_motion, settings.style, settings.palette, settings.accent());
+        theme::apply(&cc.egui_ctx, settings.appearance());
         let catalog = net::load_cache().unwrap_or_else(net::embedded);
         let rx = spawn_refresh(&cc.egui_ctx);
         let (update_tx, update_rx) = channel();
@@ -232,7 +232,7 @@ impl OrionApp {
     }
 
     fn reapply_theme(&mut self, ctx: &egui::Context) {
-        theme::apply(ctx, self.settings.effective_dark(), self.settings.reduce_motion, self.settings.style, self.settings.palette, self.settings.accent());
+        theme::apply(ctx, self.settings.appearance());
         self.sys_look = (theme::system_dark(), theme::system_accent());
     }
 
@@ -1319,6 +1319,34 @@ impl OrionApp {
                             self.settings.save();
                         }
                     });
+                    let mut density_index = theme::Density::ALL
+                        .iter()
+                        .position(|choice| *choice == self.settings.density)
+                        .unwrap_or(0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Density").color(t.muted));
+                        if kit::segmented(ui, &mut density_index, &["Comfortable", "Compact"]) {
+                            self.settings.density = theme::Density::ALL[density_index];
+                            self.reapply_theme(ctx);
+                            self.settings.save();
+                        }
+                    });
+                    let mut scale_index = theme::UiScale::ALL
+                        .iter()
+                        .position(|choice| *choice == self.settings.ui_scale)
+                        .unwrap_or(1);
+                    let scale_labels = theme::UiScale::ALL.map(theme::UiScale::label);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Scale").color(t.muted));
+                        if kit::segmented(ui, &mut scale_index, &scale_labels)
+                        {
+                            self.settings.ui_scale = theme::UiScale::ALL[scale_index];
+                            self.reapply_theme(ctx);
+                            self.settings.save();
+                        }
+                    })
+                    .response
+                    .on_hover_text("Changes text and interface size across Store and Optimaxer.");
                     let mut palette = self.settings.palette;
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Palette").color(t.muted));
@@ -1370,7 +1398,7 @@ impl OrionApp {
                     {
                         ui.add(egui::Label::new(RichText::new(message).size(T_CAPTION).color(t.muted)).wrap());
                     }
-                    ui.add(egui::Label::new(RichText::new("Appearance files include theme, control style, palette, accent and motion preference. They do not change other app settings or Windows settings.").size(T_CAPTION).color(t.subtle)).wrap());
+                    ui.add(egui::Label::new(RichText::new("Appearance files include theme, control style, palette, accent, density, scale and motion preference. They do not change other app settings or Windows settings.").size(T_CAPTION).color(t.subtle)).wrap());
                 });
                 ui.add_space(S2);
                 kit::card(ui, |ui| {

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 2;
 const MAX_PRESET_BYTES: u64 = 16 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -18,6 +18,10 @@ pub struct Preset {
     palette: Palette,
     custom_accent: String,
     reduce_motion: bool,
+    #[serde(default)]
+    density: crate::theme::Density,
+    #[serde(default)]
+    ui_scale: crate::theme::UiScale,
 }
 
 impl Preset {
@@ -29,11 +33,13 @@ impl Preset {
             palette: settings.palette,
             custom_accent: settings.custom_accent.clone(),
             reduce_motion: settings.reduce_motion,
+            density: settings.density,
+            ui_scale: settings.ui_scale,
         }
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.format_version != FORMAT_VERSION {
+        if !matches!(self.format_version, 1 | FORMAT_VERSION) {
             return Err(format!(
                 "Unsupported appearance format version {}.",
                 self.format_version
@@ -54,6 +60,8 @@ impl Preset {
         settings.palette = self.palette;
         settings.custom_accent.clone_from(&self.custom_accent);
         settings.reduce_motion = self.reduce_motion;
+        settings.density = self.density;
+        settings.ui_scale = self.ui_scale;
     }
 }
 
@@ -104,6 +112,8 @@ mod tests {
             palette: Palette::Custom,
             custom_accent: "#12ABEF".into(),
             reduce_motion: true,
+            density: crate::theme::Density::Compact,
+            ui_scale: crate::theme::UiScale::Larger,
             ..Settings::default()
         };
         let preset = Preset::capture(&source);
@@ -122,6 +132,8 @@ mod tests {
         assert_eq!(destination.palette, Palette::Custom);
         assert_eq!(destination.custom_accent, "#12ABEF");
         assert!(destination.reduce_motion);
+        assert_eq!(destination.density, crate::theme::Density::Compact);
+        assert_eq!(destination.ui_scale, crate::theme::UiScale::Larger);
         assert_eq!(destination.download_dir, "keep-this-path");
         assert!(!destination.auto_update);
     }
@@ -129,7 +141,7 @@ mod tests {
     #[test]
     fn invalid_version_mode_and_accent_are_rejected() {
         let mut preset = Preset::capture(&Settings::default());
-        preset.format_version = 2;
+        preset.format_version = 3;
         assert!(preset.validate().unwrap_err().contains("version"));
         preset.format_version = FORMAT_VERSION;
         preset.theme = "automatic-ish".into();
@@ -137,6 +149,21 @@ mod tests {
         preset.theme = "system".into();
         preset.custom_accent = "red".into();
         assert!(preset.validate().unwrap_err().contains("accent"));
+    }
+
+    #[test]
+    fn version_one_appearance_preset_migrates_with_default_density_and_scale() {
+        let json = r##"{"format_version":1,"theme":"dark","style":"windows","palette":"system","custom_accent":"#7478F8","reduce_motion":false}"##;
+        let preset: Preset = serde_json::from_str(json).unwrap();
+        preset.validate().unwrap();
+        let mut settings = Settings {
+            density: crate::theme::Density::Compact,
+            ui_scale: crate::theme::UiScale::Larger,
+            ..Settings::default()
+        };
+        preset.apply(&mut settings);
+        assert_eq!(settings.density, crate::theme::Density::Comfortable);
+        assert_eq!(settings.ui_scale, crate::theme::UiScale::Default);
     }
 
     #[test]

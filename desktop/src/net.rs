@@ -121,6 +121,10 @@ pub struct Settings {
     pub reduce_motion: bool,
     /// Windows (Fluent), Classic or Material.
     pub style: crate::theme::Style,
+    /// Spacing between controls.
+    pub density: crate::theme::Density,
+    /// Scale for text and interface dimensions.
+    pub ui_scale: crate::theme::UiScale,
     /// Named color palette; control shape remains controlled by `style`.
     #[serde(deserialize_with = "crate::theme::deserialize_palette")]
     pub palette: crate::theme::Palette,
@@ -133,11 +137,23 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let dir = dirs::download_dir().unwrap_or_else(|| PathBuf::from(".")).join("Orion");
-        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), sidebar_collapsed: false, opti_restore_point: true, opti_restart_required: false, opti_restart_uptime: 0, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, palette: crate::theme::Palette::System, custom_accent: crate::theme::hex_color(crate::theme::BRAND), auto_update: true }
+        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), sidebar_collapsed: false, opti_restore_point: true, opti_restart_required: false, opti_restart_uptime: 0, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, density: crate::theme::Density::Comfortable, ui_scale: crate::theme::UiScale::Default, palette: crate::theme::Palette::System, custom_accent: crate::theme::hex_color(crate::theme::BRAND), auto_update: true }
     }
 }
 
 impl Settings {
+    pub fn appearance(&self) -> crate::theme::Appearance {
+        crate::theme::Appearance {
+            dark: self.effective_dark(),
+            reduce_motion: self.reduce_motion,
+            style: self.style,
+            palette: self.palette,
+            accent: self.accent(),
+            density: self.density,
+            scale: self.ui_scale,
+        }
+    }
+
     /// Clear a pending restart reminder after the system uptime resets.
     pub fn clear_restart_after_reboot(&mut self, uptime: u64) -> bool {
         if self.opti_restart_required && uptime < self.opti_restart_uptime {
@@ -412,6 +428,8 @@ mod tests {
         assert_eq!(settings.theme, "dark");
         assert_eq!(settings.download_dir, "D:/Apps");
         assert_eq!(settings.palette, crate::theme::Palette::System);
+        assert_eq!(settings.density, crate::theme::Density::Comfortable);
+        assert_eq!(settings.ui_scale, crate::theme::UiScale::Default);
         assert_eq!(settings.custom_accent, "#7478F8");
         assert!(!settings.sidebar_collapsed);
         assert!(!settings.opti_restart_required);
