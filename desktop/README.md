@@ -67,6 +67,10 @@ When a tweak batch changes a setting that needs a Windows restart, Optimaxer sav
 
 The Processes page reads process CPU time, working-set memory and image paths on a background worker. CPU is an estimate over the three-second sample interval, normalized to total logical processor capacity. Windows-denied fields show as unavailable; the page never terminates processes. Publisher, GPU, temperature, disk-activity and network-throughput measurements are not included.
 
+The Tweaks page can save up to 20 named selections locally and import or export versioned JSON profiles. Local profiles live at `%LOCALAPPDATA%\OrionStore\profiles.json`. Import selects only known, non-retired, non-opt-in tweaks that fit the current hardware; unavailable or incompatible IDs are skipped with a count. Import never applies changes. Applying a selected profile still requires administrator access, an exact preview and confirmation. Profiles contain tweak IDs only, not Windows settings or backup data. See the [profile format and import rules](../docs/profile-format.md).
+
+Settings can import/export a versioned appearance preset containing theme mode, control style, palette, custom accent and reduced-motion preference. Import validates the file and updates only those appearance fields; it does not change Windows settings or other application preferences. The schema and validation are implemented in `src/appearance.rs`.
+
 The verification scope and remaining integration checks are listed in [verification.md](../docs/verification.md).
 
 Nothing is downloaded or installed automatically, and Optimaxer never installs drivers. The vendor driver button only opens the maker's support page.
@@ -87,7 +91,7 @@ powershell -NoProfile -File tools\export-optimaxer.ps1
 
 ## Screenshots
 
-`ORION_SHOTS=<folder>` makes the app walk through its pages, save each one as a PNG of its own window, and exit. It uses egui's viewport screenshot, so only the app window is captured. Set `ORION_SHOTS_SIDEBAR_COLLAPSED=true` to capture the Optimaxer icon rail or `ORION_SHOTS_RESTART_REQUIRED=true` to capture the restart reminder; screenshot mode never saves these overrides to settings.
+`ORION_SHOTS=<folder>` makes the app walk through its pages, save each one as a PNG of its own window, and exit. It uses egui's viewport screenshot, so only the app window is captured. Set `ORION_SHOTS_SIDEBAR_COLLAPSED=true` to capture the Optimaxer icon rail, `ORION_SHOTS_RESTART_REQUIRED=true` to capture the restart reminder, or `ORION_SHOTS_PROFILE_OPEN=true` to expand Profiles on the Tweaks page. Screenshot mode never saves these overrides to settings.
 
 ## License
 
@@ -96,5 +100,7 @@ This folder is GPL-3.0 (see `LICENSE` here) because the Store client is derived 
 ## Credits
 
 The Store half is built on [Orion Store](https://github.com/RookieEnough/Orion-Store) by RookieEnough (GPL-3.0): the client code, the embedded offline catalog and the catalog format. Live catalog data comes from [Orion-Data](https://github.com/RookieEnough/Orion-Data). Thank you to everyone who works on it.
+
+Profile open/save dialogs use [rfd 0.17.2](https://docs.rs/rfd/0.17.2/), MIT licensed. Its license is included in the repository's [third-party notices](../THIRD-PARTY-NOTICES.md).
 
 Optimaxer is MIT licensed, with tweak ideas from WinUtil and Win11Debloat (both MIT, see Optimaxer's `THIRD-PARTY-NOTICES.md`).

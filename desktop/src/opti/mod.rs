@@ -8,6 +8,7 @@ pub mod hw;
 pub mod history;
 pub mod network;
 pub mod processes;
+pub mod profiles;
 pub mod services;
 pub mod special;
 pub mod startup;
