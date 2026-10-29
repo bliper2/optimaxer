@@ -12,14 +12,14 @@ Snapshot of the repository at v2.15.4 (`2672279`). This describes implemented sc
 | Packages | WinGet install, upgrade, remove and verify | pacman, AUR helper, dnf and Flatpak flows | Orion catalog downloads; no package-manager install/remove workflow |
 | Network | DNS/DoH, benchmark, reset and opt-in hosts block | NetworkManager DNS and active connections | DNS/DoH, benchmark and reset |
 | Tools | Windows maintenance, boot cost, game profiles, wake sources, search exclusions and PresentMon measurement | System updates, mirrors, failed units, `.pacnew`/`.rpmnew`, SMART health | Restore point, memory, TRIM, SFC/DISM, cache resets, registry backup, network and maintenance tools |
-| Appearance | System/dark/light and several named palettes; motion setting | Nine Tk themes and dry-run control | System/light/dark mode, three shape styles, system accent following and reduced motion |
+| Appearance | System/dark/light and several named palettes; motion setting | Nine Tk themes and dry-run control | System/light/dark mode, three shape styles, 16 named palettes plus saved custom accent, reduced motion |
 | Data portability | Tweak/app selection export and import | Tweak/package selection export and import | No equivalent profile/config import/export workflow |
 
 ## Rust desktop baseline and gaps
 
 The Rust app has seven Optimaxer pages: Overview, Tweaks, Services, Startup, Cleaner, Network and Tools. The Overview samples real CPU, physical-memory, system-drive, uptime and process readings once per second. It does not currently sample network throughput, GPU load, temperatures or per-process resource use; the UI must not imply those readings exist.
 
-Settings currently expose system/light/dark mode, Windows/Classic/Material control styling, reduced motion, update checks, download location and restore-point preference. There is no independent named-palette or custom-theme editor. The navigation rail is fixed-width. There is no separate Performance Center, Gaming Hub, operation timeline, profiles page, notification center or system snapshot browser. Existing exact-undo records, activity log, service backups and confirmation previews remain the source of truth for their respective operations.
+Settings expose system/light/dark mode, Windows/Classic/Material control styling, 16 named color palettes, saved custom accent, reduced motion, update checks, download location and restore-point preference. Palette choice remains separate from control shape; custom accent text and action fills are contrast-adjusted. Density, font and corner-radius controls, theme import/export and full custom surface editing are not implemented. The navigation rail is fixed-width. There is no separate Performance Center, Gaming Hub, operation timeline, profiles page, notification center or system snapshot browser. Existing exact-undo records, activity log, service backups and confirmation previews remain the source of truth for their respective operations.
 
 The command palette is the first addition from this audit: `Ctrl+K` and the visible Commands button expose existing pages, Store search, Downloads and Settings. It does not claim absent features or trigger system changes.
 

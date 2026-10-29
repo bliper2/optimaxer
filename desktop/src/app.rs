@@ -167,7 +167,7 @@ impl OrionApp {
                 _ => {}
             }
         }
-        theme::apply(&cc.egui_ctx, settings.effective_dark(), settings.reduce_motion, settings.style, theme::system_accent());
+        theme::apply(&cc.egui_ctx, settings.effective_dark(), settings.reduce_motion, settings.style, settings.palette, settings.accent());
         let catalog = net::load_cache().unwrap_or_else(net::embedded);
         let rx = spawn_refresh(&cc.egui_ctx);
         let (update_tx, update_rx) = channel();
@@ -220,7 +220,7 @@ impl OrionApp {
     }
 
     fn reapply_theme(&mut self, ctx: &egui::Context) {
-        theme::apply(ctx, self.settings.effective_dark(), self.settings.reduce_motion, self.settings.style, theme::system_accent());
+        theme::apply(ctx, self.settings.effective_dark(), self.settings.reduce_motion, self.settings.style, self.settings.palette, self.settings.accent());
         self.sys_look = (theme::system_dark(), theme::system_accent());
     }
 
@@ -1259,88 +1259,127 @@ impl OrionApp {
                 });
             });
             ui.add_space(S3);
-            kit::card(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(RichText::new("Appearance").font(FontId::new(T_BODY, semibold())).color(t.text));
-                let mut ti = match self.settings.theme.as_str() {
-                    "light" => 1,
-                    "dark" => 2,
-                    _ => 0,
-                };
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Theme").color(t.muted));
-                    if kit::segmented(ui, &mut ti, &["Windows", "Light", "Dark"]) {
-                        self.settings.theme = ["system", "light", "dark"][ti].into();
+            egui::ScrollArea::vertical()
+                .id_salt("settings-content")
+                .max_height((ctx.content_rect().height() - 110.0).max(200.0))
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                kit::card(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(RichText::new("Appearance").font(FontId::new(T_BODY, semibold())).color(t.text));
+                    let mut ti = match self.settings.theme.as_str() {
+                        "light" => 1,
+                        "dark" => 2,
+                        _ => 0,
+                    };
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Theme").color(t.muted));
+                        if let Some(dark) = self.settings.palette.forced_dark() {
+                            ui.label(if dark { "Dark (set by palette)" } else { "Light (set by palette)" });
+                        } else if kit::segmented(ui, &mut ti, &["System", "Light", "Dark"]) {
+                            self.settings.theme = ["system", "light", "dark"][ti].into();
+                            self.reapply_theme(ctx);
+                            self.settings.save();
+                        }
+                    });
+                    let mut si = theme::Style::ALL.iter().position(|x| *x == self.settings.style).unwrap_or(0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Style").color(t.muted));
+                        if kit::segmented(ui, &mut si, &["Windows", "Classic", "Material"]) {
+                            self.settings.style = theme::Style::ALL[si];
+                            self.reapply_theme(ctx);
+                            self.settings.save();
+                        }
+                    });
+                    let mut palette = self.settings.palette;
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Palette").color(t.muted));
+                        egui::ComboBox::from_id_salt("appearance-palette").selected_text(palette.label()).show_ui(ui, |ui| {
+                            for choice in theme::Palette::ALL {
+                                ui.selectable_value(&mut palette, choice, choice.label());
+                            }
+                        });
+                    });
+                    if palette != self.settings.palette {
+                        self.settings.palette = palette;
+                        self.reapply_theme(ctx);
+                        self.settings.save();
+                    }
+                    if self.settings.palette == theme::Palette::Custom {
+                        let mut accent = theme::parse_hex_color(&self.settings.custom_accent).unwrap_or(theme::BRAND);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Custom accent").color(t.muted));
+                            if ui.color_edit_button_srgba(&mut accent).changed() {
+                                self.settings.custom_accent = theme::hex_color(accent);
+                                self.reapply_theme(ctx);
+                                self.settings.save();
+                            }
+                            if kit::ghost(ui, "Reset", true).clicked() {
+                                self.settings.custom_accent = theme::hex_color(theme::BRAND);
+                                self.reapply_theme(ctx);
+                                self.settings.save();
+                            }
+                            ui.label(RichText::new(&self.settings.custom_accent).size(T_CAPTION).color(t.subtle));
+                        });
+                    }
+                    ui.add(egui::Label::new(RichText::new("Color palettes are separate from control shape. System follows Windows; Custom saves an accessible accent and keeps contrast-adjusted text.").size(T_CAPTION).color(t.subtle)).wrap());
+                    let mut reduce = self.settings.reduce_motion;
+                    if ui.checkbox(&mut reduce, "Reduce motion").on_hover_text("Turns off transitions and the loading pulse. Follows the Windows setting by default.").changed() {
+                        self.settings.reduce_motion = reduce;
                         self.reapply_theme(ctx);
                         self.settings.save();
                     }
                 });
-                let mut si = theme::Style::ALL.iter().position(|x| *x == self.settings.style).unwrap_or(0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Style").color(t.muted));
-                    if kit::segmented(ui, &mut si, &["Windows", "Classic", "Material"]) {
-                        self.settings.style = theme::Style::ALL[si];
-                        self.reapply_theme(ctx);
+                ui.add_space(S2);
+                kit::card(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(RichText::new("Updates").font(FontId::new(T_BODY, semibold())).color(t.text));
+                    let mut auto = self.settings.auto_update;
+                    if ui.checkbox(&mut auto, "Check for updates when the app starts").on_hover_text("Only checks. Nothing is downloaded until you press Update and restart.").changed() {
+                        self.settings.auto_update = auto;
+                        self.settings.save();
+                    }
+                    ui.horizontal(|ui| {
+                        let busy = matches!(self.update, UpdateState::Checking | UpdateState::Downloading { .. });
+                        if kit::secondary(ui, if matches!(self.update, UpdateState::Checking) { "Checking" } else { "Check now" }, !busy).clicked() {
+                            self.start_check(ctx, true);
+                        }
+                        let text = if self.update_note.is_empty() { format!("Version v{}", update::CURRENT) } else { self.update_note.clone() };
+                        ui.add(egui::Label::new(RichText::new(text).size(T_SMALL).color(t.muted)).wrap());
+                    });
+                });
+                ui.add_space(S2);
+                kit::card(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(RichText::new("Downloads").font(FontId::new(T_BODY, semibold())).color(t.text));
+                    let resp = ui.add(egui::TextEdit::singleline(&mut self.settings.download_dir).desired_width(f32::INFINITY).margin(Margin::symmetric(S3 as i8, 8)));
+                    if resp.lost_focus() {
+                        self.settings.save();
+                    }
+                    ui.horizontal(|ui| {
+                        if kit::secondary(ui, "Open folder", true).clicked() {
+                            let _ = std::fs::create_dir_all(&self.settings.download_dir);
+                            let _ = open::that(&self.settings.download_dir);
+                        }
+                        if kit::ghost(ui, "Reset", true).clicked() {
+                            self.settings.download_dir = Settings::default().download_dir;
+                            self.settings.save();
+                        }
+                    });
+                });
+                ui.add_space(S2);
+                kit::card(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(RichText::new("Optimaxer").font(FontId::new(T_BODY, semibold())).color(t.text));
+                    let mut rp = self.settings.opti_restore_point;
+                    if ui.checkbox(&mut rp, "Offer a System Restore point before applying tweaks").changed() {
+                        self.settings.opti_restore_point = rp;
                         self.settings.save();
                     }
                 });
-                ui.add(egui::Label::new(RichText::new("Windows follows your Windows light or dark mode and accent colour. Classic is the original indigo and lime. Material uses Material Design 3 colours.").size(T_CAPTION).color(t.subtle)).wrap());
-                let mut reduce = self.settings.reduce_motion;
-                if ui.checkbox(&mut reduce, "Reduce motion").on_hover_text("Turns off transitions and the loading pulse. Follows the Windows setting by default.").changed() {
-                    self.settings.reduce_motion = reduce;
-                    self.reapply_theme(ctx);
-                    self.settings.save();
-                }
-            });
-            ui.add_space(S2);
-            kit::card(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(RichText::new("Updates").font(FontId::new(T_BODY, semibold())).color(t.text));
-                let mut auto = self.settings.auto_update;
-                if ui.checkbox(&mut auto, "Check for updates when the app starts").on_hover_text("Only checks. Nothing is downloaded until you press Update and restart.").changed() {
-                    self.settings.auto_update = auto;
-                    self.settings.save();
-                }
-                ui.horizontal(|ui| {
-                    let busy = matches!(self.update, UpdateState::Checking | UpdateState::Downloading { .. });
-                    if kit::secondary(ui, if matches!(self.update, UpdateState::Checking) { "Checking" } else { "Check now" }, !busy).clicked() {
-                        self.start_check(ctx, true);
-                    }
-                    let text = if self.update_note.is_empty() { format!("Version v{}", update::CURRENT) } else { self.update_note.clone() };
-                    ui.add(egui::Label::new(RichText::new(text).size(T_SMALL).color(t.muted)).wrap());
+                ui.add_space(S3);
+                ui.label(RichText::new(format!("Data folder: {}", net::data_dir().display())).size(T_CAPTION).color(t.subtle));
                 });
-            });
-            ui.add_space(S2);
-            kit::card(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(RichText::new("Downloads").font(FontId::new(T_BODY, semibold())).color(t.text));
-                let resp = ui.add(egui::TextEdit::singleline(&mut self.settings.download_dir).desired_width(f32::INFINITY).margin(Margin::symmetric(S3 as i8, 8)));
-                if resp.lost_focus() {
-                    self.settings.save();
-                }
-                ui.horizontal(|ui| {
-                    if kit::secondary(ui, "Open folder", true).clicked() {
-                        let _ = std::fs::create_dir_all(&self.settings.download_dir);
-                        let _ = open::that(&self.settings.download_dir);
-                    }
-                    if kit::ghost(ui, "Reset", true).clicked() {
-                        self.settings.download_dir = Settings::default().download_dir;
-                        self.settings.save();
-                    }
-                });
-            });
-            ui.add_space(S2);
-            kit::card(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(RichText::new("Optimaxer").font(FontId::new(T_BODY, semibold())).color(t.text));
-                let mut rp = self.settings.opti_restore_point;
-                if ui.checkbox(&mut rp, "Offer a System Restore point before applying tweaks").changed() {
-                    self.settings.opti_restore_point = rp;
-                    self.settings.save();
-                }
-            });
-            ui.add_space(S3);
-            ui.label(RichText::new(format!("Data folder: {}", net::data_dir().display())).size(T_CAPTION).color(t.subtle));
         });
         if resp.should_close() {
             self.show_settings = false;

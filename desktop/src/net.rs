@@ -112,6 +112,11 @@ pub struct Settings {
     pub reduce_motion: bool,
     /// Windows (Fluent), Classic or Material.
     pub style: crate::theme::Style,
+    /// Named color palette; control shape remains controlled by `style`.
+    #[serde(deserialize_with = "crate::theme::deserialize_palette")]
+    pub palette: crate::theme::Palette,
+    /// Saved custom accent as #RRGGBB.
+    pub custom_accent: String,
     /// Look for a newer release when the app starts. Nothing is downloaded until you press the update button.
     pub auto_update: bool,
 }
@@ -119,17 +124,28 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let dir = dirs::download_dir().unwrap_or_else(|| PathBuf::from(".")).join("Orion");
-        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), opti_restore_point: true, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, auto_update: true }
+        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), opti_restore_point: true, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, palette: crate::theme::Palette::System, custom_accent: crate::theme::hex_color(crate::theme::BRAND), auto_update: true }
     }
 }
 
 impl Settings {
     /// Whether the app draws dark: the saved choice, or Windows' own setting when it follows the system.
     pub fn effective_dark(&self) -> bool {
+        if let Some(dark) = self.palette.forced_dark() {
+            return dark;
+        }
         match self.theme.as_str() {
             "light" => false,
             "dark" => true,
             _ => crate::theme::system_dark(),
+        }
+    }
+
+    pub fn accent(&self) -> egui::Color32 {
+        if self.palette == crate::theme::Palette::Custom {
+            crate::theme::parse_hex_color(&self.custom_accent).unwrap_or(crate::theme::BRAND)
+        } else {
+            crate::theme::system_accent()
         }
     }
 
@@ -365,6 +381,42 @@ mod tests {
         let c = embedded();
         assert!(!c.apps.is_empty());
         assert!(c.apps.iter().all(|a| !a.id.is_empty() && !a.name.is_empty()));
+    }
+
+    #[test]
+    fn old_settings_gain_theme_defaults_without_resetting_existing_choices() {
+        let settings: Settings = serde_json::from_str(r#"{"theme":"dark","download_dir":"D:/Apps"}"#).unwrap();
+        assert_eq!(settings.theme, "dark");
+        assert_eq!(settings.download_dir, "D:/Apps");
+        assert_eq!(settings.palette, crate::theme::Palette::System);
+        assert_eq!(settings.custom_accent, "#7478F8");
+        assert!(settings.effective_dark());
+    }
+
+    #[test]
+    fn unknown_palette_falls_back_without_resetting_saved_settings() {
+        let settings: Settings = serde_json::from_str(r#"{"theme":"light","download_dir":"D:/Apps","palette":"future_palette"}"#).unwrap();
+        assert_eq!(settings.theme, "light");
+        assert_eq!(settings.download_dir, "D:/Apps");
+        assert_eq!(settings.palette, crate::theme::Palette::System);
+        assert!(!settings.effective_dark());
+    }
+
+    #[test]
+    fn explicit_palette_mode_and_custom_accent_survive_settings_round_trip() {
+        let mut settings = Settings {
+            palette: crate::theme::Palette::MaterialLight,
+            theme: "dark".into(),
+            custom_accent: "#12ABEF".into(),
+            ..Settings::default()
+        };
+        assert!(!settings.effective_dark(), "fixed light palette wins over the generic mode control");
+        settings.palette = crate::theme::Palette::Custom;
+        assert_eq!(settings.accent(), egui::Color32::from_rgb(0x12, 0xAB, 0xEF));
+        let saved = serde_json::to_string(&settings).unwrap();
+        let loaded: Settings = serde_json::from_str(&saved).unwrap();
+        assert_eq!(loaded.palette, crate::theme::Palette::Custom);
+        assert_eq!(loaded.custom_accent, "#12ABEF");
     }
 
     #[test]
