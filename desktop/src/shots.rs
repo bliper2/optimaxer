@@ -16,10 +16,11 @@ pub struct Shots {
 }
 
 /// (file name, seconds to wait after navigating before the capture)
-pub const STEPS: [(&str, f64); 11] = [
+pub const STEPS: [(&str, f64); 12] = [
     ("store", 9.0),
     ("store-detail", 3.0),
     ("optimaxer-overview", 14.0),
+    ("optimaxer-performance", 4.0),
     ("optimaxer-processes", 4.0),
     ("optimaxer-activity", 3.0),
     ("optimaxer-tweaks", 4.0),

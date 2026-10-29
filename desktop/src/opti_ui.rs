@@ -34,6 +34,7 @@ const LOG_LINES: usize = 600;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Page {
     Overview,
+    Performance,
     Processes,
     Activity,
     Tweaks,
@@ -45,8 +46,9 @@ pub enum Page {
 }
 
 impl Page {
-    const ALL: [Page; 9] = [
+    const ALL: [Page; 10] = [
         Page::Overview,
+        Page::Performance,
         Page::Processes,
         Page::Activity,
         Page::Tweaks,
@@ -60,6 +62,7 @@ impl Page {
     fn icon(self) -> char {
         match self {
             Page::Overview => '\u{E80F}',
+            Page::Performance => '\u{E9D2}',
             Page::Processes => '\u{E9D9}',
             Page::Activity => '\u{E81C}',
             Page::Tweaks => '\u{E9E9}',
@@ -74,6 +77,7 @@ impl Page {
     fn label(self) -> &'static str {
         match self {
             Page::Overview => "Overview",
+            Page::Performance => "Performance",
             Page::Processes => "Processes",
             Page::Activity => "Activity",
             Page::Tweaks => "Tweaks",
@@ -218,6 +222,7 @@ pub struct OptiUi {
     /// `ctx.input(|i| i.time)` when the page last changed, for the enter transition.
     page_started: f64,
     sampler: crate::opti::sysmon::Sampler,
+    telemetry_needs_reset: bool,
     info: Option<crate::opti::sysmon::SysInfo>,
     processes: Vec<ProcessInfo>,
     process_cpu: CpuTimes,
@@ -621,6 +626,7 @@ impl OptiUi {
             events: Vec::new(),
             page_started: 0.0,
             sampler: crate::opti::sysmon::Sampler::new(),
+            telemetry_needs_reset: true,
             info: None,
             processes: Vec::new(),
             process_cpu: CpuTimes::new(),
@@ -646,6 +652,10 @@ impl OptiUi {
     }
 
     fn set_page(&mut self, ctx: &egui::Context, p: Page) {
+        let live = |page| matches!(page, Page::Overview | Page::Performance);
+        if live(p) != live(self.page) {
+            self.telemetry_needs_reset = true;
+        }
         self.page = p;
         self.start_transition(ctx);
     }
@@ -1464,6 +1474,7 @@ impl OptiUi {
             ui.add_enabled_ui(self.pending.is_none(), |ui| {
                 egui::ScrollArea::vertical().id_salt(("optimaxer-page", self.page.label())).auto_shrink([false, false]).show(ui, |ui| match self.page {
                     Page::Overview => self.overview_page(ui, ctx),
+                    Page::Performance => self.performance_page(ui, ctx),
                     Page::Processes => self.processes_page(ui, ctx),
                     Page::Activity => self.activity_page(ui, ctx),
                     Page::Tweaks => self.tweaks_page(ui, ctx),
@@ -1544,11 +1555,23 @@ impl OptiUi {
         ui.add_sized([260.0, 34.0], egui::TextEdit::singleline(text).hint_text(hint).margin(Margin::symmetric(S3 as i8, 8)));
     }
 
+    fn tick_telemetry(&mut self, ctx: &egui::Context) {
+        if self.telemetry_needs_reset {
+            self.sampler.reset_window();
+            self.telemetry_needs_reset = false;
+        }
+        self.sampler.tick();
+        ctx.request_repaint_after(Duration::from_secs(1));
+    }
+
+    pub fn suspend_telemetry(&mut self) {
+        self.telemetry_needs_reset = true;
+    }
+
     fn overview_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         use crate::opti::sysmon::{format_uptime, read_info};
         let t = tokens(ctx);
-        self.sampler.tick();
-        ctx.request_repaint_after(std::time::Duration::from_millis(1000));
+        self.tick_telemetry(ctx);
         let info = self.info.get_or_insert_with(|| read_info(&WinSystem)).clone();
         let s = self.sampler.latest;
         kit::page_header(ui, "Overview", "Live readings from this PC, and the quickest ways to tune it.");
@@ -1579,9 +1602,9 @@ impl OptiUi {
             ui.horizontal_top(|ui| {
                 let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
                 let cards = [
-                    ("Processor", s.cpu / 100.0, format!("{:.0}%", s.cpu), format!("{} threads", info.threads), kit::load_color(&t, s.cpu)),
-                    ("Memory", s.ram_fraction(), format!("{:.0}%", s.ram_fraction() * 100.0), format!("{} of {}", format_size(Some(s.ram_used)), format_size(Some(s.ram_total))), kit::load_color(&t, s.ram_fraction() * 100.0)),
-                    ("Storage", s.disk_fraction(), format!("{:.0}%", s.disk_fraction() * 100.0), format!("{drive} {} of {}", format_size(Some(s.disk_used)), format_size(Some(s.disk_total))), kit::load_color(&t, s.disk_fraction() * 100.0)),
+                    ("Processor", s.cpu / 100.0, if s.cpu_available { format!("{:.0}%", s.cpu) } else { "Unavailable".into() }, if s.cpu_available { format!("{} threads", info.threads) } else { "Windows CPU counters unavailable".into() }, if s.cpu_available { kit::load_color(&t, s.cpu) } else { t.muted }),
+                    ("Memory", s.ram_fraction(), if s.ram_available { format!("{:.0}%", s.ram_fraction() * 100.0) } else { "Unavailable".into() }, if s.ram_available { format!("{} of {}", format_size(Some(s.ram_used)), format_size(Some(s.ram_total))) } else { "Windows memory counters unavailable".into() }, if s.ram_available { kit::load_color(&t, s.ram_fraction() * 100.0) } else { t.muted }),
+                    ("Storage", s.disk_fraction(), if s.disk_available { format!("{:.0}%", s.disk_fraction() * 100.0) } else { "Unavailable".into() }, if s.disk_available { format!("{drive} {} of {}", format_size(Some(s.disk_used)), format_size(Some(s.disk_total))) } else { "Windows volume counters unavailable".into() }, if s.disk_available { kit::load_color(&t, s.disk_fraction() * 100.0) } else { t.muted }),
                 ];
                 for (name, frac, value, sub, color) in cards {
                     let card_height = if compact { 126.0 } else { 132.0 };
@@ -1605,19 +1628,6 @@ impl OptiUi {
                                     kit::gauge(ui, 92.0, frac, color, &value, "in use");
                                 });
                             }
-                        });
-                    });
-                }
-            });
-            let w2 = ((ui.available_width() - gap) / 2.0 - 1.0).floor();
-            ui.horizontal_top(|ui| {
-                for (title, data, color) in [("Processor, last 60 seconds", &self.sampler.cpu_history, kit::load_color(&t, s.cpu)), ("Memory, last 60 seconds", &self.sampler.ram_history, kit::load_color(&t, s.ram_fraction() * 100.0))] {
-                    ui.allocate_ui_with_layout(vec2(w2, 150.0), Layout::top_down(Align::Min), |ui| {
-                        kit::card(ui, |ui| {
-                            ui.set_width(w2 - 2.0 * S4 - 2.0);
-                            ui.label(RichText::new(title).font(FontId::new(T_BODY, semibold())).color(t.text));
-                            ui.add_space(S1);
-                            kit::sparkline(ui, vec2(w2 - 2.0 * S4 - 2.0, 86.0), data, color);
                         });
                     });
                 }
@@ -1681,6 +1691,99 @@ impl OptiUi {
                 }
             });
             ui.add_space(S3);
+        });
+    }
+
+    fn performance_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let t = tokens(ctx);
+        self.tick_telemetry(ctx);
+        let snapshot = self.sampler.latest;
+        kit::page_header(
+            ui,
+            "Performance",
+            "Live CPU, memory and adapter traffic. Disk activity and GPU load are unavailable in this build.",
+        );
+        ui.horizontal_wrapped(|ui| {
+            kit::card(ui, |ui| {
+                ui.set_min_width(150.0);
+                ui.label(RichText::new("Processor").size(T_SMALL).color(t.muted));
+                ui.label(RichText::new(if snapshot.cpu_available { format!("{:.0}%", snapshot.cpu) } else { "Unavailable".into() }).font(FontId::new(T_TITLE, semibold())).color(t.text));
+                let detail = if snapshot.cpu_available { "total logical CPU capacity" } else { "Windows CPU counters unavailable" };
+                ui.label(RichText::new(detail).size(T_CAPTION).color(t.subtle));
+            });
+            kit::card(ui, |ui| {
+                ui.set_min_width(150.0);
+                ui.label(RichText::new("Memory").size(T_SMALL).color(t.muted));
+                ui.label(RichText::new(if snapshot.ram_available { format!("{:.1}%", snapshot.ram_fraction() * 100.0) } else { "Unavailable".into() }).font(FontId::new(T_TITLE, semibold())).color(t.text));
+                let detail = if snapshot.ram_available {
+                    format!("{} of {}", format_size(Some(snapshot.ram_used)), format_size(Some(snapshot.ram_total)))
+                } else {
+                    "Windows memory counters unavailable".into()
+                };
+                ui.label(RichText::new(detail).size(T_CAPTION).color(t.subtle));
+            });
+            if let Some(sample) = snapshot.network {
+                kit::card(ui, |ui| {
+                    ui.set_min_width(180.0);
+                    ui.label(RichText::new("Adapter receive / send").size(T_SMALL).color(t.muted));
+                    ui.label(RichText::new(format!("{} / {}", crate::opti::sysmon::format_network_rate(sample.received_bytes_per_sec), crate::opti::sysmon::format_network_rate(sample.sent_bytes_per_sec))).font(FontId::new(T_BODY, semibold())).color(t.text));
+                    ui.label(RichText::new("aggregate active adapters").size(T_CAPTION).color(t.subtle));
+                });
+            } else {
+                kit::card(ui, |ui| {
+                    ui.set_min_width(180.0);
+                    ui.label(RichText::new("Adapter receive / send").size(T_SMALL).color(t.muted));
+                    let status = if snapshot.network_available { "Collecting first sample" } else { "Unavailable" };
+                    ui.label(RichText::new(status).font(FontId::new(T_BODY, semibold())).color(t.subtle));
+                    ui.label(RichText::new("Windows adapter counters").size(T_CAPTION).color(t.subtle));
+                });
+            }
+        });
+        ui.add_space(S2);
+        let chart_width = ((ui.available_width() - S3) / 2.0).max(180.0);
+        ui.horizontal_top(|ui| {
+            for (title, data, value, color) in [
+                ("Processor, last 60 seconds", &self.sampler.cpu_history, snapshot.cpu, kit::load_color(&t, snapshot.cpu)),
+                ("Memory, last 60 seconds", &self.sampler.ram_history, snapshot.ram_fraction() * 100.0, kit::load_color(&t, snapshot.ram_fraction() * 100.0)),
+            ] {
+                ui.allocate_ui_with_layout(vec2(chart_width, 150.0), Layout::top_down(Align::Min), |ui| {
+                    kit::card(ui, |ui| {
+                        ui.set_width(chart_width - 2.0 * S4 - 2.0);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(title).font(FontId::new(T_BODY, semibold())).color(t.text));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(RichText::new(format!("{value:.0}%")).size(T_SMALL).color(t.muted));
+                            });
+                        });
+                        ui.add_space(S1);
+                        kit::sparkline(ui, vec2(chart_width - 2.0 * S4 - 2.0, 86.0), data, color);
+                    });
+                });
+            }
+        });
+        ui.add_space(S2);
+        kit::card(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("Adapter traffic, last 60 seconds").font(FontId::new(T_BODY, semibold())).color(t.text));
+                if let Some(sample) = snapshot.network {
+                    ui.label(RichText::new(format!("↓ {}", crate::opti::sysmon::format_network_rate(sample.received_bytes_per_sec))).size(T_SMALL).color(t.brand_text));
+                    ui.label(RichText::new(format!("↑ {}", crate::opti::sysmon::format_network_rate(sample.sent_bytes_per_sec))).size(T_SMALL).color(t.good));
+                } else {
+                    let status = if snapshot.network_available { "Sampling adapter counters…" } else { "Adapter counters unavailable" };
+                    ui.label(RichText::new(status).size(T_SMALL).color(t.muted));
+                }
+            });
+            ui.label(RichText::new("Aggregate active adapter counters. Virtual adapters may be included; this is not internet throughput.").size(T_CAPTION).color(t.subtle));
+            ui.add_space(S1);
+            kit::network_chart(ui, vec2(ui.available_width(), 100.0), &self.sampler.network_history, t.brand_text, t.good);
+        });
+        ui.add_space(S2);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Process-level CPU and working-set readings are available in Processes.").size(T_SMALL).color(t.muted));
+            if kit::secondary(ui, "Open Processes", true).clicked() {
+                self.set_page(ctx, Page::Processes);
+            }
         });
     }
 

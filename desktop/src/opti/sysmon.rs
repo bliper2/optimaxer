@@ -7,6 +7,10 @@ use super::hw;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::FILETIME;
+use windows_sys::Win32::NetworkManagement::IpHelper::{
+    FreeMibTable, GetIfTable2, MIB_IF_ROW2, MIB_IF_TABLE2, MIB_IF_TYPE_LOOPBACK,
+};
+use windows_sys::Win32::NetworkManagement::Ndis::NET_IF_OPER_STATUS_UP;
 use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 use windows_sys::Win32::System::ProcessStatus::EnumProcesses;
 use windows_sys::Win32::System::SystemInformation::{GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX};
@@ -15,15 +19,26 @@ use windows_sys::Win32::System::Threading::GetSystemTimes;
 pub const HISTORY: usize = 60;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct NetworkSample {
+    pub received_bytes_per_sec: f32,
+    pub sent_bytes_per_sec: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Snapshot {
     /// 0 to 100
     pub cpu: f32,
+    pub cpu_available: bool,
     pub ram_used: u64,
     pub ram_total: u64,
+    pub ram_available: bool,
     pub disk_used: u64,
     pub disk_total: u64,
+    pub disk_available: bool,
     pub uptime: u64,
     pub processes: u32,
+    pub network: Option<NetworkSample>,
+    pub network_available: bool,
 }
 
 impl Snapshot {
@@ -66,25 +81,25 @@ fn read_times() -> Option<(u64, u64, u64)> {
     (unsafe { GetSystemTimes(&mut i, &mut k, &mut u) } != 0).then(|| (ft(&i), ft(&k), ft(&u)))
 }
 
-fn read_memory() -> (u64, u64) {
+fn read_memory() -> Option<(u64, u64)> {
     let mut m: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
     m.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
     // SAFETY: dwLength is set and `m` is a valid out-pointer.
     if unsafe { GlobalMemoryStatusEx(&mut m) } == 0 {
-        return (0, 0);
+        return None;
     }
-    (m.ullTotalPhys.saturating_sub(m.ullAvailPhys), m.ullTotalPhys)
+    Some((m.ullTotalPhys.saturating_sub(m.ullAvailPhys), m.ullTotalPhys))
 }
 
-fn read_disk() -> (u64, u64) {
+fn read_disk() -> Option<(u64, u64)> {
     let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
     let path: Vec<u16> = format!("{drive}\\").encode_utf16().chain(std::iter::once(0)).collect();
     let (mut free, mut total, mut total_free) = (0u64, 0u64, 0u64);
     // SAFETY: NUL-terminated path and three valid out-pointers.
     if unsafe { GetDiskFreeSpaceExW(path.as_ptr(), &mut free, &mut total, &mut total_free) } == 0 {
-        return (0, 0);
+        return None;
     }
-    (total.saturating_sub(total_free), total)
+    Some((total.saturating_sub(total_free), total))
 }
 
 fn process_count() -> u32 {
@@ -103,13 +118,23 @@ pub struct Sampler {
     last_times: Option<(u64, u64, u64)>,
     last_at: Option<Instant>,
     pub latest: Snapshot,
-    pub cpu_history: VecDeque<f32>,
-    pub ram_history: VecDeque<f32>,
+    pub cpu_history: VecDeque<Option<f32>>,
+    pub ram_history: VecDeque<Option<f32>>,
+    pub network_history: VecDeque<Option<NetworkSample>>,
+    last_network_totals: Option<(u64, u64)>,
 }
 
 impl Sampler {
     pub fn new() -> Self {
-        Sampler { last_times: read_times(), last_at: None, latest: Snapshot::default(), cpu_history: VecDeque::new(), ram_history: VecDeque::new() }
+        Sampler {
+            last_times: read_times(),
+            last_at: None,
+            latest: Snapshot::default(),
+            cpu_history: VecDeque::new(),
+            ram_history: VecDeque::new(),
+            network_history: VecDeque::new(),
+            last_network_totals: read_network_totals(),
+        }
     }
 
     /// Takes a new reading when a second has passed. Returns true when it did.
@@ -117,27 +142,132 @@ impl Sampler {
         if self.last_at.is_some_and(|t| t.elapsed() < Duration::from_millis(950)) {
             return false;
         }
+        let sample_elapsed = self.last_at.map(|at| at.elapsed().as_secs_f64()).unwrap_or(0.0);
         self.last_at = Some(Instant::now());
         let now = read_times();
-        let cpu = match (self.last_times, now) {
-            (Some(p), Some(n)) => cpu_percent(p, n),
-            _ => self.latest.cpu,
+        let (cpu, cpu_available) = match (self.last_times, now) {
+            (Some(p), Some(n)) => (cpu_percent(p, n), true),
+            _ => (self.latest.cpu, false),
         };
         self.last_times = now;
-        let (ram_used, ram_total) = read_memory();
-        let (disk_used, disk_total) = read_disk();
-        self.latest = Snapshot { cpu, ram_used, ram_total, disk_used, disk_total, uptime: uptime_secs(), processes: process_count() };
-        push(&mut self.cpu_history, cpu);
-        push(&mut self.ram_history, self.latest.ram_fraction() * 100.0);
+        let (ram_used, ram_total, ram_available) = read_memory()
+            .map(|(used, total)| (used, total, true))
+            .unwrap_or((self.latest.ram_used, self.latest.ram_total, false));
+        let (disk_used, disk_total, disk_available) = read_disk()
+            .map(|(used, total)| (used, total, true))
+            .unwrap_or((self.latest.disk_used, self.latest.disk_total, false));
+        let network_totals = read_network_totals();
+        let network = network_totals
+            .zip(self.last_network_totals)
+            .and_then(|(now, previous)| network_rate(previous, now, sample_elapsed));
+        if let Some(totals) = network_totals {
+            self.last_network_totals = Some(totals);
+        }
+        self.latest = Snapshot {
+            cpu, cpu_available, ram_used, ram_total, ram_available, disk_used, disk_total, disk_available,
+            uptime: uptime_secs(), processes: process_count(),
+            network, network_available: network_totals.is_some(),
+        };
+        push(&mut self.cpu_history, cpu_available.then_some(cpu));
+        push(
+            &mut self.ram_history,
+            ram_available.then_some(self.latest.ram_fraction() * 100.0),
+        );
+        push_network(&mut self.network_history, network);
         true
+    }
+
+    /// Start a fresh chart window when the Overview becomes visible again.
+    pub fn reset_window(&mut self) {
+        self.last_times = read_times();
+        self.last_at = None;
+        self.latest.cpu_available = false;
+        self.latest.ram_available = false;
+        self.latest.disk_available = false;
+        self.latest.network = None;
+        self.latest.network_available = false;
+        self.cpu_history.clear();
+        self.ram_history.clear();
+        self.network_history.clear();
+        self.last_network_totals = read_network_totals();
     }
 }
 
-fn push(h: &mut VecDeque<f32>, v: f32) {
+fn push(h: &mut VecDeque<Option<f32>>, v: Option<f32>) {
     if h.len() >= HISTORY {
         h.pop_front();
     }
     h.push_back(v);
+}
+
+fn push_network(h: &mut VecDeque<Option<NetworkSample>>, value: Option<NetworkSample>) {
+    if h.len() >= HISTORY {
+        h.pop_front();
+    }
+    h.push_back(value);
+}
+
+/// Aggregate counters from active non-loopback adapters. These are adapter counters, not internet throughput.
+fn read_network_totals() -> Option<(u64, u64)> {
+    let mut table: *mut MIB_IF_TABLE2 = std::ptr::null_mut();
+    // SAFETY: `table` is a valid out-pointer. Windows owns the returned table until FreeMibTable.
+    if unsafe { GetIfTable2(&mut table) } != 0 || table.is_null() {
+        return None;
+    }
+    struct MibTable(*mut MIB_IF_TABLE2);
+    impl Drop for MibTable {
+        fn drop(&mut self) {
+            // SAFETY: GetIfTable2 allocated this table and it is freed exactly once.
+            unsafe { FreeMibTable(self.0.cast()) };
+        }
+    }
+    let table = MibTable(table);
+    // SAFETY: GetIfTable2 guarantees `NumEntries` rows follow the fixed table header.
+    let (rows, count) = unsafe {
+        let count = (*table.0).NumEntries as usize;
+        let first = std::ptr::addr_of!((*table.0).Table).cast::<MIB_IF_ROW2>();
+        (std::slice::from_raw_parts(first, count), count)
+    };
+    if count == 0 {
+        return None;
+    }
+    let totals = rows
+        .iter()
+        .filter(|row| row.OperStatus == NET_IF_OPER_STATUS_UP && row.Type != MIB_IF_TYPE_LOOPBACK)
+        .fold((0u64, 0u64), |(received, sent), row| {
+            (received.saturating_add(row.InOctets), sent.saturating_add(row.OutOctets))
+        });
+    Some(totals)
+}
+
+pub fn network_rate(
+    previous: (u64, u64),
+    current: (u64, u64),
+    elapsed_seconds: f64,
+) -> Option<NetworkSample> {
+    if !elapsed_seconds.is_finite() || elapsed_seconds <= 0.0 {
+        return None;
+    }
+    let received = current.0.checked_sub(previous.0)? as f64 / elapsed_seconds;
+    let sent = current.1.checked_sub(previous.1)? as f64 / elapsed_seconds;
+    (received.is_finite() && sent.is_finite()).then_some(NetworkSample {
+        received_bytes_per_sec: received.min(f32::MAX as f64) as f32,
+        sent_bytes_per_sec: sent.min(f32::MAX as f64) as f32,
+    })
+}
+
+pub fn format_network_rate(bytes_per_sec: f32) -> String {
+    if !bytes_per_sec.is_finite() || bytes_per_sec <= 0.0 {
+        return "0 B/s".into();
+    }
+    let units = ["B/s", "KiB/s", "MiB/s", "GiB/s"];
+    let mut value = bytes_per_sec as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < units.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 { format!("{value:.0} {}", units[unit]) } else { format!("{value:.1} {}", units[unit]) }
 }
 
 /// What does not change while the app runs: the processor name, Windows edition and graphics adapters.
@@ -199,11 +329,54 @@ mod tests {
     fn history_is_capped() {
         let mut h = VecDeque::new();
         for i in 0..(HISTORY + 20) {
-            push(&mut h, i as f32);
+            push(&mut h, Some(i as f32));
         }
         assert_eq!(h.len(), HISTORY);
-        assert_eq!(*h.front().unwrap(), 20.0);
-        assert_eq!(*h.back().unwrap(), (HISTORY + 19) as f32);
+        assert_eq!(*h.front().unwrap(), Some(20.0));
+        assert_eq!(*h.back().unwrap(), Some((HISTORY + 19) as f32));
+    }
+
+    #[test]
+    fn network_rate_uses_counter_deltas_and_rejects_resets() {
+        assert_eq!(
+            network_rate((1_000, 2_000), (3_000, 5_000), 2.0),
+            Some(NetworkSample { received_bytes_per_sec: 1_000.0, sent_bytes_per_sec: 1_500.0 })
+        );
+        assert_eq!(network_rate((10, 20), (9, 30), 1.0), None);
+        assert_eq!(network_rate((0, 0), (10, 10), 0.0), None);
+        assert_eq!(network_rate((0, 0), (10, 10), f64::NAN), None);
+    }
+
+    #[test]
+    fn network_rate_format_uses_byte_units() {
+        assert_eq!(format_network_rate(0.0), "0 B/s");
+        assert_eq!(format_network_rate(512.0), "512 B/s");
+        assert_eq!(format_network_rate(1_536.0), "1.5 KiB/s");
+        assert_eq!(format_network_rate(f32::INFINITY), "0 B/s");
+    }
+
+    #[test]
+    fn network_history_is_bounded_and_keeps_unavailable_samples() {
+        let mut history = VecDeque::new();
+        for _ in 0..=HISTORY {
+            push_network(&mut history, None);
+        }
+        assert_eq!(history.len(), HISTORY);
+        assert!(history.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn reset_window_discards_samples_from_hidden_time() {
+        let mut sampler = Sampler::new();
+        push(&mut sampler.cpu_history, Some(42.0));
+        push(&mut sampler.ram_history, Some(37.0));
+        push_network(&mut sampler.network_history, None);
+        sampler.reset_window();
+        assert!(sampler.cpu_history.is_empty());
+        assert!(sampler.ram_history.is_empty());
+        assert!(sampler.network_history.is_empty());
+        assert!(sampler.latest.network.is_none());
+        assert!(sampler.last_at.is_none());
     }
 
     #[test]
@@ -225,10 +398,18 @@ mod tests {
         std::thread::sleep(Duration::from_millis(200));
         assert!(s.tick());
         let n = s.latest;
+        assert!(n.cpu_available && n.ram_available && n.disk_available);
         assert!(n.ram_total > 1 << 30 && n.ram_used <= n.ram_total);
         assert!(n.disk_total > 0 && n.disk_used <= n.disk_total);
         assert!(n.processes > 10 && n.uptime > 0);
         assert!((0.0..=100.0).contains(&n.cpu));
         assert!(!s.tick(), "a second reading inside a second is skipped");
+        if n.network_available {
+            std::thread::sleep(Duration::from_millis(1_000));
+            assert!(s.tick());
+            let network = s.latest.network.expect("active adapter counters produce a second sample");
+            assert!(network.received_bytes_per_sec.is_finite() && network.received_bytes_per_sec >= 0.0);
+            assert!(network.sent_bytes_per_sec.is_finite() && network.sent_bytes_per_sec >= 0.0);
+        }
     }
 }
