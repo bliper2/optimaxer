@@ -7,7 +7,7 @@ Optimaxer has three implementations. A passing suite verifies its covered behavi
 | Edition | Command | Coverage |
 | --- | --- | --- |
 | PowerShell | `powershell -NoProfile -ExecutionPolicy Bypass -File tests/Optimaxer.Tests.ps1` | Catalog and preset rules, scratch-registry apply/undo, failure reporting, backup refusal, restoration, cleaner boundaries and selected tools. System-changing commands are stubbed. |
-| Rust desktop | `cargo test --locked` in `desktop/` | Fake-system engine tests, saved originals and retries, service/task restoration, cleaner boundaries, update staging, local HTTP download failures, catalog processing, UI batch behavior, command-palette filtering, theme contrast across palettes/styles, settings migration and bounded tweak-history persistence/failure handling. Some updater tests use real Windows tools against temporary files. |
+| Rust desktop | `cargo test --locked` in `desktop/` | Fake-system engine tests, saved originals and retries, service/task restoration, cleaner boundaries, update staging, local HTTP download failures, catalog processing, UI batch behavior, command-palette filtering, theme contrast across palettes/styles, settings migration, bounded tweak-history persistence/failure handling and profile validation, compatibility filtering and persistence. Some updater tests use real Windows tools against temporary files. |
 | Rust desktop | `cargo clippy --locked --all-targets -- -D warnings` | Static checks for production and test targets. |
 | Rust desktop | `cargo build --release --locked` | Release executable build. |
 | Linux | `python -B -m unittest discover -s linux/tests` | Simulated Arch/Fedora packages, files, systemd and NetworkManager; state failures, exact service restoration, dry run, startup flags, cleanup and updater validation. Tk tests exercise real widgets when a display is available. |
@@ -28,6 +28,8 @@ The v2.15.6 Windows release build was opened at 1180 × 760. Settings content sc
 A v2.15.7 build was rendered at 1180 × 760 with the Optimaxer rail collapsed. The overview screenshot was visually checked, and the Network page accessibility tree exposed full navigation names. Settings serialization tests cover the saved collapse choice and the default for older settings files; toggle persistence across an ordinary app restart still needs a manual check.
 
 The Windows debug screenshot run generated all nine app-page images with `ORION_SHOTS_RESTART_REQUIRED=true`; the overview banner was visually checked at 1180 × 760. Screenshot mode keeps settings read-only. Running the release executable directly exited without producing images, so release-mode screenshot capture remains unverified. Unit tests cover reminder serialization, older-settings defaults, clearing after uptime resets and atomic-write failure cleanup. A real Windows reboot round trip has not been run.
+
+The profile-enabled Tweaks page screenshot was generated at 1180 × 760 with `ORION_SHOTS_PROFILE_OPEN=true`. Profile tests cover version and identifier validation, corrupt-store preservation, cross-PC applicability filtering and conflicting tweak rejection. Native file-dialog import/export has compile coverage only; interactive selection, overwrite confirmation and operation on another Windows profile still need manual checks.
 
 The v2.15.7 fake-system tests verify apply/undo history values, status and undo eligibility. The history store tests its 100-entry bound and refusal to overwrite corrupt data. No live system tweaks were run for this check.
 

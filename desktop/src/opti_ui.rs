@@ -4,7 +4,7 @@
 
 use crate::kit;
 use crate::model::{format_size, AppItem};
-use crate::net::Settings;
+use crate::net::{self, Settings};
 use crate::opti::backend::{System, WinSystem};
 use crate::opti::catalog::{Catalog, Tweak};
 use crate::opti::cleaner::{self, Target};
@@ -12,6 +12,7 @@ use crate::opti::engine::{Change, Engine};
 use crate::opti::hw::{self, Traits};
 use crate::opti::history::{self, Action as HistoryAction, Change as HistoryChange, Entry as HistoryEntry};
 use crate::opti::network;
+use crate::opti::profiles::{self, Profile};
 use crate::opti::services::{self, Data, DnsProvider, SvcRow};
 use crate::opti::startup;
 use crate::opti::state::{backup_dir, State};
@@ -159,6 +160,9 @@ pub struct OptiUi {
     log_expanded: bool,
     history: Vec<HistoryEntry>,
     history_error: Option<String>,
+    profiles: Vec<Profile>,
+    profiles_error: Option<String>,
+    profile_name: String,
     restart_pending: bool,
     pending: Option<Pending>,
     restore_first: bool,
@@ -388,6 +392,10 @@ impl OptiUi {
             Ok(entries) => (entries, None),
             Err(error) => (Vec::new(), Some(error)),
         };
+        let (profiles, profiles_error) = match profiles::load_store(&net::data_dir().join("profiles.json")) {
+            Ok(profiles) => (profiles, None),
+            Err(error) => (Vec::new(), Some(error)),
+        };
         Self {
             page: Page::Overview,
             cat: Arc::new(Catalog::load()),
@@ -407,6 +415,9 @@ impl OptiUi {
             log_expanded: false,
             history,
             history_error,
+            profiles,
+            profiles_error,
+            profile_name: "My profile".into(),
             restart_pending: false,
             pending: None,
             restore_first: true,
@@ -825,6 +836,175 @@ impl OptiUi {
             tag => self.selected.extend(hw::preset_ids(&self.cat, &tr, tag)),
         }
     }
+
+    fn save_selected_profile(&mut self) {
+        if self.profiles_error.is_some() {
+            self.events.push(OptiEvent::Toast("Saved profiles could not be read. Export the current selection or recover the profiles file before saving.".into()));
+            return;
+        }
+        if self.selected.is_empty() {
+            self.events.push(OptiEvent::Toast("Select at least one tweak before saving a profile.".into()));
+            return;
+        }
+        let ids = self.selected.iter().cloned().collect::<Vec<_>>();
+        let profile = match Profile::new(&self.profile_name, ids) {
+            Ok(profile) => profile,
+            Err(error) => {
+                self.profile_error(error);
+                return;
+            }
+        };
+        if self.profiles.iter().any(|saved| saved.name.eq_ignore_ascii_case(&profile.name)) {
+            self.profile_error(format!("A profile named '{}' already exists. Remove it before saving a replacement.", profile.name));
+            return;
+        }
+        let mut updated = self.profiles.clone();
+        updated.push(profile);
+        self.store_profiles(updated);
+    }
+
+    fn store_profiles(&mut self, updated: Vec<Profile>) {
+        match profiles::save_store(&net::data_dir().join("profiles.json"), &updated) {
+            Ok(()) => {
+                self.profiles = updated;
+                self.profiles_error = None;
+                self.say("Saved tweak profile.");
+            }
+            Err(error) => self.profile_error(error),
+        }
+    }
+
+    fn profile_error(&mut self, error: String) {
+        self.say(&format!("Profile error: {error}"));
+        self.events.push(OptiEvent::Toast(error));
+    }
+
+    fn select_profile(&mut self, profile: &Profile) {
+        let Some(traits) = self.traits.as_ref() else {
+            self.events.push(OptiEvent::Toast("Still analyzing this PC. Try again in a moment.".into()));
+            return;
+        };
+        match profiles::compatible_ids(profile, &self.cat, traits) {
+            Ok((ids, skipped)) if !ids.is_empty() => {
+                self.selected = ids.into_iter().collect();
+                self.tw_skip.clear();
+                self.say(&format!("Selected profile '{}': {} tweak(s) fit this PC; {} skipped.", profile.name, self.selected.len(), skipped));
+            }
+            Ok((_, skipped)) => self.events.push(OptiEvent::Toast(format!("No tweaks in '{}' fit this PC ({skipped} skipped).", profile.name))),
+            Err(error) => self.profile_error(error),
+        }
+    }
+
+    fn import_profile(&mut self) {
+        let Some(path) = rfd::FileDialog::new().add_filter("Optimaxer profile", &["json"]).pick_file() else { return };
+        let profile = match profiles::read_export(&path) {
+            Ok(profile) => profile,
+            Err(error) => {
+                self.profile_error(error);
+                return;
+            }
+        };
+        let Some(traits) = self.traits.as_ref() else {
+            self.events.push(OptiEvent::Toast("Still analyzing this PC. Try again in a moment.".into()));
+            return;
+        };
+        match profiles::compatible_ids(&profile, &self.cat, traits) {
+            Ok((ids, skipped)) if !ids.is_empty() => {
+                self.selected = ids.into_iter().collect();
+                self.tw_skip.clear();
+                self.profile_name = profile.name.clone();
+                let message = format!("Imported '{}': {} tweak(s) selected; {} unavailable or incompatible tweak(s) skipped. Review the list before applying.", profile.name, self.selected.len(), skipped);
+                self.say(&message);
+                self.events.push(OptiEvent::Toast(message));
+            }
+            Ok((_, skipped)) => self.events.push(OptiEvent::Toast(format!("No imported tweaks fit this PC ({skipped} skipped). Existing selection kept."))),
+            Err(error) => self.profile_error(error),
+        }
+    }
+
+    fn export_profile(&mut self, profile: &Profile) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Optimaxer profile", &["json"])
+            .set_file_name("optimaxer-profile.json")
+            .save_file()
+        else {
+            return;
+        };
+        match profiles::write_export(&path, profile) {
+            Ok(()) => self.say(&format!("Exported profile '{}' to {}.", profile.name, path.display())),
+            Err(error) => self.profile_error(error),
+        }
+    }
+
+    fn export_selected_profile(&mut self) {
+        if self.selected.is_empty() {
+            self.events.push(OptiEvent::Toast("Select at least one tweak before exporting a profile.".into()));
+            return;
+        }
+        let ids = self.selected.iter().cloned().collect::<Vec<_>>();
+        match Profile::new(&self.profile_name, ids) {
+            Ok(profile) => self.export_profile(&profile),
+            Err(error) => self.profile_error(error),
+        }
+    }
+
+    fn profiles_section(&mut self, ui: &mut Ui) {
+        let t = tokens(ui.ctx());
+        let screenshot_open = std::env::var_os("ORION_SHOTS").is_some() && std::env::var_os("ORION_SHOTS_PROFILE_OPEN").is_some();
+        egui::CollapsingHeader::new("Profiles").default_open(screenshot_open).show(ui, |ui| {
+            ui.add(egui::Label::new(RichText::new("Save and move tweak selections between PCs. Imported profiles only select tweaks that fit this machine; applying still requires review and confirmation.").size(T_CAPTION).color(t.muted)).wrap());
+            ui.add_space(S2);
+            ui.horizontal_wrapped(|ui| {
+                ui.add_sized([220.0, 32.0], egui::TextEdit::singleline(&mut self.profile_name).hint_text("Profile name"));
+                if kit::secondary(ui, "Save selection", !self.selected.is_empty()).clicked() {
+                    self.save_selected_profile();
+                }
+                if kit::ghost(ui, "Export selection…", !self.selected.is_empty()).clicked() {
+                    self.export_selected_profile();
+                }
+                if kit::secondary(ui, "Import…", true).clicked() {
+                    self.import_profile();
+                }
+            });
+            if let Some(error) = &self.profiles_error {
+                ui.label(RichText::new(format!("Saved profiles unavailable: {error}")).size(T_SMALL).color(t.warn));
+            }
+            if self.profiles.is_empty() && self.profiles_error.is_none() {
+                ui.label(RichText::new("No saved profiles yet.").size(T_SMALL).color(t.subtle));
+            }
+            let mut select = None;
+            let mut export = None;
+            let mut remove = None;
+            for (index, profile) in self.profiles.iter().enumerate() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(&profile.name).font(FontId::new(T_BODY, semibold())).color(t.text));
+                    ui.label(RichText::new(format!("{} tweaks", profile.tweak_ids.len())).size(T_CAPTION).color(t.muted));
+                    if kit::ghost(ui, "Select", true).clicked() {
+                        select = Some(index);
+                    }
+                    if kit::ghost(ui, "Export…", true).clicked() {
+                        export = Some(index);
+                    }
+                    if kit::ghost(ui, "Remove", true).clicked() {
+                        remove = Some(index);
+                    }
+                });
+            }
+            if let Some(index) = select {
+                let profile = self.profiles[index].clone();
+                self.select_profile(&profile);
+            }
+            if let Some(index) = export {
+                let profile = self.profiles[index].clone();
+                self.export_profile(&profile);
+            }
+            if let Some(index) = remove {
+                let mut updated = self.profiles.clone();
+                updated.remove(index);
+                self.store_profiles(updated);
+            }
+        });
+    }
     // endregion
 
     // region drawing
@@ -1237,6 +1417,7 @@ impl OptiUi {
                 }
             }
         });
+        self.profiles_section(ui);
         ui.horizontal_wrapped(|ui| {
             let mut q = std::mem::take(&mut self.tw_search);
             self.toolbar_search(ui, &mut q, "Search tweaks");
