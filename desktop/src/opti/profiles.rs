@@ -203,7 +203,7 @@ fn validate(profile: &Profile) -> Result<(), String> {
     Ok(())
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let temp = path.with_extension("tmp");
     fs::write(&temp, bytes)
         .map_err(|error| format!("Could not stage {}: {error}", path.display()))?;
