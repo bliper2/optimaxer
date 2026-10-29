@@ -65,6 +65,8 @@ When a tweak batch changes a setting that needs a Windows restart, Optimaxer sav
 
 The Tweaks page can save up to 20 named selections locally and import or export versioned JSON profiles. Local profiles live at `%LOCALAPPDATA%\OrionStore\profiles.json`. Import selects only known, non-retired, non-opt-in tweaks that fit the current hardware; unavailable or incompatible IDs are skipped with a count. Import never applies changes. Applying a selected profile still requires administrator access, an exact preview and confirmation. Profiles contain tweak IDs only, not Windows settings or backup data. See the [profile format and import rules](../docs/profile-format.md).
 
+Settings can import/export a versioned appearance preset containing theme mode, control style, palette, custom accent and reduced-motion preference. Import validates the file and updates only those appearance fields; it does not change Windows settings or other application preferences. The schema and validation are implemented in `src/appearance.rs`.
+
 The verification scope and remaining integration checks are listed in [verification.md](../docs/verification.md).
 
 Nothing is downloaded or installed automatically, and Optimaxer never installs drivers. The vendor driver button only opens the maker's support page.
