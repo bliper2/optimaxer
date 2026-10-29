@@ -5,6 +5,7 @@ pub mod catalog;
 pub mod cleaner;
 pub mod engine;
 pub mod hw;
+pub mod history;
 pub mod network;
 pub mod services;
 pub mod special;

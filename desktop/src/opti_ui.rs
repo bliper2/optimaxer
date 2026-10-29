@@ -10,6 +10,7 @@ use crate::opti::catalog::{Catalog, Tweak};
 use crate::opti::cleaner::{self, Target};
 use crate::opti::engine::{Change, Engine};
 use crate::opti::hw::{self, Traits};
+use crate::opti::history::{self, Action as HistoryAction, Change as HistoryChange, Entry as HistoryEntry};
 use crate::opti::network;
 use crate::opti::services::{self, Data, DnsProvider, SvcRow};
 use crate::opti::startup;
@@ -115,6 +116,7 @@ enum Msg {
     Scan(Vec<(&'static str, Option<u64>)>),
     Adapters(Vec<String>),
     Bench(Vec<(String, Option<f64>)>),
+    History(Result<Vec<HistoryEntry>, String>),
 }
 
 #[derive(Clone)]
@@ -154,6 +156,8 @@ pub struct OptiUi {
     busy: Option<String>,
     log: Vec<String>,
     log_expanded: bool,
+    history: Vec<HistoryEntry>,
+    history_error: Option<String>,
     pending: Option<Pending>,
     restore_first: bool,
     elevated: bool,
@@ -324,12 +328,13 @@ struct Batch {
     restart: bool,
     explorer: bool,
     now: HashMap<String, bool>,
+    changes: Vec<HistoryChange>,
 }
 
 /// Applies or undoes a list of tweaks. With a requested restore point that fails, nothing is changed and
 /// `restore_failed` is set, so the window can ask before going on without one.
 fn run_batch(eng: &Engine, cat: &Catalog, ids: &[String], apply: bool, restore_point: bool, st: &mut State, log: &mut dyn FnMut(&str)) -> Batch {
-    let mut b = Batch { restore_failed: false, ok: 0, restart: false, explorer: false, now: HashMap::new() };
+    let mut b = Batch { restore_failed: false, ok: 0, restart: false, explorer: false, now: HashMap::new(), changes: Vec::new() };
     if apply && restore_point && !tools::create_restore_point(eng.sys, "Optimaxer - before tweaks", log) {
         log("WARN No restore point, so nothing was changed.");
         b.restore_failed = true;
@@ -337,12 +342,19 @@ fn run_batch(eng: &Engine, cat: &Catalog, ids: &[String], apply: bool, restore_p
     }
     for id in ids {
         let Some(t) = cat.find(id) else { continue };
+        let details = if apply {
+            eng.plan(t).iter().map(Change::describe).collect()
+        } else {
+            st.records.get(id).map(|record| vec![format!("Saved originals: {} registry values, {} service settings, {} scheduled tasks", record.reg.len(), record.svc.len(), record.task.len())]).unwrap_or_default()
+        };
         let (on, failed) = if apply { (eng.apply(t, st, log), Vec::new()) } else { eng.undo_checked(t, st, log) };
         b.restart |= t.restart;
         b.explorer |= t.explorer;
-        if on == apply && failed.is_empty() {
+        let verified = on == apply && failed.is_empty();
+        if verified {
             b.ok += 1;
         }
+        b.changes.push(HistoryChange { id: t.id.clone(), name: t.name.clone(), verified, undo_available: st.contains(id), details });
     }
     // A changed value can also change the status of another tweak that uses it.
     b.now = eng.status_all(&cat.tweaks, st);
@@ -368,6 +380,10 @@ fn plan_lines(eng: &Engine, tweaks: &[&Tweak]) -> Vec<Line> {
 impl OptiUi {
     pub fn new() -> Self {
         let (tx, rx) = channel();
+        let (history, history_error) = match history::load() {
+            Ok(entries) => (entries, None),
+            Err(error) => (Vec::new(), Some(error)),
+        };
         Self {
             page: Page::Overview,
             cat: Arc::new(Catalog::load()),
@@ -385,6 +401,8 @@ impl OptiUi {
             busy: None,
             log: Vec::new(),
             log_expanded: false,
+            history,
+            history_error,
             pending: None,
             restore_first: true,
             elevated: hw::is_elevated(),
@@ -508,6 +526,11 @@ impl OptiUi {
                 }
                 Msg::Adapters(a) => self.adapters = a,
                 Msg::Bench(b) => self.bench = b,
+                Msg::History(Ok(entries)) => {
+                    self.history = entries;
+                    self.history_error = None;
+                }
+                Msg::History(Err(error)) => self.history_error = Some(error),
             }
         }
     }
@@ -740,7 +763,21 @@ impl OptiUi {
                 }));
                 return;
             }
-            let (ok, restart, explorer, now) = (b.ok, b.restart, b.explorer, b.now);
+            let (ok, restart, explorer, now, changes) = (b.ok, b.restart, b.explorer, b.now, b.changes);
+            if !changes.is_empty() {
+                let entry = HistoryEntry {
+                    time: format!("{}Z", crate::opti::now_iso()),
+                    action: if apply { HistoryAction::Apply } else { HistoryAction::Undo },
+                    changes,
+                };
+                match history::append(entry) {
+                    Ok(entries) => w.send(Msg::History(Ok(entries))),
+                    Err(error) => {
+                        w.log(&format!("WARN Changes ran, but tweak history could not be saved: {error}"));
+                        w.send(Msg::History(Err(error)));
+                    }
+                }
+            }
             if explorer {
                 w.log("Restarting Explorer to apply interface changes");
                 sys.run("taskkill.exe", &["/F", "/IM", "explorer.exe"]);
@@ -1091,6 +1128,44 @@ impl OptiUi {
                         row("Profile", profile_summary(tr));
                     }
                 });
+            });
+            ui.add_space(S2);
+            kit::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new("Recent tweak changes").font(FontId::new(T_HEADING, semibold())).color(t.text));
+                ui.add_space(S1);
+                if let Some(error) = &self.history_error {
+                    ui.label(RichText::new(format!("History unavailable: {error}")).size(T_SMALL).color(t.warn));
+                } else if self.history.is_empty() {
+                    ui.label(RichText::new("Confirmed tweak apply and undo operations will appear here.").size(T_SMALL).color(t.muted));
+                } else {
+                    for (index, entry) in self.history.iter().rev().take(8).enumerate() {
+                        let verified = entry.changes.iter().filter(|change| change.verified).count();
+                        let undoable = entry.changes.iter().filter(|change| change.undo_available).count();
+                        let action = match entry.action {
+                            HistoryAction::Apply => "Applied",
+                            HistoryAction::Undo => "Undid",
+                        };
+                        egui::CollapsingHeader::new(format!("{action} tweaks · {verified}/{} verified · {undoable} undoable", entry.changes.len()))
+                            .id_salt(("tweak-history", index, &entry.time))
+                            .show(ui, |ui| {
+                                ui.label(RichText::new(&entry.time).size(T_CAPTION).color(t.subtle));
+                                for change in &entry.changes {
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label(RichText::new(&change.name).size(T_SMALL).color(t.text));
+                                        kit::chip(ui, if change.verified { "Verified" } else { "Incomplete" }, if change.verified { Tone::Good } else { Tone::Warn });
+                                        if change.undo_available {
+                                            kit::chip(ui, "Undo available", Tone::Neutral);
+                                        }
+                                    });
+                                    for detail in &change.details {
+                                        ui.add(egui::Label::new(RichText::new(detail).size(T_CAPTION).color(t.muted)).wrap());
+                                    }
+                                }
+                            });
+                    }
+                    ui.label(RichText::new("Records confirmed tweak changes and verification. Performance gains are not measured.").size(T_CAPTION).color(t.subtle));
+                }
             });
             ui.add_space(S3);
         });
@@ -1726,6 +1801,12 @@ mod tests {
         let batch = run_batch(&eng, &cat, &["first".into()], true, false, &mut state, &mut |_| {});
         assert_eq!(batch.now.get("first"), Some(&true));
         assert_eq!(batch.now.get("second"), Some(&false));
+        assert!(batch.changes[0].verified && batch.changes[0].undo_available);
+        assert!(batch.changes[0].details.iter().any(|line| line.contains("2 -> 1")));
+        let undone = run_batch(&eng, &cat, &["first".into()], false, false, &mut state, &mut |_| {});
+        assert!(undone.changes[0].verified && !undone.changes[0].undo_available);
+        assert!(undone.changes[0].details[0].contains("Saved originals: 1 registry values"));
+        assert_eq!(sys.reg_get(path, "Choice"), Some(RegData::Dword(2)));
         std::fs::remove_dir_all(dir).unwrap();
     }
 
