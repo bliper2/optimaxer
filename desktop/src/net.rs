@@ -106,6 +106,8 @@ pub struct Settings {
     pub platform: String,
     /// Which part of the window was open last: "Store" or "Optimaxer".
     pub section: String,
+    /// Keep the Optimaxer navigation as an icon rail when enabled.
+    pub sidebar_collapsed: bool,
     /// Optimaxer: offer a System Restore point before applying tweaks.
     pub opti_restore_point: bool,
     /// No transitions or pulses. Defaults to the Windows "animation effects" setting.
@@ -124,7 +126,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let dir = dirs::download_dir().unwrap_or_else(|| PathBuf::from(".")).join("Orion");
-        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), opti_restore_point: true, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, palette: crate::theme::Palette::System, custom_accent: crate::theme::hex_color(crate::theme::BRAND), auto_update: true }
+        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), sidebar_collapsed: false, opti_restore_point: true, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, palette: crate::theme::Palette::System, custom_accent: crate::theme::hex_color(crate::theme::BRAND), auto_update: true }
     }
 }
 
@@ -390,7 +392,16 @@ mod tests {
         assert_eq!(settings.download_dir, "D:/Apps");
         assert_eq!(settings.palette, crate::theme::Palette::System);
         assert_eq!(settings.custom_accent, "#7478F8");
+        assert!(!settings.sidebar_collapsed);
         assert!(settings.effective_dark());
+    }
+
+    #[test]
+    fn collapsed_sidebar_setting_survives_round_trip() {
+        let settings = Settings { sidebar_collapsed: true, ..Settings::default() };
+        let saved = serde_json::to_string(&settings).unwrap();
+        let loaded: Settings = serde_json::from_str(&saved).unwrap();
+        assert!(loaded.sidebar_collapsed);
     }
 
     #[test]

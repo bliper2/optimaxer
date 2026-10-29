@@ -98,6 +98,7 @@ pub fn nav_item(ui: &mut Ui, selected: bool, label: &str, trailing: Option<&str>
 pub fn nav_item_icon(ui: &mut Ui, selected: bool, icon: Option<char>, label: &str, trailing: Option<&str>) -> Response {
     let ctx = ui.ctx().clone();
     let (t, m) = (tokens(&ctx), motion(&ctx));
+    let compact = ui.available_width() < 100.0;
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
     resp.widget_info(|| WidgetInfo::selected(Role::Tab, true, selected, label));
     let hover = ctx.animate_bool_with_time_and_easing(resp.id.with("hover"), resp.hovered(), m.fast(), ease_out);
@@ -115,13 +116,20 @@ pub fn nav_item_icon(ui: &mut Ui, selected: bool, icon: Option<char>, label: &st
         let fg = mix(t.muted, t.text, (hover * 0.6).max(sel));
         let font = if selected { FontId::new(T_BODY, semibold()) } else { FontId::proportional(T_BODY) };
         let mut x = rect.left() + S3 + 4.0;
-        if let Some(g) = icon.filter(|_| theme::icons_available()) {
+        if compact {
+            let glyph = icon.filter(|_| theme::icons_available());
+            let text = glyph.map_or_else(|| label.chars().next().unwrap_or('?').to_string(), |g| g.to_string());
+            let font = glyph.map_or_else(|| FontId::new(T_BODY, semibold()), |_| FontId::new(16.0, theme::icons()));
+            p.text(rect.center(), Align2::CENTER_CENTER, text, font, if selected { t.ring() } else { fg });
+        } else if let Some(g) = icon.filter(|_| theme::icons_available()) {
             let glyph_color = if selected { t.ring() } else { fg };
             p.text(egui::pos2(x + 8.0, rect.center().y), Align2::CENTER_CENTER, g, FontId::new(16.0, theme::icons()), glyph_color);
             x += 28.0;
         }
-        p.text(egui::pos2(x, rect.center().y), Align2::LEFT_CENTER, label, font, fg);
-        if let Some(tr) = trailing {
+        if !compact {
+            p.text(egui::pos2(x, rect.center().y), Align2::LEFT_CENTER, label, font, fg);
+        }
+        if let Some(tr) = trailing.filter(|_| !compact) {
             p.text(egui::pos2(rect.right() - S3, rect.center().y), Align2::RIGHT_CENTER, tr, FontId::proportional(T_CAPTION), t.subtle);
         }
         if resp.has_focus() {
@@ -132,7 +140,7 @@ pub fn nav_item_icon(ui: &mut Ui, selected: bool, icon: Option<char>, label: &st
     if resp.hovered() {
         ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    resp
+    if compact { resp.on_hover_text(label) } else { resp }
 }
 
 /// Two or more exclusive choices on one rail. The selected thumb slides to its new place.

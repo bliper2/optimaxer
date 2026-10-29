@@ -821,17 +821,19 @@ impl OptiUi {
     // endregion
 
     // region drawing
-    pub fn side_panel(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+    pub fn side_panel(&mut self, ui: &mut Ui, ctx: &egui::Context, collapsed: bool) {
         let t = tokens(ctx);
         ui.add_space(S3);
-        ui.label(RichText::new("Optimaxer").font(FontId::new(T_SMALL, semibold())).color(t.subtle));
-        ui.add_space(S1);
+        if !collapsed {
+            ui.label(RichText::new("Optimaxer").font(FontId::new(T_SMALL, semibold())).color(t.subtle));
+            ui.add_space(S1);
+        }
         for p in Page::ALL {
             if kit::nav_item_icon(ui, self.page == p, Some(p.icon()), p.label(), None).clicked() && self.page != p {
                 self.set_page(ctx, p);
             }
         }
-        if let Some(tr) = &self.traits {
+        if !collapsed && let Some(tr) = &self.traits {
             ui.add_space(S4);
             ui.label(RichText::new("This PC").font(FontId::new(T_SMALL, semibold())).color(t.subtle));
             ui.add_space(S1);
