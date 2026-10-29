@@ -72,6 +72,24 @@ pub fn compatible_ids(
     Ok((selected, skipped))
 }
 
+pub fn difference(left: &Profile, right: &Profile) -> (Vec<String>, Vec<String>) {
+    let left_ids: HashSet<&str> = left.tweak_ids.iter().map(String::as_str).collect();
+    let right_ids: HashSet<&str> = right.tweak_ids.iter().map(String::as_str).collect();
+    let only_left = left
+        .tweak_ids
+        .iter()
+        .filter(|id| !right_ids.contains(id.as_str()))
+        .cloned()
+        .collect();
+    let only_right = right
+        .tweak_ids
+        .iter()
+        .filter(|id| !left_ids.contains(id.as_str()))
+        .cloned()
+        .collect();
+    (only_left, only_right)
+}
+
 pub fn load_store(path: &Path) -> Result<Vec<Profile>, String> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
@@ -311,6 +329,20 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("conflicting tweaks"));
+    }
+
+    #[test]
+    fn profile_difference_reports_only_ids_unique_to_each_profile() {
+        let left = profile("Gaming", &["shared", "gaming-only", "legacy"]);
+        let right = profile("Work", &["shared", "work-only"]);
+
+        assert_eq!(
+            difference(&left, &right),
+            (
+                vec!["gaming-only".to_owned(), "legacy".to_owned()],
+                vec!["work-only".to_owned()]
+            )
+        );
     }
 
     #[test]

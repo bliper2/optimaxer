@@ -163,6 +163,8 @@ pub struct OptiUi {
     profiles: Vec<Profile>,
     profiles_error: Option<String>,
     profile_name: String,
+    compare_profile_left: String,
+    compare_profile_right: String,
     restart_pending: bool,
     pending: Option<Pending>,
     restore_first: bool,
@@ -228,6 +230,34 @@ fn profile_summary(tr: &Traits) -> String {
         "Windows version unknown"
     };
     [form, storage, windows].join(" · ")
+}
+
+fn draw_profile_difference(
+    ui: &mut Ui,
+    catalog: &Catalog,
+    profile_name: &str,
+    ids: Vec<String>,
+    tokens: &theme::Tokens,
+) {
+    ui.vertical(|ui| {
+        ui.label(RichText::new(format!("Only in {profile_name} · {}", ids.len()))
+            .font(FontId::new(T_SMALL, semibold())).color(tokens.muted));
+        if ids.is_empty() {
+            ui.label(RichText::new("No unique tweaks").size(T_CAPTION).color(tokens.subtle));
+        } else {
+            egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
+                for id in ids {
+                    if let Some(tweak) = catalog.find(&id) {
+                        ui.label(RichText::new(&tweak.name).size(T_CAPTION).color(tokens.text))
+                            .on_hover_text(&tweak.desc);
+                    } else {
+                        ui.label(RichText::new(format!("Unknown tweak · {id}"))
+                            .size(T_CAPTION).color(tokens.warn));
+                    }
+                }
+            });
+        }
+    });
 }
 
 fn tweak_notes(t: &Tweak) -> String {
@@ -418,6 +448,8 @@ impl OptiUi {
             profiles,
             profiles_error,
             profile_name: "My profile".into(),
+            compare_profile_left: String::new(),
+            compare_profile_right: String::new(),
             restart_pending: false,
             pending: None,
             restore_first: true,
@@ -951,6 +983,22 @@ impl OptiUi {
     fn profiles_section(&mut self, ui: &mut Ui) {
         let t = tokens(ui.ctx());
         let screenshot_open = std::env::var_os("ORION_SHOTS").is_some() && std::env::var_os("ORION_SHOTS_PROFILE_OPEN").is_some();
+        if self.profiles.len() >= 2 {
+            if !self.profiles.iter().any(|profile| profile.name == self.compare_profile_left) {
+                self.compare_profile_left = self.profiles[0].name.clone();
+            }
+            if !self.profiles.iter().any(|profile| profile.name == self.compare_profile_right)
+                || self.compare_profile_right == self.compare_profile_left
+            {
+                self.compare_profile_right = self.profiles.iter()
+                    .find(|profile| profile.name != self.compare_profile_left)
+                    .map(|profile| profile.name.clone())
+                    .unwrap_or_default();
+            }
+        } else {
+            self.compare_profile_left.clear();
+            self.compare_profile_right.clear();
+        }
         egui::CollapsingHeader::new("Profiles").default_open(screenshot_open).show(ui, |ui| {
             ui.add(egui::Label::new(RichText::new("Save and move tweak selections between PCs. Imported profiles only select tweaks that fit this machine; applying still requires review and confirmation.").size(T_CAPTION).color(t.muted)).wrap());
             ui.add_space(S2);
@@ -989,6 +1037,38 @@ impl OptiUi {
                         remove = Some(index);
                     }
                 });
+            }
+            if self.profiles.len() >= 2 {
+                ui.add_space(S2);
+                ui.label(RichText::new("Compare saved selections").font(FontId::new(T_SMALL, semibold())).color(t.text));
+                ui.horizontal_wrapped(|ui| {
+                    egui::ComboBox::from_id_salt("profile-compare-left")
+                        .selected_text(&self.compare_profile_left)
+                        .show_ui(ui, |ui| {
+                            for profile in &self.profiles {
+                                ui.selectable_value(&mut self.compare_profile_left, profile.name.clone(), &profile.name);
+                            }
+                        });
+                    ui.label(RichText::new("against").size(T_CAPTION).color(t.subtle));
+                    egui::ComboBox::from_id_salt("profile-compare-right")
+                        .selected_text(&self.compare_profile_right)
+                        .show_ui(ui, |ui| {
+                            for profile in &self.profiles {
+                                if profile.name != self.compare_profile_left {
+                                    ui.selectable_value(&mut self.compare_profile_right, profile.name.clone(), &profile.name);
+                                }
+                            }
+                        });
+                });
+                let left = self.profiles.iter().find(|profile| profile.name == self.compare_profile_left);
+                let right = self.profiles.iter().find(|profile| profile.name == self.compare_profile_right);
+                if let (Some(left), Some(right)) = (left, right) {
+                    let (only_left, only_right) = profiles::difference(left, right);
+                    ui.columns(2, |columns| {
+                        draw_profile_difference(&mut columns[0], &self.cat, &left.name, only_left, &t);
+                        draw_profile_difference(&mut columns[1], &self.cat, &right.name, only_right, &t);
+                    });
+                }
             }
             if let Some(index) = select {
                 let profile = self.profiles[index].clone();
