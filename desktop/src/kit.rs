@@ -73,6 +73,21 @@ pub fn secondary(ui: &mut Ui, label: &str, enabled: bool) -> Response {
 pub fn ghost(ui: &mut Ui, label: &str, enabled: bool) -> Response {
     button(ui, label, enabled, Look::Ghost, 0.0)
 }
+
+/// Compact top-bar action with a visible tooltip and full accessibility label.
+pub fn toolbar_icon_button(ui: &mut Ui, glyph: char, fallback: &str, label: &str, selected: bool) -> Response {
+    let text = if theme::icons_available() {
+        RichText::new(glyph.to_string()).font(FontId::new(16.0, theme::icons()))
+    } else {
+        RichText::new(fallback).font(FontId::new(T_BODY, semibold()))
+    };
+    let response = ui.add_sized(
+        vec2(36.0, 34.0),
+        egui::Button::new(text).selected(selected),
+    );
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, label));
+    response.on_hover_text(label)
+}
 // endregion
 
 pub fn chip(ui: &mut Ui, text: &str, tone: Tone) {

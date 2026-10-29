@@ -1889,7 +1889,7 @@ impl OptiUi {
         let (on, total) = self.traits.as_ref().map(|tr| score(&self.cat, tr, &self.status)).unwrap_or((0, 0));
         kit::card(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
+            let draw_stats = |ui: &mut Ui| {
                 if total > 0 {
                     let pct = (100.0 * on as f32 / total as f32).round();
                     let col = if pct >= 80.0 { t.good } else if pct >= 45.0 { t.text } else { t.bad };
@@ -1901,16 +1901,26 @@ impl OptiUi {
                 } else {
                     kit::skeleton(ui, 2);
                 }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let ready = self.busy.is_none() && self.traits.is_some();
-                    if kit::primary(ui, "Smart optimize", ready).on_hover_text("Reads your hardware (laptop or desktop, SSD or HDD, RAM, GPU) and selects only the tweaks that fit this PC").clicked() {
-                        self.select_preset("auto");
-                        if !self.selected.is_empty() {
-                            self.preview_apply(ctx);
-                        }
+            };
+            let ready = self.busy.is_none() && self.traits.is_some();
+            let mut draw_action = |ui: &mut Ui| {
+                if kit::primary(ui, "Smart optimize", ready).on_hover_text("Reads your hardware (laptop or desktop, SSD or HDD, RAM, GPU) and selects only the tweaks that fit this PC").clicked() {
+                    self.select_preset("auto");
+                    if !self.selected.is_empty() {
+                        self.preview_apply(ctx);
                     }
+                }
+            };
+            if ui.available_width() < 520.0 {
+                ui.horizontal(|ui| draw_stats(ui));
+                ui.add_space(S2);
+                ui.horizontal(|ui| draw_action(ui));
+            } else {
+                ui.horizontal(|ui| {
+                    draw_stats(ui);
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| draw_action(ui));
                 });
-            });
+            }
         });
         ui.add_space(S3);
         ui.horizontal_wrapped(|ui| {
@@ -2072,21 +2082,53 @@ impl OptiUi {
         }
         kit::page_header(ui, "Services", "Optimaxer's recommended Manual and Disabled lists. Core Windows services are hidden. The current start types are saved to a backup before every change.");
         let idle = self.busy.is_none();
-        ui.horizontal(|ui| {
+        let compact = ui.available_width() < 520.0;
+        let mut clear_selection = false;
+        let mut restore_services = false;
+        let mut refresh_services = false;
+        ui.horizontal_wrapped(|ui| {
             let mut q = std::mem::take(&mut self.svc_search);
-            self.toolbar_search(ui, &mut q, "Search services");
+            let search_width = if compact { 110.0 } else { 260.0 };
+            let search_hint = if compact { "Search" } else { "Search services" };
+            ui.add_sized([search_width, 34.0], egui::TextEdit::singleline(&mut q).hint_text(search_hint).margin(Margin::symmetric(S3 as i8, 8)));
             self.svc_search = q;
             if kit::ghost(ui, "Select recommended", true).clicked() {
                 self.svc_sel = self.services.iter().filter(|s| s.rec.as_ref().is_some_and(|r| r.0 == 3)).map(|s| s.name.clone()).collect();
             }
-            if kit::ghost(ui, "Clear", !self.svc_sel.is_empty()).clicked() {
-                self.svc_sel.clear();
-            }
-            if !self.svc_sel.is_empty() {
-                ui.label(RichText::new(format!("{} selected", self.svc_sel.len())).size(T_SMALL).color(t.muted));
+            if compact {
+                ui.menu_button("More", |ui| {
+                    if ui.add_enabled(!self.svc_sel.is_empty(), egui::Button::new("Clear selection")).clicked() {
+                        clear_selection = true;
+                        ui.close();
+                    }
+                    if ui.add_enabled(idle, egui::Button::new("Restore last backup")).clicked() {
+                        restore_services = true;
+                        ui.close();
+                    }
+                    if ui.add_enabled(idle, egui::Button::new("Refresh")).clicked() {
+                        refresh_services = true;
+                        ui.close();
+                    }
+                });
+            } else {
+                if kit::ghost(ui, "Clear", !self.svc_sel.is_empty()).clicked() {
+                    self.svc_sel.clear();
+                }
+                if !self.svc_sel.is_empty() {
+                    ui.label(RichText::new(format!("{} selected", self.svc_sel.len())).size(T_SMALL).color(t.muted));
+                }
             }
         });
-        ui.horizontal(|ui| {
+        if clear_selection {
+            self.svc_sel.clear();
+        }
+        if restore_services && idle && self.need_admin() {
+            self.pending = Some(Pending { title: "Restore services".into(), intro: "Put every service back to the start type saved in the most recent backup?".into(), lines: vec![], action: Action::RestoreServices, restore_option: false, ok_label: "Restore services".into() });
+        }
+        if refresh_services && idle {
+            self.refresh_services(ctx);
+        }
+        ui.horizontal_wrapped(|ui| {
             let names: Vec<String> = self.svc_sel.iter().cloned().collect();
             let any = idle && !names.is_empty();
             for (label, start) in [("Set to Manual", 3u32), ("Disable", 4), ("Set to Automatic", 2)] {
@@ -2102,11 +2144,13 @@ impl OptiUi {
                     });
                 }
             }
-            if kit::ghost(ui, "Restore last backup", idle).clicked() && self.need_admin() {
-                self.pending = Some(Pending { title: "Restore services".into(), intro: "Put every service back to the start type saved in the most recent backup?".into(), lines: vec![], action: Action::RestoreServices, restore_option: false, ok_label: "Restore services".into() });
-            }
-            if kit::ghost(ui, "Refresh", idle).clicked() {
-                self.refresh_services(ctx);
+            if !compact {
+                if kit::ghost(ui, "Restore last backup", idle).clicked() && self.need_admin() {
+                    self.pending = Some(Pending { title: "Restore services".into(), intro: "Put every service back to the start type saved in the most recent backup?".into(), lines: vec![], action: Action::RestoreServices, restore_option: false, ok_label: "Restore services".into() });
+                }
+                if kit::ghost(ui, "Refresh", idle).clicked() {
+                    self.refresh_services(ctx);
+                }
             }
         });
         ui.add_space(S2);
@@ -2175,7 +2219,7 @@ impl OptiUi {
         let idle = self.busy.is_none();
         let key = |i: &startup::Item| format!("{}|{}", i.scope, i.name);
         let picked: Vec<startup::Item> = self.startup.iter().filter(|i| self.st_sel.contains(&key(i))).cloned().collect();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for (label, enable) in [("Turn off selected", false), ("Turn on selected", true)] {
                 if kit::secondary(ui, label, idle && !picked.is_empty()).clicked() && self.need_admin() {
                     let n = picked.len();
@@ -2243,7 +2287,7 @@ impl OptiUi {
         let idle = self.busy.is_none();
         let total: u64 = self.clean_sizes.values().flatten().sum();
         let picked: Vec<&'static str> = cleaner::TARGETS.iter().map(|t| t.id).filter(|id| self.clean_sel.contains(id)).collect();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if kit::secondary(ui, "Scan", idle).clicked() {
                 self.scan_cleaner(ctx);
             }
