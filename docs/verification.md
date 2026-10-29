@@ -27,7 +27,7 @@ The v2.15.6 Windows release build was opened at 1180 × 760. Settings content sc
 
 A v2.15.7 build was rendered at 1180 × 760 with the Optimaxer rail collapsed. The overview screenshot was visually checked, and the Network page accessibility tree exposed full navigation names. Settings serialization tests cover the saved collapse choice and the default for older settings files; toggle persistence across an ordinary app restart still needs a manual check.
 
-The developer screenshot override sets the restart reminder without changing saved settings. This Windows run exited without producing screenshots, so banner placement remains visually unverified. Unit tests cover reminder serialization, older-settings defaults and clearing after uptime resets. A real Windows reboot round trip has not been run.
+The Windows debug screenshot run generated all nine app-page images with `ORION_SHOTS_RESTART_REQUIRED=true`; the overview banner was visually checked at 1180 × 760. Screenshot mode keeps settings read-only. Running the release executable directly exited without producing images, so release-mode screenshot capture remains unverified. Unit tests cover reminder serialization, older-settings defaults, clearing after uptime resets and atomic-write failure cleanup. A real Windows reboot round trip has not been run.
 
 The v2.15.7 fake-system tests verify apply/undo history values, status and undo eligibility. The history store tests its 100-entry bound and refusal to overwrite corrupt data. No live system tweaks were run for this check.
 
