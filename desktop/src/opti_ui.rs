@@ -36,6 +36,7 @@ pub enum Page {
     Overview,
     Performance,
     Processes,
+    Gaming,
     Activity,
     Tweaks,
     Services,
@@ -46,10 +47,11 @@ pub enum Page {
 }
 
 impl Page {
-    const ALL: [Page; 10] = [
+    const ALL: [Page; 11] = [
         Page::Overview,
         Page::Performance,
         Page::Processes,
+        Page::Gaming,
         Page::Activity,
         Page::Tweaks,
         Page::Services,
@@ -64,6 +66,7 @@ impl Page {
             Page::Overview => '\u{E80F}',
             Page::Performance => '\u{E9D2}',
             Page::Processes => '\u{E9D9}',
+            Page::Gaming => '\u{E7FC}',
             Page::Activity => '\u{E81C}',
             Page::Tweaks => '\u{E9E9}',
             Page::Services => '\u{E9F5}',
@@ -79,6 +82,7 @@ impl Page {
             Page::Overview => "Overview",
             Page::Performance => "Performance",
             Page::Processes => "Processes",
+            Page::Gaming => "Gaming",
             Page::Activity => "Activity",
             Page::Tweaks => "Tweaks",
             Page::Services => "Services",
@@ -179,6 +183,7 @@ pub struct OptiUi {
     data: Arc<Data>,
     traits: Option<Traits>,
     status: HashMap<String, bool>,
+    status_ready: bool,
     selected: HashSet<String>,
     tw_search: String,
     /// Risk filter on the Tweaks page: 0 all, 1 Safe, 2 Moderate, 3 Advanced.
@@ -588,6 +593,7 @@ impl OptiUi {
             data: Arc::new(Data::load()),
             traits: None,
             status: HashMap::new(),
+            status_ready: false,
             selected: HashSet::new(),
             tw_search: String::new(),
             tw_risk: 0,
@@ -753,7 +759,10 @@ impl OptiUi {
                 Msg::Log(s) => self.say(&s),
                 Msg::Idle => self.busy = None,
                 Msg::Traits(t) => self.traits = Some(t),
-                Msg::Status(map) => self.status.extend(map),
+                Msg::Status(map) => {
+                    self.status.extend(map);
+                    self.status_ready = true;
+                }
                 Msg::Plan(p) => self.pending = Some(p),
                 Msg::Services(s) => {
                     self.svc_sel.retain(|n| s.iter().any(|r| &r.name == n));
@@ -873,6 +882,10 @@ impl OptiUi {
     /// Builds the confirmation for applying tweaks. Reads only; nothing changes until the user confirms.
     fn preview_apply(&mut self, ctx: &egui::Context) {
         let ids: Vec<String> = self.cat.tweaks.iter().filter(|t| self.selected.contains(&t.id)).map(|t| t.id.clone()).collect();
+        self.preview_apply_ids(ctx, ids);
+    }
+
+    fn preview_apply_ids(&mut self, ctx: &egui::Context, ids: Vec<String>) {
         if ids.is_empty() {
             self.events.push(OptiEvent::Toast("No tweaks selected.".into()));
             return;
@@ -896,6 +909,10 @@ impl OptiUi {
 
     fn preview_undo(&mut self) {
         let ids: Vec<String> = self.cat.tweaks.iter().filter(|t| self.selected.contains(&t.id)).map(|t| t.id.clone()).collect();
+        self.preview_undo_ids(ids);
+    }
+
+    fn preview_undo_ids(&mut self, ids: Vec<String>) {
         if ids.is_empty() {
             self.events.push(OptiEvent::Toast("No tweaks selected.".into()));
             return;
@@ -1476,6 +1493,7 @@ impl OptiUi {
                     Page::Overview => self.overview_page(ui, ctx),
                     Page::Performance => self.performance_page(ui, ctx),
                     Page::Processes => self.processes_page(ui, ctx),
+                    Page::Gaming => self.gaming_page(ui, ctx),
                     Page::Activity => self.activity_page(ui, ctx),
                     Page::Tweaks => self.tweaks_page(ui, ctx),
                     Page::Services => self.services_page(ui, ctx),
@@ -1984,6 +2002,83 @@ impl OptiUi {
                     });
                 });
             });
+    }
+
+    fn gaming_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let t = tokens(ctx);
+        kit::page_header(ui, "Gaming", "Review the existing reversible Windows gaming settings. These switches do not promise higher frame rates.");
+
+        let supported: Vec<_> = self.cat.tweaks.iter().filter(|tw| tw.has_tag("gaming") && tw.retired.is_empty() && !tw.has_tag("optin")).collect();
+        let Some(traits) = self.traits.as_ref() else {
+            kit::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new("Reading this PC’s hardware and current settings…").color(t.muted));
+            });
+            return;
+        };
+        if !self.status_ready {
+            kit::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new("Checking the current Windows settings…").color(t.muted));
+            });
+            return;
+        }
+
+        let to_apply: Vec<String> = hw::preset_ids(&self.cat, traits, "gaming").into_iter()
+            .filter(|id| !self.status.get(id).copied().unwrap_or(false)).collect();
+        let to_undo: Vec<String> = supported.iter().filter(|tw| self.status.get(&tw.id).copied().unwrap_or(false))
+            .map(|tw| tw.id.clone()).collect();
+        kit::card(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                kit::chip(ui, &format!("{} settings", supported.len()), Tone::Brand);
+                ui.label(RichText::new("Current state is read from Windows. Incompatible settings stay visible with the reason they were skipped.").size(T_SMALL).color(t.muted));
+            });
+            ui.add_space(S2);
+            for tw in &supported {
+                let applied = self.status.get(&tw.id).copied().unwrap_or(false);
+                let compatible = hw::fits(tw, traits);
+                egui::Frame::new().inner_margin(Margin::symmetric(S2 as i8, S1 as i8)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let details_width = (ui.available_width() - 96.0).max(120.0);
+                    ui.horizontal(|ui| {
+                        ui.scope(|ui| {
+                            ui.set_max_width(details_width);
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new(&tw.name).font(FontId::new(T_BODY, semibold())).color(t.text));
+                                ui.add(egui::Label::new(RichText::new(&tw.desc).size(T_CAPTION).color(t.muted)).wrap());
+                            });
+                        });
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if applied {
+                                kit::chip(ui, "Applied", Tone::Good);
+                            } else if !compatible {
+                                kit::chip(ui, "Not applicable", Tone::Neutral);
+                            } else {
+                                kit::chip(ui, "Available", Tone::Neutral);
+                            }
+                        });
+                    });
+                    if !compatible && let Some(reason) = hw::fit_reason(tw, traits) {
+                        ui.label(RichText::new(reason).size(T_SMALL).color(t.subtle));
+                    }
+                });
+                ui.separator();
+            }
+        });
+        ui.add_space(S2);
+        ui.horizontal_wrapped(|ui| {
+            let ready = self.busy.is_none() && self.elevated;
+            if kit::primary(ui, "Review compatible settings", ready && !to_apply.is_empty()).clicked() {
+                self.preview_apply_ids(ctx, to_apply);
+            }
+            if kit::secondary(ui, "Review undo", ready && !to_undo.is_empty()).clicked() {
+                self.preview_undo_ids(to_undo);
+            }
+            if !self.elevated {
+                ui.label(RichText::new("Administrator access is required to change Windows settings.").size(T_SMALL).color(t.muted));
+            }
+        });
     }
 
     fn tweaks_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
