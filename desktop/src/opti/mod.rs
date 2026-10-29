@@ -3,6 +3,7 @@
 pub mod backend;
 pub mod catalog;
 pub mod cleaner;
+pub mod diagnostics;
 pub mod engine;
 pub mod hw;
 pub mod history;

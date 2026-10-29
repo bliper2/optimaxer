@@ -44,9 +44,10 @@ enum PaletteCommand {
     Settings,
 }
 
-const PALETTE_COMMANDS: [(&str, &str, PaletteCommand); 15] = [
+const PALETTE_COMMANDS: [(&str, &str, PaletteCommand); 16] = [
     ("Overview", "Optimaxer page", PaletteCommand::Page("Overview")),
     ("Performance", "Live CPU, memory and adapter traffic", PaletteCommand::Page("Performance")),
+    ("Diagnostics", "Read-only Windows integrity checks", PaletteCommand::Page("Diagnostics")),
     ("Processes", "Read-only process explorer", PaletteCommand::Page("Processes")),
     ("Gaming", "Review reversible Windows gaming settings", PaletteCommand::Page("Gaming")),
     ("Activity", "Search confirmed tweak changes", PaletteCommand::Page("Activity")),
@@ -1578,7 +1579,7 @@ mod palette_tests {
 
     #[test]
     fn palette_lists_all_commands_for_blank_query() {
-        assert_eq!(matching_palette_commands("  ").len(), 15);
+        assert_eq!(matching_palette_commands("  ").len(), 16);
     }
 
     #[test]
@@ -1593,6 +1594,13 @@ mod palette_tests {
         let results = matching_palette_commands("gaming");
         assert_eq!(results.len(), 1);
         assert!(matches!(results[0].2, PaletteCommand::Page("Gaming")));
+    }
+
+    #[test]
+    fn diagnostics_command_navigates_to_its_page() {
+        let results = matching_palette_commands("diagnostics");
+        assert_eq!(results.len(), 1);
+        assert!(matches!(results[0].2, PaletteCommand::Page("Diagnostics")));
     }
 
     #[test]
