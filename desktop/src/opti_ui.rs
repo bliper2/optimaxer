@@ -31,6 +31,7 @@ const LOG_LINES: usize = 600;
 pub enum Page {
     Overview,
     Processes,
+    Activity,
     Tweaks,
     Services,
     Startup,
@@ -40,12 +41,23 @@ pub enum Page {
 }
 
 impl Page {
-    const ALL: [Page; 8] = [Page::Overview, Page::Processes, Page::Tweaks, Page::Services, Page::Startup, Page::Cleaner, Page::Network, Page::Tools];
+    const ALL: [Page; 9] = [
+        Page::Overview,
+        Page::Processes,
+        Page::Activity,
+        Page::Tweaks,
+        Page::Services,
+        Page::Startup,
+        Page::Cleaner,
+        Page::Network,
+        Page::Tools,
+    ];
     /// Segoe Fluent Icons glyph shown in the sidebar.
     fn icon(self) -> char {
         match self {
             Page::Overview => '\u{E80F}',
             Page::Processes => '\u{E9D9}',
+            Page::Activity => '\u{E81C}',
             Page::Tweaks => '\u{E9E9}',
             Page::Services => '\u{E9F5}',
             Page::Startup => '\u{E7E8}',
@@ -59,6 +71,7 @@ impl Page {
         match self {
             Page::Overview => "Overview",
             Page::Processes => "Processes",
+            Page::Activity => "Activity",
             Page::Tweaks => "Tweaks",
             Page::Services => "Services",
             Page::Startup => "Startup",
@@ -165,6 +178,7 @@ pub struct OptiUi {
     log_expanded: bool,
     history: Vec<HistoryEntry>,
     history_error: Option<String>,
+    history_search: String,
     restart_pending: bool,
     pending: Option<Pending>,
     restore_first: bool,
@@ -237,6 +251,26 @@ fn profile_summary(tr: &Traits) -> String {
         "Windows version unknown"
     };
     [form, storage, windows].join(" · ")
+}
+
+fn history_entry_matches(entry: &HistoryEntry, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    query.is_empty()
+        || entry.time.to_lowercase().contains(&query)
+        || match entry.action {
+            HistoryAction::Apply => {
+                "apply".contains(&query) || "applied".contains(&query)
+            }
+            HistoryAction::Undo => "undo".contains(&query) || "undid".contains(&query),
+        }
+        || entry.changes.iter().any(|change| {
+            change.id.to_lowercase().contains(&query)
+                || change.name.to_lowercase().contains(&query)
+                || change
+                    .details
+                    .iter()
+                    .any(|detail| detail.to_lowercase().contains(&query))
+        })
 }
 
 fn tweak_notes(t: &Tweak) -> String {
@@ -420,6 +454,7 @@ impl OptiUi {
             log_expanded: false,
             history,
             history_error,
+            history_search: String::new(),
             restart_pending: false,
             pending: None,
             restore_first: true,
@@ -1026,6 +1061,7 @@ impl OptiUi {
                 egui::ScrollArea::vertical().id_salt(("optimaxer-page", self.page.label())).auto_shrink([false, false]).show(ui, |ui| match self.page {
                     Page::Overview => self.overview_page(ui, ctx),
                     Page::Processes => self.processes_page(ui, ctx),
+                    Page::Activity => self.activity_page(ui, ctx),
                     Page::Tweaks => self.tweaks_page(ui, ctx),
                     Page::Services => self.services_page(ui, ctx),
                     Page::Startup => self.startup_page(ui, ctx),
@@ -1242,6 +1278,84 @@ impl OptiUi {
             });
             ui.add_space(S3);
         });
+    }
+
+    fn activity_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let t = tokens(ctx);
+        kit::page_header(ui, "Activity", "Search confirmed tweak apply and undo records. Other system operations are not included in this history.");
+        ui.horizontal_wrapped(|ui| {
+            ui.add_sized(
+                [280.0, 34.0],
+                egui::TextEdit::singleline(&mut self.history_search)
+                    .hint_text("Search action, tweak or date"),
+            );
+            let visible = self
+                .history
+                .iter()
+                .filter(|entry| history_entry_matches(entry, &self.history_search))
+                .count();
+            ui.label(
+                RichText::new(format!("{visible} of {} records", self.history.len()))
+                    .size(T_SMALL)
+                    .color(t.muted),
+            );
+        });
+        ui.add_space(S2);
+        if let Some(error) = &self.history_error {
+            kit::empty_state(ui, "Activity history unavailable", error);
+            return;
+        }
+        let matches: Vec<_> = self
+            .history
+            .iter()
+            .rev()
+            .filter(|entry| history_entry_matches(entry, &self.history_search))
+            .collect();
+        if matches.is_empty() {
+            kit::empty_state(
+                ui,
+                if self.history.is_empty() {
+                    "No recorded activity"
+                } else {
+                    "No matching activity"
+                },
+                if self.history.is_empty() {
+                    "Confirmed tweak apply and undo operations will appear here."
+                } else {
+                    "Try another search or clear the filter."
+                },
+            );
+            return;
+        }
+        for (index, entry) in matches.iter().enumerate() {
+            let verified = entry.changes.iter().filter(|change| change.verified).count();
+            let undoable = entry.changes.iter().filter(|change| change.undo_available).count();
+            let action = match entry.action {
+                HistoryAction::Apply => "Applied",
+                HistoryAction::Undo => "Undid",
+            };
+            egui::CollapsingHeader::new(format!(
+                "{action} {} tweaks · {verified}/{} verified · {undoable} undoable",
+                entry.changes.len(),
+                entry.changes.len()
+            ))
+                .id_salt(("activity-record", index, &entry.time))
+                .show(ui, |ui| {
+                    ui.label(RichText::new(&entry.time).size(T_CAPTION).color(t.subtle));
+                    for change in &entry.changes {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(&change.name).size(T_SMALL).color(t.text));
+                            kit::chip(ui, if change.verified { "Verified" } else { "Incomplete" }, if change.verified { Tone::Good } else { Tone::Warn });
+                            if change.undo_available {
+                                kit::chip(ui, "Undo available", Tone::Neutral);
+                            }
+                        });
+                        for detail in &change.details {
+                            ui.add(egui::Label::new(RichText::new(detail).size(T_CAPTION).color(t.muted)).wrap());
+                        }
+                    }
+                });
+        }
     }
 
     fn processes_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
@@ -1935,6 +2049,32 @@ mod tests {
         assert_eq!(score(&cat, &t, &HashMap::new()).0, 0);
         let (_, laptop_total) = score(&cat, &tr(true), &HashMap::new());
         assert!(laptop_total <= total, "desktop-only tweaks must not count on a laptop");
+    }
+
+    #[test]
+    fn activity_search_matches_dates_actions_names_ids_and_change_details() {
+        let entry = HistoryEntry {
+            time: "2026-10-29T12:30:00Z".into(),
+            action: HistoryAction::Apply,
+            changes: vec![HistoryChange {
+                id: "disable-copilot".into(),
+                name: "Disable Copilot".into(),
+                verified: true,
+                undo_available: true,
+                details: vec!["registry value changed".into()],
+            }],
+        };
+        for query in [
+            "copilot",
+            "disable-copilot",
+            "2026-10-29",
+            "apply",
+            "registry value",
+        ] {
+            assert!(history_entry_matches(&entry, query), "should match {query}");
+        }
+        assert!(!history_entry_matches(&entry, "service"));
+        assert!(history_entry_matches(&entry, "  "));
     }
 
     #[test]

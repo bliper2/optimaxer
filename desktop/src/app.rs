@@ -44,9 +44,10 @@ enum PaletteCommand {
     Settings,
 }
 
-const PALETTE_COMMANDS: [(&str, &str, PaletteCommand); 12] = [
+const PALETTE_COMMANDS: [(&str, &str, PaletteCommand); 13] = [
     ("Overview", "Optimaxer page", PaletteCommand::Page("Overview")),
     ("Processes", "Read-only process explorer", PaletteCommand::Page("Processes")),
+    ("Activity", "Search confirmed tweak changes", PaletteCommand::Page("Activity")),
     ("Tweaks", "Optimaxer page", PaletteCommand::Page("Tweaks")),
     ("Services", "Optimaxer page", PaletteCommand::Page("Services")),
     ("Startup", "Optimaxer page", PaletteCommand::Page("Startup")),
@@ -1450,7 +1451,7 @@ mod palette_tests {
 
     #[test]
     fn palette_lists_all_commands_for_blank_query() {
-        assert_eq!(matching_palette_commands("  ").len(), 12);
+        assert_eq!(matching_palette_commands("  ").len(), 13);
     }
 
     #[test]
