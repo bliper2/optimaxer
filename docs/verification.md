@@ -25,6 +25,8 @@ The v2.15.5 Windows release build was also opened interactively at 1180 × 760: 
 
 The v2.15.6 Windows release build was opened at 1180 × 760. Settings content scrolled to the lower sections, the Arctic palette changed the live interface, and the selected palette remained after restarting the app. The original settings file was restored after the check. This does not cover every palette or display scale.
 
+A v2.15.7 build was rendered at 1180 × 760 with the Optimaxer rail collapsed. The overview screenshot was visually checked, and the Network page accessibility tree exposed full navigation names. Settings serialization tests cover the saved collapse choice and the default for older settings files; toggle persistence across an ordinary app restart still needs a manual check.
+
 The v2.15.7 fake-system tests verify apply/undo history values, status and undo eligibility. The history store tests its 100-entry bound and refusal to overwrite corrupt data. No live system tweaks were run for this check.
 
 ## Failure and restoration rules
