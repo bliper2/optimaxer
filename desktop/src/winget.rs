@@ -18,6 +18,7 @@ pub struct Package {
     pub id: String,
     pub domain: String,
     pub website: String,
+    pub icon_ref: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,6 +94,7 @@ fn parse_catalog(raw: &str) -> Result<Vec<Package>, String> {
             id: id.into(),
             domain: fields[3].into(),
             website: website.into(),
+            icon_ref: fields[5].into(),
         });
     }
     if packages.is_empty() {
@@ -308,6 +310,7 @@ mod tests {
     fn curated_catalog_has_unique_valid_ids_and_real_categories() {
         let packages = catalog().unwrap();
         assert!(packages.len() >= 200);
+        assert!(packages.iter().any(|package| !package.icon_ref.is_empty()));
         assert!(packages.iter().all(|package| valid_package_id(&package.id)
             && !package.name.is_empty()
             && !package.category.is_empty()));

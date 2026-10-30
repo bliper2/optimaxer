@@ -5,12 +5,15 @@ use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
+const ICON_SCREENSHOT_DELAY_SECONDS: f64 = 16.0;
+
 pub struct Shots {
     tx: Sender<Arc<egui::ColorImage>>,
     rx: Receiver<Arc<egui::ColorImage>>,
     dir: PathBuf,
     idx: usize,
     due: f64,
+    load_icons: bool,
     navigated: bool,
     requested: bool,
 }
@@ -45,8 +48,19 @@ impl Shots {
     pub fn from_env() -> Option<Self> {
         let dir = PathBuf::from(std::env::var_os("ORION_SHOTS")?);
         std::fs::create_dir_all(&dir).ok()?;
+        let load_icons = std::env::var("ORION_SHOTS_LOAD_ICONS")
+            .is_ok_and(|value| value.eq_ignore_ascii_case("true"));
         let (tx, rx) = channel();
-        Some(Shots { tx, rx, dir, idx: 0, due: 0.0, navigated: false, requested: false })
+        Some(Shots {
+            tx,
+            rx,
+            dir,
+            idx: 0,
+            due: 0.0,
+            load_icons,
+            navigated: false,
+            requested: false,
+        })
     }
 
     pub fn sender(&self) -> Sender<Arc<egui::ColorImage>> {
@@ -67,7 +81,14 @@ impl Shots {
             return false;
         }
         self.navigated = true;
-        self.due = now + self.step().map_or(0.0, |s| s.1);
+        let delay = self.step().map_or(0.0, |(name, seconds)| {
+            if name == "winget" && self.load_icons {
+                ICON_SCREENSHOT_DELAY_SECONDS
+            } else {
+                seconds
+            }
+        });
+        self.due = now + delay;
         true
     }
 
@@ -104,7 +125,16 @@ mod tests {
     #[test]
     fn steps_advance_navigate_then_capture_then_next() {
         let (tx, rx) = channel();
-        let mut s = Shots { tx, rx, dir: std::env::temp_dir(), idx: 0, due: 0.0, navigated: false, requested: false };
+        let mut s = Shots {
+            tx,
+            rx,
+            dir: std::env::temp_dir(),
+            idx: 0,
+            due: 0.0,
+            load_icons: false,
+            navigated: false,
+            requested: false,
+        };
         assert!(!s.should_capture(0.0), "no capture before navigating");
         assert!(s.should_navigate(1.0));
         assert!(!s.should_navigate(1.1), "navigate only once per step");
@@ -114,6 +144,38 @@ mod tests {
         s.save(1, 1, &[0, 0, 0, 255]);
         assert_eq!(s.step().unwrap().0, "store-detail");
         assert!(!s.finished());
+    }
+
+    #[test]
+    fn icon_screenshot_waits_for_remote_images() {
+        let (tx, rx) = channel();
+        let mut s = Shots {
+            tx,
+            rx,
+            dir: std::env::temp_dir(),
+            idx: 3,
+            due: 0.0,
+            load_icons: true,
+            navigated: false,
+            requested: false,
+        };
+        assert!(s.should_navigate(10.0));
+        assert!(!s.should_capture(14.0), "remote icon capture keeps the extended wait");
+        assert!(s.should_capture(10.0 + ICON_SCREENSHOT_DELAY_SECONDS));
+
+        let (tx, rx) = channel();
+        let mut normal = Shots {
+            tx,
+            rx,
+            dir: std::env::temp_dir(),
+            idx: 3,
+            due: 0.0,
+            load_icons: false,
+            navigated: false,
+            requested: false,
+        };
+        assert!(normal.should_navigate(10.0));
+        assert!(normal.should_capture(14.0), "normal screenshot keeps the short wait");
     }
 
     #[test]
