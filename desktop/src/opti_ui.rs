@@ -214,6 +214,7 @@ enum Msg {
     Services(Vec<SvcRow>),
     Startup(startup::Listing),
     StartupBoot(Option<(u64, String)>),
+    StartupPublisher(String, PathBuf, Result<Option<String>, String>),
     Scan(Vec<(&'static str, Option<u64>)>),
     ScanCancelled,
     CleanPreview(&'static str, Result<cleaner::Preview, String>),
@@ -244,6 +245,29 @@ enum ProcessPublisherState {
     Loading,
     Ready(Option<String>),
     Error(String),
+}
+
+enum StartupInspectionState {
+    Loading(PathBuf),
+    Unavailable,
+    Ready {
+        path: PathBuf,
+        company_name: Option<String>,
+    },
+    Error {
+        path: Option<PathBuf>,
+        message: String,
+    },
+}
+
+fn startup_item_key(item: &startup::Item) -> String {
+    format!(
+        "{}|{}|{}|{}",
+        item.scope,
+        item.task_path.as_deref().unwrap_or(""),
+        item.name,
+        item.cmd
+    )
 }
 
 #[derive(Clone)]
@@ -388,6 +412,8 @@ pub struct OptiUi {
     startup: Vec<startup::Item>,
     startup_warning: Option<String>,
     st_sel: HashSet<String>,
+    startup_inspection: Option<startup::Item>,
+    startup_inspection_state: Option<StartupInspectionState>,
     clean_sizes: HashMap<&'static str, Option<u64>>,
     clean_scan_cancelled: bool,
     clean_sel: HashSet<&'static str>,
@@ -1144,6 +1170,8 @@ impl OptiUi {
             startup: Vec::new(),
             startup_warning: None,
             st_sel: HashSet::new(),
+            startup_inspection: None,
+            startup_inspection_state: None,
             clean_sizes: HashMap::new(),
             clean_scan_cancelled: false,
             clean_sel: HashSet::new(),
@@ -1407,6 +1435,8 @@ impl OptiUi {
                 }
                 Msg::Startup(s) => {
                     self.st_sel.clear();
+                    self.startup_inspection = None;
+                    self.startup_inspection_state = None;
                     self.startup = s.items;
                     self.startup_warning = s.warning;
                     self.startup_loaded = true;
@@ -1414,6 +1444,23 @@ impl OptiUi {
                 Msg::StartupBoot(record) => {
                     self.startup_boot_record = record;
                     self.startup_boot_loading = false;
+                }
+                Msg::StartupPublisher(key, path, result) => {
+                    if self
+                        .startup_inspection
+                        .as_ref()
+                        .is_some_and(|item| startup_item_key(item) == key)
+                    {
+                        self.startup_inspection_state = Some(match result {
+                            Ok(company_name) => {
+                                StartupInspectionState::Ready { path, company_name }
+                            }
+                            Err(message) => StartupInspectionState::Error {
+                                path: Some(path),
+                                message,
+                            },
+                        });
+                    }
                 }
                 Msg::Scan(v) => {
                     self.clean_scan_cancelled = false;
@@ -1581,6 +1628,30 @@ impl OptiUi {
                 processes::company_name(&path),
             ));
         });
+    }
+
+    fn inspect_startup(&mut self, ctx: &egui::Context, item: startup::Item) {
+        let key = startup_item_key(&item);
+        self.startup_inspection = Some(item.clone());
+        match startup::resolve_executable(item.executable.as_deref()) {
+            Ok(Some(path)) => {
+                self.startup_inspection_state = Some(StartupInspectionState::Loading(path.clone()));
+                let worker = self.worker(ctx);
+                std::thread::spawn(move || {
+                    let result = processes::company_name(&path);
+                    worker.send(Msg::StartupPublisher(key, path, result));
+                });
+            }
+            Ok(None) => {
+                self.startup_inspection_state = Some(StartupInspectionState::Unavailable);
+            }
+            Err(message) => {
+                self.startup_inspection_state = Some(StartupInspectionState::Error {
+                    path: None,
+                    message,
+                });
+            }
+        }
     }
 
     fn refresh_status(&mut self, ctx: &egui::Context) {
@@ -5789,18 +5860,10 @@ impl OptiUi {
         );
         ui.add_space(S2);
         let idle = self.busy.is_none();
-        let key = |i: &startup::Item| {
-            format!(
-                "{}|{}|{}",
-                i.scope,
-                i.task_path.as_deref().unwrap_or(""),
-                i.name
-            )
-        };
         let picked: Vec<startup::Item> = self
             .startup
             .iter()
-            .filter(|i| self.st_sel.contains(&key(i)))
+            .filter(|i| self.st_sel.contains(&startup_item_key(i)))
             .cloned()
             .collect();
         ui.horizontal_wrapped(|ui| {
@@ -5841,14 +5904,138 @@ impl OptiUi {
             }
             return;
         }
+        let mut clear_inspection = false;
+        if let Some(item) = &self.startup_inspection {
+            kit::card(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(&item.name)
+                            .font(FontId::new(T_BODY, semibold()))
+                            .color(t.text),
+                    );
+                    kit::chip(ui, item.scope, Tone::Neutral);
+                    if kit::ghost(ui, "Close details", true).clicked() {
+                        clear_inspection = true;
+                    }
+                });
+                ui.label(
+                    RichText::new("Launch command")
+                        .size(T_CAPTION)
+                        .color(t.muted),
+                );
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(&item.cmd)
+                            .monospace()
+                            .size(T_CAPTION)
+                            .color(t.subtle),
+                    )
+                    .wrap(),
+                );
+                match self.startup_inspection_state.as_ref() {
+                    Some(StartupInspectionState::Loading(path)) => {
+                        ui.label(
+                            RichText::new("Reading executable metadata…")
+                                .size(T_SMALL)
+                                .color(t.subtle),
+                        );
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(path.to_string_lossy())
+                                    .monospace()
+                                    .size(T_CAPTION)
+                                    .color(t.text),
+                            )
+                            .wrap(),
+                        );
+                    }
+                    Some(StartupInspectionState::Unavailable) | None => {
+                        ui.label(
+                            RichText::new("Executable location not resolved. Shortcut targets, scripts, relative commands, and ambiguous launchers are not guessed.")
+                                .size(T_SMALL)
+                                .color(t.subtle),
+                        );
+                    }
+                    Some(StartupInspectionState::Ready { path, company_name }) => {
+                        ui.label(
+                            RichText::new("Executable location")
+                                .size(T_CAPTION)
+                                .color(t.muted),
+                        );
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(path.to_string_lossy())
+                                    .monospace()
+                                    .size(T_CAPTION)
+                                    .color(t.text),
+                            )
+                            .wrap(),
+                        );
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(
+                                RichText::new("Embedded CompanyName")
+                                    .size(T_CAPTION)
+                                    .color(t.muted),
+                            );
+                            match company_name {
+                                Some(name) => {
+                                    ui.label(RichText::new(name).size(T_SMALL).color(t.text))
+                                }
+                                None => ui.label(
+                                    RichText::new("Not present in this executable")
+                                        .size(T_SMALL)
+                                        .color(t.subtle),
+                                ),
+                            };
+                        });
+                        ui.label(
+                            RichText::new("This file metadata is not signature verification and may identify a launcher rather than the application.")
+                                .size(T_CAPTION)
+                                .color(t.subtle),
+                        );
+                    }
+                    Some(StartupInspectionState::Error { path, message }) => {
+                        if let Some(path) = path {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(path.to_string_lossy())
+                                        .monospace()
+                                        .size(T_CAPTION)
+                                        .color(t.text),
+                                )
+                                .wrap(),
+                            );
+                        }
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format!(
+                                    "Executable metadata unavailable: {message}"
+                                ))
+                                .size(T_SMALL)
+                                .color(t.warn),
+                            )
+                            .wrap(),
+                        );
+                    }
+                }
+            });
+            ui.add_space(S2);
+        }
+        if clear_inspection {
+            self.startup_inspection = None;
+            self.startup_inspection_state = None;
+        }
+        let mut inspect = None;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for i in &self.startup {
-                    let k = key(i);
+                    let k = startup_item_key(i);
                     let on = self.st_sel.contains(&k);
+                    let mut inspect_clicked = false;
+                    let mut details_rect = None;
                     let r = kit::row(ui, ("st", &k), on, |ui| {
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             kit::check(ui, on);
                             ui.vertical(|ui| {
                                 ui.horizontal_wrapped(|ui| {
@@ -5874,6 +6061,12 @@ impl OptiUi {
                                     .truncate(),
                                 );
                             });
+                            let details = kit::ghost(ui, "Details", true);
+                            details_rect = Some(details.rect);
+                            if details.clicked() {
+                                inspect = Some(i.clone());
+                                inspect_clicked = true;
+                            }
                         });
                     });
                     let click = ui.interact(
@@ -5885,14 +6078,24 @@ impl OptiUi {
                         ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
                     }
                     if click.clicked() {
-                        if on {
-                            self.st_sel.remove(&k);
-                        } else {
-                            self.st_sel.insert(k);
+                        let clicked_details = click
+                            .interact_pointer_pos()
+                            .is_some_and(|pos| details_rect.is_some_and(|rect| rect.contains(pos)));
+                        if clicked_details {
+                            inspect = Some(i.clone());
+                        } else if !inspect_clicked {
+                            if on {
+                                self.st_sel.remove(&k);
+                            } else {
+                                self.st_sel.insert(k);
+                            }
                         }
                     }
                 }
             });
+        if let Some(item) = inspect {
+            self.inspect_startup(ctx, item);
+        }
     }
 
     fn cleaner_page(&mut self, ui: &mut Ui, ctx: &egui::Context, settings: &mut Settings) {

@@ -5,6 +5,9 @@
 use super::backend::{RegData, System};
 use serde::Deserialize;
 use std::path::PathBuf;
+use windows_sys::Win32::System::Environment::ExpandEnvironmentStringsW;
+
+const MAX_EXPANDED_PATH_UNITS: u32 = 32_768;
 
 const APR: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved";
 
@@ -18,6 +21,8 @@ pub struct Item {
     pub enabled: bool,
     /// Scheduled-task folder when this item is a third-party logon/boot task.
     pub task_path: Option<String>,
+    /// Executable path from the launch command when it can be identified without guessing.
+    pub executable: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -33,6 +38,70 @@ struct ScheduledTask {
     task_path: String,
     command: String,
     enabled: bool,
+    #[serde(default)]
+    executable: String,
+}
+
+fn command_executable(command: &str) -> Option<String> {
+    let command = command.trim();
+    if let Some(quoted) = command.strip_prefix('"') {
+        let end = quoted.find('"')?;
+        let path = quoted[..end].trim();
+        return PathBuf::from(path)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+            .then(|| path.to_owned());
+    }
+
+    let lower = command.to_ascii_lowercase();
+    let end = lower.find(".exe")? + ".exe".len();
+    Some(command[..end].trim().to_owned())
+}
+
+/// Resolve only absolute executable paths. Relative commands and shortcuts are left unresolved
+/// rather than being expanded against an arbitrary working directory.
+pub fn resolve_executable(raw: Option<&str>) -> Result<Option<PathBuf>, String> {
+    let Some(raw) = raw.map(str::trim).filter(|raw| !raw.is_empty()) else {
+        return Ok(None);
+    };
+    let raw = raw
+        .strip_prefix('"')
+        .and_then(|path| path.strip_suffix('"'))
+        .unwrap_or(raw);
+    let source: Vec<u16> = raw.encode_utf16().chain(Some(0)).collect();
+    // SAFETY: `source` is NUL-terminated; a null destination with size zero requests the size.
+    let required = unsafe { ExpandEnvironmentStringsW(source.as_ptr(), std::ptr::null_mut(), 0) };
+    if required == 0 {
+        return Err(format!(
+            "Could not expand the executable path: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    if required > MAX_EXPANDED_PATH_UNITS {
+        return Err("Expanded executable path exceeds the Windows path limit.".into());
+    }
+    let mut expanded = vec![0u16; required as usize];
+    // SAFETY: `expanded` has the size returned by the first call and both pointers stay valid.
+    let written =
+        unsafe { ExpandEnvironmentStringsW(source.as_ptr(), expanded.as_mut_ptr(), required) };
+    if written == 0 {
+        return Err(format!(
+            "Could not expand the executable path: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    if written > required {
+        return Err(
+            "Executable path changed while Windows expanded its environment variables.".into(),
+        );
+    }
+    let length = (written as usize).saturating_sub(1);
+    let expanded = String::from_utf16_lossy(&expanded[..length]);
+    if expanded.contains('%') {
+        return Ok(None);
+    }
+    let path = PathBuf::from(expanded);
+    Ok(path.is_absolute().then_some(path))
 }
 
 fn enabled_flag(sys: &dyn System, approved: &str, name: &str) -> bool {
@@ -51,8 +120,10 @@ try {
         $_.TaskPath -notlike '\Microsoft\*' -and
         @($_.Triggers | Where-Object { $_.CimClass.CimClassName -in @('MSFT_TaskLogonTrigger', 'MSFT_TaskBootTrigger') }).Count -gt 0
     } | ForEach-Object {
-        $command = @($_.Actions | ForEach-Object { ("$($_.Execute) $($_.Arguments)").Trim() }) -join '; '
-        [pscustomobject]@{ name = $_.TaskName; taskPath = $_.TaskPath; command = $command; enabled = ($_.State -ne 'Disabled') }
+        $actions = @($_.Actions)
+        $command = @($actions | ForEach-Object { ("$($_.Execute) $($_.Arguments)").Trim() }) -join '; '
+        $executable = if ($actions.Count -eq 1) { [string]$actions[0].Execute } else { '' }
+        [pscustomobject]@{ name = $_.TaskName; taskPath = $_.TaskPath; command = $command; executable = $executable; enabled = ($_.State -ne 'Disabled') }
     })
     [Console]::Out.Write((ConvertTo-Json -InputObject $tasks -Depth 3 -Compress))
 } catch {
@@ -92,6 +163,7 @@ pub fn list(sys: &dyn System) -> Listing {
             }
             let enabled = enabled_flag(sys, &approved, &name);
             out.push(Item {
+                executable: command_executable(&cmd),
                 name,
                 cmd,
                 scope,
@@ -127,13 +199,20 @@ pub fn list(sys: &dyn System) -> Listing {
                 continue;
             }
             let enabled = enabled_flag(sys, &approved, &name);
+            let path = e.path();
+            let cmd = path.to_string_lossy().to_string();
+            let executable = path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+                .then(|| cmd.clone());
             out.push(Item {
                 name,
-                cmd: e.path().to_string_lossy().to_string(),
+                cmd,
                 scope,
                 approved: approved.clone(),
                 enabled,
                 task_path: None,
+                executable,
             });
         }
     }
@@ -173,6 +252,7 @@ pub fn list(sys: &dyn System) -> Listing {
                         continue;
                     }
                     out.push(Item {
+                        executable: (!task.executable.trim().is_empty()).then_some(task.executable),
                         name: task.name,
                         cmd: task.command,
                         scope: "Scheduled task (logon/boot)",
@@ -267,6 +347,40 @@ mod tests {
         };
         assert!(by("alpha").enabled);
         assert!(!by("beta").enabled);
+        assert_eq!(by("alpha").executable.as_deref(), Some(r"C:\a.exe"));
+    }
+
+    #[test]
+    fn launch_commands_resolve_only_an_explicit_executable_path() {
+        assert_eq!(
+            command_executable(r#""C:\Program Files\Vendor\agent.exe" --tray"#),
+            Some(r"C:\Program Files\Vendor\agent.exe".into())
+        );
+        assert_eq!(
+            command_executable(r"C:\Program Files\Vendor\agent.exe --tray"),
+            Some(r"C:\Program Files\Vendor\agent.exe".into())
+        );
+        assert_eq!(
+            command_executable(r"wscript.exe //B script.vbs"),
+            Some("wscript.exe".into())
+        );
+        assert_eq!(command_executable(r#""C:\broken\agent.exe"#), None);
+        assert_eq!(command_executable(r"relative-agent --tray"), None);
+    }
+
+    #[test]
+    fn executable_resolution_expands_windows_environment_variables() {
+        let root = std::env::var("SystemRoot").expect("Windows SystemRoot is set");
+        let path = resolve_executable(Some(r"%SystemRoot%\System32\notepad.exe"))
+            .unwrap()
+            .unwrap();
+        assert!(path.starts_with(root));
+        assert!(path.is_absolute());
+        assert!(
+            resolve_executable(Some(r"%OPTIMAXER_TEST_VARIABLE_MISSING%\app.exe"))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -326,7 +440,7 @@ mod tests {
     fn lists_only_third_party_logon_and_boot_tasks_and_toggles_by_full_path() {
         let sys = FakeSystem::default();
         sys.answer("powershell.exe", r#"[
-            {"name":"Agent","taskPath":"\\Vendor\\","command":"agent.exe","enabled":true},
+            {"name":"Agent","taskPath":"\\Vendor\\","command":"agent.exe","executable":"C:\\Vendor\\agent.exe","enabled":true},
             {"name":"Update","taskPath":"\\Microsoft\\Windows\\","command":"update.exe","enabled":true}
         ]"#);
         sys.tasks.borrow_mut().insert(r"\vendor\agent".into(), true);
@@ -342,6 +456,7 @@ mod tests {
         let task = tasks[0];
         assert_eq!(task.name, "Agent");
         assert_eq!(task.task_path.as_deref(), Some("\\Vendor\\"));
+        assert_eq!(task.executable.as_deref(), Some(r"C:\Vendor\agent.exe"));
         set_enabled(&sys, task, false).unwrap();
         assert_eq!(sys.task_enabled(r"\Vendor\Agent"), Some(false));
         set_enabled(&sys, task, true).unwrap();

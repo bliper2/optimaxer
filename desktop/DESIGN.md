@@ -55,6 +55,8 @@ States: every control has rest, hover, pressed, disabled and keyboard focus. Foc
 
 The Optimaxer sidebar can collapse to a 64 px icon rail. Its expanded destinations are grouped under Workspace, Optimization and System. Labels stay available as tooltips and accessibility names; the detected PC summary returns when expanded. The choice persists in application settings. Store navigation remains expanded because its platform and category entries use text labels and counts.
 
+Startup rows retain their checkbox behavior for batch enable/disable. A separate Details action opens the original launch command and, only when an executable path is explicit, its location and embedded CompanyName. The panel labels this as file metadata rather than verified publisher identity; links and ambiguous launch commands are reported as unresolved.
+
 The Appearance settings palette picker is a selectable gallery rather than a text-only menu. Each choice shows its live accent, success and warning colors; selecting a palette immediately reapplies the app theme. The old palette is restored if the settings file cannot be saved.
 
 The System Snapshot page uses a compact, collapsible history because each capture is a point-in-time inventory rather than a live dashboard. It labels unavailable readings explicitly and states that local snapshots cannot restore Windows.
