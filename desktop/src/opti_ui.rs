@@ -1554,7 +1554,9 @@ impl OptiUi {
         };
         let Some(path) = selected.image_path.clone() else {
             self.process_inspection = Some(selected);
-            self.process_publisher = Some(ProcessPublisherState::Ready(None));
+            self.process_publisher = Some(ProcessPublisherState::Error(
+                "Windows denied access to this executable path.".into(),
+            ));
             return;
         };
 
