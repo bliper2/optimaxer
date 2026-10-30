@@ -1,6 +1,7 @@
 //! Optimaxer, ported to Rust. Engine and system access live here; the egui pages are in `opti_ui.rs`.
 
 pub mod backend;
+pub mod backup_integrity;
 pub mod catalog;
 pub mod cleaner;
 pub mod diagnostics;

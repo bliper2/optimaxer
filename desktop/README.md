@@ -51,6 +51,8 @@ Network. DNS provider switch with DNS-over-HTTPS where the provider offers it, f
 
 Tools. Restore point, Free RAM (clears process and system working sets, the file cache, the modified and standby lists, identical pages and the registry cache), TRIM, SFC, DISM, Windows Update reset, icon and Store cache reset, performance counters, registry backup, System Restore, and "Undo ALL Optimaxer tweaks".
 
+Tools also includes a read-only backup check for the saved tweak-undo state and service backup JSON files. It validates JSON readability and required record fields. It cannot prove Windows will accept every restoration; missing backups are reported separately from invalid ones.
+
 ## How the two halves connect
 
 The Tools page suggests PC apps from the Orion catalog (Utility and Customization) and has buttons that open the Store on those categories. A finished download that is an installer gets a "Restore point + run" button in the Downloads list: Optimaxer creates a restore point first, and only then opens the file. You still decide inside the installer whether to continue.
