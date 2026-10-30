@@ -49,7 +49,7 @@ Primary button: lime fill, dark text, one per view. Secondary: raised surface wi
 
 States: every control has rest, hover, pressed, disabled and keyboard focus. Focus draws a 2 px ring in the accent colour. Disabled controls drop to the subtle text colour on surface2.
 
-The Optimaxer sidebar can collapse to a 64 px icon rail. Labels stay available as tooltips and accessibility names; the detected PC summary returns when expanded. The choice persists in application settings. Store navigation remains expanded because its platform and category entries use text labels and counts.
+The Optimaxer sidebar can collapse to a 64 px icon rail. Its expanded destinations are grouped under Workspace, Optimization and System. Labels stay available as tooltips and accessibility names; the detected PC summary returns when expanded. The choice persists in application settings. Store navigation remains expanded because its platform and category entries use text labels and counts.
 
 The System Snapshot page uses a compact, collapsible history because each capture is a point-in-time inventory rather than a live dashboard. It labels unavailable readings explicitly and states that local snapshots cannot restore Windows.
 
