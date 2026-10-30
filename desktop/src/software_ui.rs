@@ -1,8 +1,9 @@
 use crate::kit;
 use crate::theme::{self, Tone, semibold, tokens};
 use crate::winget::{self, Action, InstalledPackage, Package};
+use crate::winget_icons;
 use egui::{Align, FontId, Layout, RichText, Ui};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
@@ -24,10 +25,16 @@ pub struct SoftwareUi {
     operation_rx: Option<Receiver<Result<i32, String>>>,
     message: Option<(bool, String)>,
     pending: Option<PendingAction>,
+    icon_attempts: HashMap<String, usize>,
+    icon_failures: HashSet<String>,
+    remote_icons_enabled: bool,
 }
 
 impl SoftwareUi {
     pub fn new() -> Self {
+        let screenshot_mode = std::env::var_os("ORION_SHOTS").is_some();
+        let load_icons_in_screenshot = std::env::var("ORION_SHOTS_LOAD_ICONS")
+            .is_ok_and(|value| value.eq_ignore_ascii_case("true"));
         let (packages, catalog_error) = match winget::catalog() {
             Ok(packages) => (packages, None),
             Err(error) => (Vec::new(), Some(error)),
@@ -45,6 +52,9 @@ impl SoftwareUi {
             operation_rx: None,
             message: None,
             pending: None,
+            icon_attempts: HashMap::new(),
+            icon_failures: HashSet::new(),
+            remote_icons_enabled: !screenshot_mode || load_icons_in_screenshot,
         }
     }
 
@@ -173,6 +183,64 @@ impl SoftwareUi {
         self.refresh_rx.is_none() && self.operation_rx.is_none()
     }
 
+    fn package_icon(&mut self, ui: &mut Ui, package: &Package) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(38.0, 38.0), egui::Sense::hover());
+        let t = tokens(ui.ctx());
+        let radius = egui::CornerRadius::same(t.ctl_radius());
+        ui.painter().rect_filled(rect, radius, t.surface2);
+        let letter = package
+            .name
+            .chars()
+            .next()
+            .unwrap_or('?')
+            .to_uppercase()
+            .to_string();
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            letter,
+            FontId::new(17.0, semibold()),
+            t.text,
+        );
+        if !ui.is_rect_visible(rect)
+            || !self.remote_icons_enabled
+            || self.icon_failures.contains(&package.id)
+        {
+            return;
+        }
+        let urls = winget_icons::candidates(package);
+        let mut index = *self.icon_attempts.get(&package.id).unwrap_or(&0);
+        while let Some(url) = urls.get(index) {
+            match ui.ctx().try_load_texture(
+                url,
+                egui::TextureOptions::LINEAR,
+                egui::load::SizeHint::Size {
+                    width: 48,
+                    height: 48,
+                    maintain_aspect_ratio: true,
+                },
+            ) {
+                Ok(egui::load::TexturePoll::Pending { .. }) => {
+                    self.icon_attempts.insert(package.id.clone(), index);
+                    return;
+                }
+                Ok(egui::load::TexturePoll::Ready { texture }) => {
+                    egui::Image::from_texture(texture)
+                        .fit_to_exact_size(rect.size())
+                        .corner_radius(radius)
+                        .paint_at(ui, rect);
+                    return;
+                }
+                Err(_) => {
+                    index += 1;
+                    self.icon_attempts.insert(package.id.clone(), index);
+                    ui.ctx().request_repaint();
+                }
+            }
+        }
+        self.icon_failures.insert(package.id.clone());
+    }
+
     fn start_operation(&mut self, ctx: &egui::Context, pending: PendingAction) {
         let id = pending.package.as_ref().map(|package| package.id.clone());
         let label = match (&pending.package, pending.action) {
@@ -234,7 +302,7 @@ impl SoftwareUi {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 kit::page_header(ui, "WinGet", "Install, upgrade and remove curated Windows apps with the system package manager.");
-                ui.label(RichText::new("Package installers run in a visible WinGet console. Source agreements and installer prompts stay yours to review. Installed status includes only apps WinGet can match in its export.").size(theme::T_SMALL).color(t.muted));
+                ui.label(RichText::new("App icons load from the web as needed; missing icons use initials. Installers run in a visible console. Review source agreements and installer prompts. WinGet export may miss installed apps.").size(theme::T_SMALL).color(t.muted));
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if kit::secondary(ui, if self.refresh_rx.is_some() { "Checking…" } else { "Refresh installed" }, self.refresh_rx.is_none() && self.operation_rx.is_none()).clicked() {
@@ -290,6 +358,7 @@ impl SoftwareUi {
                     || package.domain.to_lowercase().contains(&query);
                 in_category && in_state && in_query
             })
+            .cloned()
             .collect::<Vec<_>>();
         ui.horizontal(|ui| {
             let heading = if self.installed_only {
@@ -343,10 +412,15 @@ impl SoftwareUi {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for package in visible {
-                    let installed = self.installed.get(&package.id.to_ascii_lowercase());
+                for package in &visible {
+                    let installed = self
+                        .installed
+                        .get(&package.id.to_ascii_lowercase())
+                        .cloned();
                     kit::row(ui, ("winget-package", &package.id), false, |ui| {
                         ui.horizontal(|ui| {
+                            self.package_icon(ui, package);
+                            ui.add_space(theme::S2);
                             ui.vertical(|ui| {
                                 ui.add(
                                     egui::Label::new(
@@ -365,7 +439,7 @@ impl SoftwareUi {
                                     .color(t.muted),
                                 );
                             });
-                            if let Some(installed) = installed {
+                            if let Some(installed) = &installed {
                                 let version = installed
                                     .version
                                     .as_deref()

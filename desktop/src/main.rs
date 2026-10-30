@@ -12,6 +12,7 @@ mod shots;
 mod software_ui;
 mod theme;
 mod winget;
+mod winget_icons;
 mod update;
 
 /// 1180 x 760 normally; `ORION_SHOTS_SIZE=1440x900` sets another size for the developer screenshot run.
