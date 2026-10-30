@@ -2507,7 +2507,7 @@ dependencies = [
 
 [[package]]
 name = "orion-store-desktop"
-version = "2.15.29"
+version = "2.15.30"
 dependencies = [
  "dirs",
  "eframe",

@@ -315,6 +315,7 @@ pub struct OptiUi {
     status_ready: bool,
     selected: HashSet<String>,
     tw_search: String,
+    focus_tweak_search: bool,
     /// Risk filter on the Tweaks page: 0 all, 1 Safe, 2 Moderate, 3 Advanced.
     tw_risk: usize,
     /// Group filter on the Tweaks page, an index into `TWEAK_GROUPS`.
@@ -979,6 +980,7 @@ impl OptiUi {
             status_ready: false,
             selected: HashSet::new(),
             tw_search: String::new(),
+            focus_tweak_search: false,
             tw_risk: 0,
             tw_group: 0,
             tw_state: 0,
@@ -1063,6 +1065,12 @@ impl OptiUi {
         {
             self.set_page(ctx, p);
         }
+    }
+
+    pub fn search_tweaks(&mut self, ctx: &egui::Context, query: &str) {
+        self.tw_search = query.to_owned();
+        self.focus_tweak_search = true;
+        self.set_page(ctx, Page::Tweaks);
     }
 
     pub fn start_transition(&mut self, ctx: &egui::Context) {
@@ -2656,13 +2664,14 @@ impl OptiUi {
         }
     }
 
-    fn toolbar_search(&self, ui: &mut Ui, text: &mut String, hint: &str) {
+    fn toolbar_search(&self, ui: &mut Ui, text: &mut String, hint: &str) -> egui::Response {
         ui.add_sized(
             [260.0, 34.0],
             egui::TextEdit::singleline(text)
+                .id_salt("optimaxer-tweak-search")
                 .hint_text(hint)
                 .margin(Margin::symmetric(S3 as i8, 8)),
-        );
+        )
     }
 
     fn tick_telemetry(&mut self, ctx: &egui::Context) {
@@ -4795,8 +4804,12 @@ impl OptiUi {
         self.profiles_section(ui);
         ui.horizontal_wrapped(|ui| {
             let mut q = std::mem::take(&mut self.tw_search);
-            self.toolbar_search(ui, &mut q, "Search tweaks");
+            let search = self.toolbar_search(ui, &mut q, "Search tweaks");
             self.tw_search = q;
+            if self.focus_tweak_search {
+                search.request_focus();
+                self.focus_tweak_search = false;
+            }
             if kit::ghost(ui, "Refresh", self.busy.is_none()).clicked() {
                 self.refresh_status(ctx);
             }

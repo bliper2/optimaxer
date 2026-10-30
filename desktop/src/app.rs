@@ -58,92 +58,358 @@ enum PaletteCommand {
     Page(&'static str),
     Store,
     SearchStore,
+    SearchTweaks,
     WinGet,
     Downloads,
     Settings,
+    Palette(theme::Palette),
 }
 
-const PALETTE_COMMANDS: [(&str, &str, PaletteCommand); 18] = [
-    (
-        "Overview",
-        "Optimaxer page",
-        PaletteCommand::Page("Overview"),
-    ),
-    (
-        "Performance",
-        "Live CPU, memory, disk and adapter traffic",
-        PaletteCommand::Page("Performance"),
-    ),
-    (
-        "Diagnostics",
-        "Read-only Windows integrity checks",
-        PaletteCommand::Page("Diagnostics"),
-    ),
-    (
-        "System Snapshot",
-        "Capture and browse local hardware inventory",
-        PaletteCommand::Page("System Snapshot"),
-    ),
-    (
-        "Processes",
-        "Read-only process explorer",
-        PaletteCommand::Page("Processes"),
-    ),
-    (
-        "Gaming",
-        "Review reversible Windows gaming settings",
-        PaletteCommand::Page("Gaming"),
-    ),
-    (
-        "Activity",
-        "Search confirmed tweak changes",
-        PaletteCommand::Page("Activity"),
-    ),
-    ("Tweaks", "Optimaxer page", PaletteCommand::Page("Tweaks")),
-    (
-        "Services",
-        "Optimaxer page",
-        PaletteCommand::Page("Services"),
-    ),
-    ("Startup", "Optimaxer page", PaletteCommand::Page("Startup")),
-    ("Cleaner", "Optimaxer page", PaletteCommand::Page("Cleaner")),
-    ("Network", "Optimaxer page", PaletteCommand::Page("Network")),
-    ("Tools", "Optimaxer page", PaletteCommand::Page("Tools")),
-    ("Store", "Browse apps", PaletteCommand::Store),
-    (
-        "Search apps",
-        "Focus Store search",
-        PaletteCommand::SearchStore,
-    ),
-    (
-        "WinGet apps",
-        "Install, upgrade or remove Windows apps",
-        PaletteCommand::WinGet,
-    ),
-    (
-        "Downloads",
-        "Show download activity",
-        PaletteCommand::Downloads,
-    ),
-    (
-        "Settings",
-        "Open application settings",
-        PaletteCommand::Settings,
-    ),
+#[derive(Clone, Copy)]
+struct PaletteEntry {
+    name: &'static str,
+    category: &'static str,
+    hint: &'static str,
+    command: PaletteCommand,
+}
+
+struct PaletteMatch {
+    name: std::borrow::Cow<'static, str>,
+    category: &'static str,
+    hint: &'static str,
+    command: PaletteCommand,
+}
+
+const PALETTE_COMMANDS: [PaletteEntry; 19] = [
+    PaletteEntry {
+        name: "Overview",
+        category: "Workspace",
+        hint: "System overview",
+        command: PaletteCommand::Page("Overview"),
+    },
+    PaletteEntry {
+        name: "Performance",
+        category: "Workspace",
+        hint: "Live CPU, memory, disk and adapter traffic",
+        command: PaletteCommand::Page("Performance"),
+    },
+    PaletteEntry {
+        name: "Activity",
+        category: "Workspace",
+        hint: "Search confirmed tweak changes",
+        command: PaletteCommand::Page("Activity"),
+    },
+    PaletteEntry {
+        name: "Processes",
+        category: "System",
+        hint: "Read-only process explorer",
+        command: PaletteCommand::Page("Processes"),
+    },
+    PaletteEntry {
+        name: "Diagnostics",
+        category: "System",
+        hint: "Read-only Windows integrity checks",
+        command: PaletteCommand::Page("Diagnostics"),
+    },
+    PaletteEntry {
+        name: "System Snapshot",
+        category: "System",
+        hint: "Capture and browse local hardware inventory",
+        command: PaletteCommand::Page("System Snapshot"),
+    },
+    PaletteEntry {
+        name: "Gaming",
+        category: "Optimization",
+        hint: "Review reversible Windows gaming settings",
+        command: PaletteCommand::Page("Gaming"),
+    },
+    PaletteEntry {
+        name: "Tweaks",
+        category: "Optimization",
+        hint: "Open the tweak catalog",
+        command: PaletteCommand::Page("Tweaks"),
+    },
+    PaletteEntry {
+        name: "Services",
+        category: "Optimization",
+        hint: "Review Windows services",
+        command: PaletteCommand::Page("Services"),
+    },
+    PaletteEntry {
+        name: "Startup",
+        category: "Optimization",
+        hint: "Manage startup entries",
+        command: PaletteCommand::Page("Startup"),
+    },
+    PaletteEntry {
+        name: "Cleaner",
+        category: "Optimization",
+        hint: "Review and remove selected files",
+        command: PaletteCommand::Page("Cleaner"),
+    },
+    PaletteEntry {
+        name: "Network",
+        category: "Optimization",
+        hint: "Network and DNS tools",
+        command: PaletteCommand::Page("Network"),
+    },
+    PaletteEntry {
+        name: "Tools",
+        category: "System",
+        hint: "Open maintenance tools",
+        command: PaletteCommand::Page("Tools"),
+    },
+    PaletteEntry {
+        name: "Store",
+        category: "Software",
+        hint: "Browse apps",
+        command: PaletteCommand::Store,
+    },
+    PaletteEntry {
+        name: "Search apps",
+        category: "Software",
+        hint: "Focus Store search",
+        command: PaletteCommand::SearchStore,
+    },
+    PaletteEntry {
+        name: "WinGet apps",
+        category: "Software",
+        hint: "Install, upgrade or remove Windows apps",
+        command: PaletteCommand::WinGet,
+    },
+    PaletteEntry {
+        name: "Downloads",
+        category: "Software",
+        hint: "Show download activity",
+        command: PaletteCommand::Downloads,
+    },
+    PaletteEntry {
+        name: "Search tweaks",
+        category: "Optimization",
+        hint: "Filter the tweak catalog by your query",
+        command: PaletteCommand::SearchTweaks,
+    },
+    PaletteEntry {
+        name: "Settings",
+        category: "Application",
+        hint: "Open application settings",
+        command: PaletteCommand::Settings,
+    },
 ];
 
-fn matching_palette_commands(
-    query: &str,
-) -> Vec<&'static (&'static str, &'static str, PaletteCommand)> {
-    let query = query.trim().to_lowercase();
-    PALETTE_COMMANDS
+const PALETTE_THEME_COMMANDS: [PaletteEntry; 17] = [
+    PaletteEntry {
+        name: "System palette",
+        category: "Appearance",
+        hint: "Use the Windows system palette",
+        command: PaletteCommand::Palette(theme::Palette::System),
+    },
+    PaletteEntry {
+        name: "Midnight palette",
+        category: "Appearance",
+        hint: "Set the Midnight palette",
+        command: PaletteCommand::Palette(theme::Palette::Midnight),
+    },
+    PaletteEntry {
+        name: "OLED palette",
+        category: "Appearance",
+        hint: "Set the OLED palette",
+        command: PaletteCommand::Palette(theme::Palette::Oled),
+    },
+    PaletteEntry {
+        name: "Graphite palette",
+        category: "Appearance",
+        hint: "Set the Graphite palette",
+        command: PaletteCommand::Palette(theme::Palette::Graphite),
+    },
+    PaletteEntry {
+        name: "Nebula palette",
+        category: "Appearance",
+        hint: "Set the Nebula palette",
+        command: PaletteCommand::Palette(theme::Palette::Nebula),
+    },
+    PaletteEntry {
+        name: "Nord palette",
+        category: "Appearance",
+        hint: "Set the Nord palette",
+        command: PaletteCommand::Palette(theme::Palette::Nord),
+    },
+    PaletteEntry {
+        name: "Arctic palette",
+        category: "Appearance",
+        hint: "Set the Arctic palette",
+        command: PaletteCommand::Palette(theme::Palette::Arctic),
+    },
+    PaletteEntry {
+        name: "Fluent dark palette",
+        category: "Appearance",
+        hint: "Set the Fluent dark palette",
+        command: PaletteCommand::Palette(theme::Palette::FluentDark),
+    },
+    PaletteEntry {
+        name: "Fluent light palette",
+        category: "Appearance",
+        hint: "Set the Fluent light palette",
+        command: PaletteCommand::Palette(theme::Palette::FluentLight),
+    },
+    PaletteEntry {
+        name: "Material dark palette",
+        category: "Appearance",
+        hint: "Set the Material dark palette",
+        command: PaletteCommand::Palette(theme::Palette::MaterialDark),
+    },
+    PaletteEntry {
+        name: "Material light palette",
+        category: "Appearance",
+        hint: "Set the Material light palette",
+        command: PaletteCommand::Palette(theme::Palette::MaterialLight),
+    },
+    PaletteEntry {
+        name: "Emerald palette",
+        category: "Appearance",
+        hint: "Set the Emerald palette",
+        command: PaletteCommand::Palette(theme::Palette::Emerald),
+    },
+    PaletteEntry {
+        name: "Crimson palette",
+        category: "Appearance",
+        hint: "Set the Crimson palette",
+        command: PaletteCommand::Palette(theme::Palette::Crimson),
+    },
+    PaletteEntry {
+        name: "Solarized palette",
+        category: "Appearance",
+        hint: "Set the Solarized palette",
+        command: PaletteCommand::Palette(theme::Palette::Solarized),
+    },
+    PaletteEntry {
+        name: "Porcelain palette",
+        category: "Appearance",
+        hint: "Set the Porcelain palette",
+        command: PaletteCommand::Palette(theme::Palette::Porcelain),
+    },
+    PaletteEntry {
+        name: "Cyberpunk palette",
+        category: "Appearance",
+        hint: "Set the Cyberpunk palette",
+        command: PaletteCommand::Palette(theme::Palette::Cyberpunk),
+    },
+    PaletteEntry {
+        name: "Custom palette",
+        category: "Appearance",
+        hint: "Use your custom palette",
+        command: PaletteCommand::Palette(theme::Palette::Custom),
+    },
+];
+
+fn matching_palette_commands(query: &str) -> Vec<PaletteMatch> {
+    let normalized_query = search_chars(query);
+    if normalized_query.is_empty() {
+        return PALETTE_COMMANDS
+            .iter()
+            .chain(PALETTE_THEME_COMMANDS.iter())
+            .map(palette_match)
+            .collect();
+    }
+
+    let mut matches = PALETTE_COMMANDS
         .iter()
-        .filter(|(name, hint, _)| {
-            query.is_empty()
-                || name.to_lowercase().contains(&query)
-                || hint.to_lowercase().contains(&query)
+        .chain(PALETTE_THEME_COMMANDS.iter())
+        .filter_map(|entry| {
+            let name_score = fuzzy_match_score(&normalized_query, entry.name);
+            let hint_score = fuzzy_match_score(&normalized_query, entry.hint);
+            name_score
+                .map(|score| (entry, (true, score)))
+                .or_else(|| hint_score.map(|score| (entry, (false, score))))
         })
+        .collect::<Vec<_>>();
+    matches.sort_by(|(_, left), (_, right)| right.cmp(left));
+    if matches.is_empty() {
+        let display_query = query
+            .trim()
+            .chars()
+            .filter(|character| !character.is_control())
+            .take(80)
+            .collect::<String>();
+        return vec![PaletteMatch {
+            name: format!("Search tweaks for “{display_query}”").into(),
+            category: "Optimization",
+            hint: "Filter the tweak catalog by this text",
+            command: PaletteCommand::SearchTweaks,
+        }];
+    }
+    matches
+        .into_iter()
+        .map(|(entry, _)| palette_match(entry))
         .collect()
+}
+
+fn palette_match(entry: &PaletteEntry) -> PaletteMatch {
+    PaletteMatch {
+        name: entry.name.into(),
+        category: entry.category,
+        hint: entry.hint,
+        command: entry.command,
+    }
+}
+
+fn search_chars(value: &str) -> Vec<char> {
+    value
+        .chars()
+        .flat_map(char::to_lowercase)
+        .filter(|character| character.is_alphanumeric())
+        .collect()
+}
+
+fn palette_tweak_query(query: &str) -> &str {
+    let query = query.trim();
+    const PREFIX: &str = "search tweaks";
+    if query
+        .get(..PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(PREFIX))
+    {
+        query[PREFIX.len()..].trim_start_matches(|character: char| {
+            character.is_whitespace() || matches!(character, ':' | '-')
+        })
+    } else {
+        query
+    }
+}
+
+fn fuzzy_match_score(query: &[char], text: &str) -> Option<i32> {
+    let mut searchable = Vec::new();
+    let mut word_start = true;
+    for character in text.chars() {
+        if character.is_alphanumeric() {
+            for normalized in character.to_lowercase() {
+                searchable.push((normalized, word_start));
+                word_start = false;
+            }
+        } else {
+            word_start = true;
+        }
+    }
+
+    let mut score = 0i32;
+    let mut cursor = 0usize;
+    let mut previous = None;
+    for character in query {
+        let (index, (_, starts_word)) = searchable
+            .iter()
+            .enumerate()
+            .skip(cursor)
+            .find(|(_, (candidate, _))| candidate == character)?;
+        let skipped = index - cursor;
+        let consecutive = previous.is_some_and(|last| index == last + 1);
+        score += if consecutive { 8 } else { 2 };
+        score += if *starts_word { 5 } else { 0 };
+        score -= skipped as i32;
+        cursor = index + 1;
+        previous = Some(index);
+    }
+
+    score -= searchable.len().saturating_sub(query.len()) as i32 / 12;
+    Some(score)
 }
 
 /// PC tools from the catalog that Optimaxer offers on its Tools page.
@@ -1417,13 +1683,16 @@ impl OrionApp {
                 egui::ScrollArea::vertical()
                     .max_height(460.0)
                     .show(ui, |ui| {
-                        for (index, (name, hint, command)) in matches.iter().enumerate() {
+                        for (index, command) in matches.iter().enumerate() {
                             let response = ui.selectable_label(
                                 index == self.palette_selected,
-                                format!("{name}    ·    {hint}"),
+                                format!(
+                                    "{}    ·    {}    ·    {}",
+                                    command.name, command.category, command.hint
+                                ),
                             );
                             if response.clicked() {
-                                chosen = Some(*command);
+                                chosen = Some(command.command);
                             }
                         }
                     });
@@ -1453,16 +1722,17 @@ impl OrionApp {
         if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
             chosen = matches
                 .get(self.palette_selected)
-                .map(|(_, _, command)| *command);
+                .map(|command| command.command);
         }
         if let Some(command) = chosen {
-            self.run_palette_command(ctx, command);
+            let query = self.palette_query.clone();
+            self.run_palette_command(ctx, command, &query);
         } else if close || modal.should_close() {
             self.show_palette = false;
         }
     }
 
-    fn run_palette_command(&mut self, ctx: &egui::Context, command: PaletteCommand) {
+    fn run_palette_command(&mut self, ctx: &egui::Context, command: PaletteCommand, query: &str) {
         self.show_palette = false;
         match command {
             PaletteCommand::Page(name) => {
@@ -1475,6 +1745,10 @@ impl OrionApp {
                 self.detail = None;
                 ctx.memory_mut(|m| m.request_focus(self.search_id));
             }
+            PaletteCommand::SearchTweaks => {
+                self.set_section(ctx, Section::Optimaxer);
+                self.opti.search_tweaks(ctx, palette_tweak_query(query));
+            }
             PaletteCommand::WinGet => {
                 self.set_section(ctx, Section::Store);
                 self.show_winget = true;
@@ -1482,6 +1756,12 @@ impl OrionApp {
             }
             PaletteCommand::Downloads => self.show_downloads = true,
             PaletteCommand::Settings => self.show_settings = true,
+            PaletteCommand::Palette(palette) => {
+                let previous = self.settings.clone();
+                self.settings.palette = palette;
+                self.reapply_theme(ctx);
+                self.persist_appearance(ctx, previous, "Palette");
+            }
         }
     }
 
@@ -2745,33 +3025,41 @@ fn resize_edges(ctx: &egui::Context) {
 
 #[cfg(test)]
 mod app_tests {
-    use super::{PaletteCommand, matching_palette_commands, retain_store_favorites};
+    use super::{
+        PaletteCommand, matching_palette_commands, palette_tweak_query, retain_store_favorites,
+    };
     use crate::model::AppItem;
 
     #[test]
     fn palette_lists_all_commands_for_blank_query() {
-        assert_eq!(matching_palette_commands("  ").len(), 18);
+        assert_eq!(matching_palette_commands("  ").len(), 36);
     }
 
     #[test]
     fn performance_command_navigates_to_its_page() {
         let results = matching_palette_commands("performance");
         assert_eq!(results.len(), 1);
-        assert!(matches!(results[0].2, PaletteCommand::Page("Performance")));
+        assert!(matches!(
+            results[0].command,
+            PaletteCommand::Page("Performance")
+        ));
     }
 
     #[test]
     fn gaming_command_navigates_to_its_page() {
         let results = matching_palette_commands("gaming");
         assert_eq!(results.len(), 1);
-        assert!(matches!(results[0].2, PaletteCommand::Page("Gaming")));
+        assert!(matches!(results[0].command, PaletteCommand::Page("Gaming")));
     }
 
     #[test]
     fn diagnostics_command_navigates_to_its_page() {
         let results = matching_palette_commands("diagnostics");
         assert_eq!(results.len(), 1);
-        assert!(matches!(results[0].2, PaletteCommand::Page("Diagnostics")));
+        assert!(matches!(
+            results[0].command,
+            PaletteCommand::Page("Diagnostics")
+        ));
     }
 
     #[test]
@@ -2779,7 +3067,7 @@ mod app_tests {
         let results = matching_palette_commands("system snapshot");
         assert_eq!(results.len(), 1);
         assert!(matches!(
-            results[0].2,
+            results[0].command,
             PaletteCommand::Page("System Snapshot")
         ));
     }
@@ -2787,16 +3075,56 @@ mod app_tests {
     #[test]
     fn palette_search_is_case_insensitive_and_matches_hints() {
         let page = matching_palette_commands("  tWeAkS  ");
-        assert_eq!(page.len(), 1);
-        assert_eq!(page[0].0, "Tweaks");
+        assert_eq!(page[0].name, "Tweaks");
         let hint = matching_palette_commands("focus store search");
         assert_eq!(hint.len(), 1);
-        assert_eq!(hint[0].0, "Search apps");
+        assert_eq!(hint[0].name, "Search apps");
     }
 
     #[test]
-    fn palette_returns_no_commands_for_unknown_query() {
-        assert!(matching_palette_commands("not a command").is_empty());
+    fn palette_search_matches_fuzzy_subsequences_and_word_boundaries() {
+        let typo = matching_palette_commands("prfmnce");
+        assert_eq!(typo.len(), 1);
+        assert_eq!(typo[0].name, "Performance");
+
+        let words = matching_palette_commands("sys snap");
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].name, "System Snapshot");
+    }
+
+    #[test]
+    fn palette_ranks_name_matches_above_hint_matches() {
+        let results = matching_palette_commands("store");
+        assert_eq!(results[0].name, "Store");
+        assert!(results.iter().any(|command| command.name == "Search apps"));
+    }
+
+    #[test]
+    fn unknown_palette_query_routes_to_tweak_search() {
+        let results = matching_palette_commands("disable telemetry");
+        assert_eq!(results.len(), 1);
+        assert!(results[0].name.contains("disable telemetry"));
+        assert!(matches!(results[0].command, PaletteCommand::SearchTweaks));
+        assert_eq!(
+            palette_tweak_query("disable telemetry"),
+            "disable telemetry"
+        );
+        assert_eq!(palette_tweak_query("Search tweaks: bluetooth"), "bluetooth");
+    }
+
+    #[test]
+    fn palette_commands_can_change_the_color_palette() {
+        let results = matching_palette_commands("oled");
+        let oled = results
+            .iter()
+            .find(|result| {
+                matches!(
+                    result.command,
+                    PaletteCommand::Palette(crate::theme::Palette::Oled)
+                )
+            })
+            .expect("the OLED palette command is searchable");
+        assert_eq!(oled.name, "OLED palette");
     }
 
     #[test]
