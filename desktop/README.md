@@ -93,7 +93,7 @@ Nothing is downloaded or installed automatically, and Optimaxer never installs d
 
 11 tweaks remain PowerShell-only because they require Appx package control, external downloads, ACL operations, or Windows APIs outside the Rust engine: uninstalling OneDrive, folder type detection, removing the Copilot and AI app packages, uninstalling Edge, blocking Razer and Logitech installers, Opera startup tasks, adapter power settings, telemetry hosts, Loudness Equalization and Store search permissions. "Turn off Recall" applies its registry part and skips the DISM step. Hiding the Settings AI page is supported with exact visibility-policy restoration.
 
-Not in this build at all: Appx debloat, Windows optional features, WinGet app installs (the Orion catalog covers downloads), and the hourly auto clean task. Startup lists and toggles third-party scheduled tasks with logon or boot triggers; Microsoft tasks are excluded.
+Not in this build at all: Appx debloat, Windows optional features, and the hourly auto clean task. The WinGet page reuses the curated PowerShell package list and supports exact-ID install, upgrade, uninstall and upgrade-all commands in a visible console. Each operation requires confirmation. Optimaxer does not accept source agreements, suppress installer prompts or elevate automatically. Installed status comes from `winget export`; it includes only apps WinGet can match and is not a full installed-software inventory. Orion Store remains a separate download catalog and does not install downloaded files.
 
 ## Data tables
 
@@ -105,7 +105,7 @@ powershell -NoProfile -File tools\export-optimaxer.ps1
 
 ## Screenshots
 
-`ORION_SHOTS=<folder>` makes the app walk through its pages, save each one as a PNG of its own window, capture Settings, and exit (16 steps). It uses egui's viewport screenshot, so only the app window is captured. Set `ORION_SHOTS_SIDEBAR_COLLAPSED=true` to capture the Optimaxer icon rail, `ORION_SHOTS_RESTART_REQUIRED=true` to capture the restart reminder, or `ORION_SHOTS_PROFILE_OPEN=true` to expand Profiles on the Tweaks page. Screenshot mode never saves these overrides to settings.
+`ORION_SHOTS=<folder>` makes the app walk through its pages, save each one as a PNG of its own window, capture Settings, and exit (18 steps). It uses egui's viewport screenshot, so only the app window is captured. Set `ORION_SHOTS_SIDEBAR_COLLAPSED=true` to capture the Optimaxer icon rail, `ORION_SHOTS_RESTART_REQUIRED=true` to capture the restart reminder, or `ORION_SHOTS_PROFILE_OPEN=true` to expand Profiles on the Tweaks page. Screenshot mode never saves these overrides to settings or runs WinGet commands.
 
 ## License
 

@@ -8,6 +8,8 @@ A calm tool surface. Surfaces step in tone instead of being drawn with lines, on
 
 The System palette keeps Optimaxer's indigo `#7478F8` for selection, focus and navigation, with lime `#A3E635` for the one primary action per view. Named palettes use their own restrained accent for selection and primary actions.
 
+The WinGet page shares these tokens and row components. It separates the Orion download catalog from software installation, labels exported package matches as incomplete inventory, and keeps package-manager output in a visible console. Confirmation shows the exact ID-scoped command before launch.
+
 ## Colour
 
 | Token | Dark | Light | Use |
