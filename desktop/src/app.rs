@@ -663,7 +663,7 @@ impl eframe::App for OrionApp {
         // Windows 11 layering: the content area is one step lighter than the rail around it
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.canvas).inner_margin(Margin { left: S5 as i8, right: S5 as i8, top: S3 as i8, bottom: 0 })).show(root, |ui| {
             if self.section == Section::Optimaxer {
-                self.opti.central(ui, ctx, &self.suggestions);
+                self.opti.central(ui, ctx, &self.suggestions, &mut self.settings);
             } else {
                 kit::enter(ui, self.view_started, |ui| {
                     if self.detail.is_some() {

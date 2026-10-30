@@ -221,6 +221,12 @@ pub struct OptiUi {
     tw_risk: usize,
     /// Group filter on the Tweaks page, an index into `TWEAK_GROUPS`.
     tw_group: usize,
+    /// Tweaks page filters: state (all/applied/not applied), view (all/recommended/favorites), compatibility (all/fits/does not fit).
+    tw_state: usize,
+    tw_view: usize,
+    tw_compatibility: usize,
+    /// Tweaks page order: category, name, risk, status.
+    tw_sort: usize,
     /// Tweaks whose technical details are expanded.
     tw_open: HashSet<String>,
     /// Why Smart optimize left a tweak unticked (risk or the hardware fact). Cleared by the other presets.
@@ -294,6 +300,34 @@ fn risk_tone(risk: &str) -> Tone {
         "Advanced" => Tone::Bad,
         _ => Tone::Good,
     }
+}
+
+fn risk_order(risk: &str) -> u8 {
+    match risk {
+        "Safe" => 0,
+        "Moderate" => 1,
+        "Advanced" => 2,
+        _ => 3,
+    }
+}
+
+fn tweak_matches_view(tweak: &Tweak, applied: bool, fits: bool, favorite: bool, state: usize, view: usize, compatibility: usize) -> bool {
+    let state_matches = match state {
+        1 => applied,
+        2 => !applied,
+        _ => true,
+    };
+    let view_matches = match view {
+        1 => tweak.auto_pick(),
+        2 => favorite,
+        _ => true,
+    };
+    let compatibility_matches = match compatibility {
+        1 => fits,
+        2 => !fits,
+        _ => true,
+    };
+    state_matches && view_matches && compatibility_matches
 }
 
 fn profile_summary(tr: &Traits) -> String {
@@ -645,6 +679,10 @@ impl OptiUi {
             tw_search: String::new(),
             tw_risk: 0,
             tw_group: 0,
+            tw_state: 0,
+            tw_view: 0,
+            tw_compatibility: 0,
+            tw_sort: 0,
             tw_open: HashSet::new(),
             tw_skip: Default::default(),
             tx,
@@ -1579,7 +1617,7 @@ impl OptiUi {
         self.restart_pending = self.restart_pending || settings.opti_restart_required;
     }
 
-    pub fn central(&mut self, ui: &mut Ui, ctx: &egui::Context, suggestions: &[AppItem]) {
+    pub fn central(&mut self, ui: &mut Ui, ctx: &egui::Context, suggestions: &[AppItem], settings: &mut Settings) {
         if !self.started {
             self.load_first_time(ctx);
         }
@@ -1621,7 +1659,7 @@ impl OptiUi {
                     Page::Processes => self.processes_page(ui, ctx),
                     Page::Gaming => self.gaming_page(ui, ctx),
                     Page::Activity => self.activity_page(ui, ctx),
-                    Page::Tweaks => self.tweaks_page(ui, ctx),
+                    Page::Tweaks => self.tweaks_page(ui, ctx, settings),
                     Page::Services => self.services_page(ui, ctx),
                     Page::Startup => self.startup_page(ui, ctx),
                     Page::Cleaner => self.cleaner_page(ui, ctx),
@@ -2705,7 +2743,7 @@ impl OptiUi {
         }
     }
 
-    fn tweaks_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+    fn tweaks_page(&mut self, ui: &mut Ui, ctx: &egui::Context, settings: &mut Settings) {
         let t = tokens(ctx);
         kit::page_header(ui, "Tweaks", "Performance, gaming, network, privacy and interface settings. The original value is saved before each change, so every tweak can be undone.");
         let (on, total) = self.traits.as_ref().map(|tr| score(&self.cat, tr, &self.status)).unwrap_or((0, 0));
@@ -2770,12 +2808,15 @@ impl OptiUi {
             if kit::secondary(ui, "Undo selected", idle && n > 0).clicked() {
                 self.preview_undo();
             }
+            if kit::ghost(ui, "Clear selection", n > 0).clicked() {
+                self.selected.clear();
+            }
             if kit::ghost(ui, "Refresh", idle).clicked() {
                 self.refresh_status(ctx);
             }
         });
         ui.add_space(S2);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("Risk").size(T_SMALL).color(t.muted));
             kit::segmented(ui, &mut self.tw_risk, &["All", "Safe", "Moderate", "Advanced"]);
             ui.add_space(S3);
@@ -2785,9 +2826,39 @@ impl OptiUi {
                     ui.selectable_value(&mut self.tw_group, i, *g);
                 }
             });
-            if (self.tw_risk != 0 || self.tw_group != 0) && kit::ghost(ui, "Reset filters", true).clicked() {
+            ui.label(RichText::new("State").size(T_SMALL).color(t.muted));
+            egui::ComboBox::from_id_salt("tw-state").selected_text(["All", "Applied", "Not applied"][self.tw_state.min(2)]).show_ui(ui, |ui| {
+                for (i, label) in ["All", "Applied", "Not applied"].iter().enumerate() {
+                    ui.selectable_value(&mut self.tw_state, i, *label);
+                }
+            });
+            ui.label(RichText::new("View").size(T_SMALL).color(t.muted));
+            egui::ComboBox::from_id_salt("tw-view").selected_text(["All tweaks", "Recommended", "Favorites"][self.tw_view.min(2)]).show_ui(ui, |ui| {
+                for (i, label) in ["All tweaks", "Recommended", "Favorites"].iter().enumerate() {
+                    ui.selectable_value(&mut self.tw_view, i, *label);
+                }
+            });
+            ui.label(RichText::new("Compatibility").size(T_SMALL).color(t.muted));
+            egui::ComboBox::from_id_salt("tw-compatibility").selected_text(["All PCs", "Fits this PC", "Does not fit"][self.tw_compatibility.min(2)]).show_ui(ui, |ui| {
+                for (i, label) in ["All PCs", "Fits this PC", "Does not fit"].iter().enumerate() {
+                    ui.selectable_value(&mut self.tw_compatibility, i, *label);
+                }
+            });
+            ui.label(RichText::new("Sort").size(T_SMALL).color(t.muted));
+            egui::ComboBox::from_id_salt("tw-sort").selected_text(["Category", "Name", "Risk", "Status"][self.tw_sort.min(3)]).show_ui(ui, |ui| {
+                for (i, label) in ["Category", "Name", "Risk", "Status"].iter().enumerate() {
+                    ui.selectable_value(&mut self.tw_sort, i, *label);
+                }
+            });
+            let filters_active = self.tw_risk != 0 || self.tw_group != 0 || self.tw_state != 0
+                || self.tw_view != 0 || self.tw_compatibility != 0 || self.tw_sort != 0;
+            if filters_active && kit::ghost(ui, "Reset filters", true).clicked() {
                 self.tw_risk = 0;
                 self.tw_group = 0;
+                self.tw_state = 0;
+                self.tw_view = 0;
+                self.tw_compatibility = 0;
+                self.tw_sort = 0;
             }
         });
         ui.add_space(S2);
@@ -2795,25 +2866,40 @@ impl OptiUi {
         let q = self.tw_search.trim().to_lowercase();
         let risk_filter = ["", "Safe", "Moderate", "Advanced"][self.tw_risk.min(3)];
         let group_filter = self.tw_group;
-        let mut cats: Vec<&str> = Vec::new();
+        let mut cats: Vec<String> = Vec::new();
         for tw in &self.cat.tweaks {
-            if !cats.contains(&tw.cat.as_str()) {
-                cats.push(&tw.cat);
+            if !cats.contains(&tw.cat) {
+                cats.push(tw.cat.clone());
             }
+        }
+        if self.tw_sort == 1 {
+            cats.sort_by_key(|category| category.to_lowercase());
         }
         let cat = self.cat.clone();
         let traits = self.traits.clone();
+        let favorites: HashSet<String> = settings.opti_tweak_favorites.iter().cloned().collect();
         let mut shown = 0;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for c in cats {
-                let rows: Vec<&Tweak> = cat.tweaks.iter().filter(|tw| {
+                let mut rows: Vec<&Tweak> = cat.tweaks.iter().filter(|tw| {
                     // a retired tweak is listed only while it has a saved record, so it can still be undone
-                    (tw.retired.is_empty() || self.status.get(&tw.id).copied().unwrap_or(false))
-                        && tw.cat == c
+                    let applied = self.status.get(&tw.id).copied().unwrap_or(false);
+                    let fits = traits.as_ref().is_none_or(|tr| hw::fits(tw, tr));
+                    (tw.retired.is_empty() || applied)
+                        && tw.cat == c.as_str()
                         && (q.is_empty() || tw.name.to_lowercase().contains(&q) || tw.desc.to_lowercase().contains(&q))
                         && (risk_filter.is_empty() || tw.risk == risk_filter)
-                        && in_group(tw, group_filter, self.status.get(&tw.id).copied().unwrap_or(false))
+                        && in_group(tw, group_filter, applied)
+                        && tweak_matches_view(tw, applied, fits, favorites.contains(&tw.id), self.tw_state, self.tw_view, self.tw_compatibility)
                 }).collect();
+                match self.tw_sort {
+                    1 => rows.sort_by_cached_key(|tweak| tweak.name.to_lowercase()),
+                    2 => rows.sort_by_cached_key(|tweak| (risk_order(&tweak.risk), tweak.name.to_lowercase())),
+                    3 => rows.sort_by_cached_key(|tweak| {
+                        (std::cmp::Reverse(self.status.get(&tweak.id).copied().unwrap_or(false)), tweak.name.to_lowercase())
+                    }),
+                    _ => {}
+                }
                 if rows.is_empty() {
                     continue;
                 }
@@ -2825,12 +2911,17 @@ impl OptiUi {
                         let on = self.selected.contains(&tw.id);
                         let open = self.tw_open.contains(&tw.id);
                         let mut details_rect = egui::Rect::NOTHING;
+                        let mut favorite_rect = egui::Rect::NOTHING;
+                        let favorite = settings.opti_tweak_favorites.iter().any(|id| id == &tw.id);
                         let r = kit::row(ui, ("tw", &tw.id), on, |ui| {
                             ui.horizontal(|ui| {
                                 kit::check(ui, on);
                                 ui.vertical(|ui| {
                                     ui.horizontal_wrapped(|ui| {
                                         ui.label(RichText::new(&tw.name).font(FontId::new(T_BODY, semibold())).color(t.text));
+                                        let favorite_label = ui.add(egui::Label::new(RichText::new(if favorite { "Favorited" } else { "Favorite" }).size(T_CAPTION).color(if favorite { t.brand_text } else { t.subtle })).sense(Sense::click()))
+                                            .on_hover_text(if favorite { "Remove from favorites" } else { "Add to favorites" });
+                                        favorite_rect = favorite_label.rect;
                                         if !tw.risk.is_empty() && tw.risk != "Safe" {
                                             kit::chip(ui, &tw.risk, risk_tone(&tw.risk));
                                         }
@@ -2866,7 +2957,22 @@ impl OptiUi {
                         if click.has_focus() {
                             ui.painter().rect_stroke(r.response.rect, CornerRadius::same(R_MD), Stroke::new(2.0, t.ring()), StrokeKind::Inside);
                         }
-                        if click.clicked() && ctx.pointer_interact_pos().is_some_and(|p| details_rect.contains(p)) {
+                        if click.clicked() && ctx.pointer_interact_pos().is_some_and(|p| favorite_rect.contains(p)) {
+                            let previous_favorites = settings.opti_tweak_favorites.clone();
+                            if favorite {
+                                settings.opti_tweak_favorites.retain(|id| id != &tw.id);
+                            } else {
+                                settings.opti_tweak_favorites.push(tw.id.clone());
+                                settings.opti_tweak_favorites.sort();
+                                settings.opti_tweak_favorites.dedup();
+                            }
+                            if let Err(error) = settings.save_checked() {
+                                settings.opti_tweak_favorites = previous_favorites;
+                                let message = format!("Favorite could not be saved: {error}");
+                                self.say(&message);
+                                self.events.push(OptiEvent::Toast(message));
+                            }
+                        } else if click.clicked() && ctx.pointer_interact_pos().is_some_and(|p| details_rect.contains(p)) {
                             if !self.tw_open.remove(&tw.id) {
                                 self.tw_open.insert(tw.id.clone());
                             }
@@ -3522,6 +3628,26 @@ mod tests {
         let t = &cat.tweaks[0];
         assert!(in_group(t, 6, true) && !in_group(t, 6, false) && in_group(t, 7, false));
         assert!(cat.tweaks.iter().filter(|t| in_group(t, 1, false)).all(|t| t.has_tag("safe")));
+    }
+
+    #[test]
+    fn tweak_filters_combine_state_recommendation_favorites_and_compatibility() {
+        let recommended = Tweak { id: "recommended".into(), risk: "Safe".into(), tags: vec!["safe".into()], ..Default::default() };
+        let opt_in = Tweak { id: "opt-in".into(), risk: "Safe".into(), tags: vec!["optin".into()], ..Default::default() };
+
+        assert!(tweak_matches_view(&recommended, true, true, false, 1, 1, 1));
+        assert!(!tweak_matches_view(&recommended, false, true, false, 1, 1, 1));
+        assert!(!tweak_matches_view(&opt_in, false, true, false, 0, 1, 0));
+        assert!(tweak_matches_view(&opt_in, false, true, true, 2, 2, 1));
+        assert!(!tweak_matches_view(&opt_in, false, false, true, 2, 2, 1));
+        assert!(tweak_matches_view(&opt_in, false, false, true, 2, 2, 2));
+    }
+
+    #[test]
+    fn tweak_risk_sort_has_explicit_unknown_order() {
+        assert!(risk_order("Safe") < risk_order("Moderate"));
+        assert!(risk_order("Moderate") < risk_order("Advanced"));
+        assert!(risk_order("Advanced") < risk_order("Other"));
     }
 
     #[test]
