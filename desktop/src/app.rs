@@ -39,6 +39,12 @@ enum UpdateState {
     Failed(String),
 }
 
+impl UpdateState {
+    fn is_busy(&self) -> bool {
+        matches!(self, Self::Checking | Self::Downloading { .. })
+    }
+}
+
 enum UpdateMsg {
     Checked {
         manual: bool,
@@ -765,6 +771,9 @@ impl OrionApp {
     }
 
     fn start_check(&mut self, ctx: &egui::Context, manual: bool) {
+        if self.update.is_busy() {
+            return;
+        }
         self.update = UpdateState::Checking;
         let (tx, ctx) = (self.update_tx.clone(), ctx.clone());
         std::thread::spawn(move || {
@@ -1172,6 +1181,13 @@ impl OrionApp {
             match ev {
                 OptiEvent::Toast(m) => self.say(m),
                 OptiEvent::Close => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                OptiEvent::CheckForUpdates => {
+                    if self.update.is_busy() {
+                        self.say("An update check or download is already running.");
+                    } else {
+                        self.start_check(ctx, true);
+                    }
+                }
                 OptiEvent::OpenStoreCategory(c) => {
                     self.set_section(ctx, Section::Store);
                     self.settings.platform = PC.into();
@@ -2931,7 +2947,7 @@ impl OrionApp {
                         self.save_settings("Update preference");
                     }
                     ui.horizontal(|ui| {
-                        let busy = matches!(self.update, UpdateState::Checking | UpdateState::Downloading { .. });
+                        let busy = self.update.is_busy();
                         if kit::secondary(ui, if matches!(self.update, UpdateState::Checking) { "Checking" } else { "Check now" }, !busy).clicked() {
                             self.start_check(ctx, true);
                         }
@@ -3073,11 +3089,38 @@ fn resize_edges(ctx: &egui::Context) {
 #[cfg(test)]
 mod app_tests {
     use super::{
-        PaletteCommand, matching_palette_commands, matching_palette_commands_with_recent,
-        palette_tweak_query, retain_store_favorites,
+        PaletteCommand, UpdateState, matching_palette_commands,
+        matching_palette_commands_with_recent, palette_tweak_query, retain_store_favorites,
     };
     use crate::model::AppItem;
     use crate::opti_ui::RecentAction;
+    use crate::update::Release;
+
+    #[test]
+    fn update_busy_state_only_matches_running_operations() {
+        let release = || Release {
+            version: (2, 15, 32),
+            tag: "v2.15.32".into(),
+            notes: String::new(),
+            page: String::new(),
+            url: String::new(),
+            digest: String::new(),
+            size: 0,
+        };
+
+        assert!(!UpdateState::Idle.is_busy());
+        assert!(UpdateState::Checking.is_busy());
+        assert!(
+            UpdateState::Downloading {
+                rel: release(),
+                done: 0,
+                total: 0,
+            }
+            .is_busy()
+        );
+        assert!(!UpdateState::Available(release()).is_busy());
+        assert!(!UpdateState::Failed("offline".into()).is_busy());
+    }
 
     #[test]
     fn palette_lists_all_commands_for_blank_query() {

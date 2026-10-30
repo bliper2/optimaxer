@@ -149,6 +149,7 @@ impl Page {
 
 /// Things the Optimaxer section asks the rest of the app to do.
 pub enum OptiEvent {
+    CheckForUpdates,
     OpenStoreCategory(String),
     OpenApp(String),
     Toast(String),
@@ -1735,6 +1736,22 @@ impl OptiUi {
         false
     }
 
+    fn request_system_tool(&mut self, info: &tools::ToolInfo) {
+        if !info.changes_system {
+            return;
+        }
+        if self.need_admin() {
+            self.pending = Some(Pending {
+                title: info.title.into(),
+                intro: info.desc.into(),
+                lines: vec![],
+                action: Action::RunTool(info.tool),
+                restore_option: false,
+                ok_label: info.title.into(),
+            });
+        }
+    }
+
     fn confirm(&mut self, ctx: &egui::Context, p: Pending, restore_point: bool) {
         match p.action {
             Action::ApplyTweaks(ids) => self.run_tweaks(ctx, ids, true, restore_point),
@@ -2806,7 +2823,8 @@ impl OptiUi {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let gap = S3;
             ui.spacing_mut().item_spacing = vec2(gap, gap);
-            ui.horizontal(|ui| {
+            let compact_actions = ui.available_width() < 680.0;
+            ui.horizontal_wrapped(|ui| {
                 let ready = self.busy.is_none() && self.traits.is_some();
                 if kit::primary(ui, "Smart optimize", ready).on_hover_text("Reads your hardware and selects only the tweaks that fit this PC").clicked() {
                     self.select_preset("auto");
@@ -2815,12 +2833,35 @@ impl OptiUi {
                         self.preview_apply(ctx);
                     }
                 }
-                if kit::secondary(ui, "Free RAM", self.busy.is_none()).clicked() && self.need_admin() {
-                    self.pending = Some(Pending { title: "Free RAM now".into(), intro: "Clears every RAM cache Windows allows: process and system working sets, the file cache, the modified and standby lists, identical pages and the registry cache. Windows refills the file cache as you open files again.".into(), lines: vec![], action: Action::RunTool(Tool::FreeRam), restore_option: false, ok_label: "Free RAM".into() });
-                }
                 if kit::secondary(ui, "Scan for junk", self.busy.is_none()).clicked() {
                     self.set_page(ctx, Page::Cleaner);
                     self.scan_cleaner(ctx, settings.cleaner_exclusions.clone());
+                }
+                if kit::secondary(ui, "Review startup", true).clicked() {
+                    self.set_page(ctx, Page::Startup);
+                }
+                if !compact_actions && kit::secondary(ui, "Open diagnostics", true).clicked() {
+                    self.set_page(ctx, Page::Diagnostics);
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                if kit::secondary(ui, "Check for updates", true).clicked() {
+                    self.events.push(OptiEvent::CheckForUpdates);
+                }
+                if let Some(restore_point) = tools::TOOLS
+                    .iter()
+                    .find(|info| info.tool == Tool::RestorePoint)
+                    && kit::secondary(ui, "Create restore point", self.busy.is_none()).clicked()
+                {
+                    self.request_system_tool(restore_point);
+                }
+                if kit::secondary(ui, "Free RAM", self.busy.is_none()).clicked()
+                    && self.need_admin()
+                {
+                    self.pending = Some(Pending { title: "Free RAM now".into(), intro: "Clears every RAM cache Windows allows: process and system working sets, the file cache, the modified and standby lists, identical pages and the registry cache. Windows refills the file cache as you open files again.".into(), lines: vec![], action: Action::RunTool(Tool::FreeRam), restore_option: false, ok_label: "Free RAM".into() });
+                }
+                if compact_actions && kit::secondary(ui, "Open diagnostics", true).clicked() {
+                    self.set_page(ctx, Page::Diagnostics);
                 }
             });
             let inactive_recommended = if self.status_ready {
@@ -6065,9 +6106,7 @@ impl OptiUi {
                 for info in tools::TOOLS.iter() {
                     if kit::tile(ui, size, info.title, info.desc, None, idle, false).clicked() {
                         if info.changes_system {
-                            if self.need_admin() {
-                                self.pending = Some(Pending { title: info.title.into(), intro: info.desc.into(), lines: vec![], action: Action::RunTool(info.tool), restore_option: false, ok_label: info.title.into() });
-                            }
+                            self.request_system_tool(info);
                         } else {
                             let tool = info.tool;
                             self.spawn_recorded(ctx, info.title, move |w| tools::run(&WinSystem, tool, &backup_dir(), &mut |l| w.log(l)));
