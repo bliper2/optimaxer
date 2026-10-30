@@ -200,10 +200,6 @@ impl Settings {
     pub fn load() -> Self {
         fs::read(data_dir().join("settings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
     }
-    pub fn save(&self) {
-        let _ = self.save_checked();
-    }
-
     pub fn save_checked(&self) -> Result<(), String> {
         if READ_ONLY.load(Ordering::Relaxed) {
             return Ok(());
