@@ -1,12 +1,12 @@
 # Edition comparison
 
-Snapshot of the repository at v2.15.36. This describes implemented scope, not a parity promise. The Rust desktop app is the primary target for the UI work; the PowerShell and Linux editions remain independent products.
+Snapshot of the repository at v2.15.37. This describes implemented scope, not a parity promise. The Rust desktop app is the primary target for the UI work; the PowerShell and Linux editions remain independent products.
 
 | Area | PowerShell / WPF (Windows) | Python / Tkinter (Linux) | Rust / egui (Windows) |
 | --- | --- | --- | --- |
 | Delivery | Windows app and unattended CLI | Arch-family and Fedora-family GUI and CLI | Windows desktop app, Orion Store and Optimaxer in one window |
 | Tweaks | 209 active, 8 retired; presets and exact undo | Linux-specific catalog, presets, dry run and undo | 206 of 217 catalog entries; 11 PowerShell-only entries omitted; presets, dry run/preview and exact undo |
-| Services | About 240, protected core rows hidden, backup and restore | systemd service list, enable/disable and restore | About 220, protected core rows hidden, JSON backup and restore |
+| Services | About 240, protected core rows hidden, backup and restore | systemd service list, enable/disable and restore | About 220, protected core rows hidden, JSON backup and restore; selected services show direct dependencies and dependents before confirmation, and a failed lookup blocks the change |
 | Startup | Run keys, Startup folders, and third-party logon/boot tasks; Microsoft tasks excluded | User and system XDG `.desktop` entries; system entries use user-level override files | User/machine Run keys, Startup folders, and third-party logon/boot tasks; Microsoft tasks excluded; Event 100 boot duration; on-demand executable path and embedded CompanyName for supported commands, with unresolved cases explicit; no invented per-app impact score |
 | Cleaner | Scan-first Windows targets, including component store and Windows.old | Package-manager caches, user caches, logs and Trash | 32 Windows targets; cancellable read-only size scans discard partial results; persisted exact-path exclusions in path-based scans, previews and cleanup; overlapping Windows.old/event-log targets are skipped; system APIs disclose exclusion limits; links are not followed |
 | Packages | WinGet install, upgrade, remove and verify | pacman, AUR helper, dnf and Flatpak flows | Curated WinGet exact-ID install, upgrade, uninstall and upgrade-all in a visible console; on-demand icons with initials fallback; Orion catalog downloads remain separate |
