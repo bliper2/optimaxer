@@ -11,22 +11,31 @@ mod opti_ui;
 mod shots;
 mod software_ui;
 mod theme;
+mod update;
 mod winget;
 mod winget_icons;
-mod update;
 
 /// 1180 x 760 normally; `ORION_SHOTS_SIZE=1440x900` sets another size for the developer screenshot run.
 fn window_size() -> [f32; 2] {
     std::env::var("ORION_SHOTS_SIZE")
         .ok()
-        .and_then(|v| v.split_once('x').and_then(|(w, h)| Some([w.parse().ok()?, h.parse().ok()?])))
+        .and_then(|v| {
+            v.split_once('x')
+                .and_then(|(w, h)| Some([w.parse().ok()?, h.parse().ok()?]))
+        })
         .unwrap_or([1180.0, 760.0])
 }
 
 fn window_icon() -> egui::IconData {
-    let img = image::load_from_memory(include_bytes!("../../assets/logo.png")).expect("assets/logo.png").into_rgba8();
+    let img = image::load_from_memory(include_bytes!("../../assets/logo.png"))
+        .expect("assets/logo.png")
+        .into_rgba8();
     let (width, height) = img.dimensions();
-    egui::IconData { rgba: img.into_raw(), width, height }
+    egui::IconData {
+        rgba: img.into_raw(),
+        width,
+        height,
+    }
 }
 
 fn main() -> eframe::Result {
@@ -41,5 +50,9 @@ fn main() -> eframe::Result {
             .with_min_inner_size([760.0, 520.0]),
         ..Default::default()
     };
-    eframe::run_native("Orion Store", options, Box::new(|cc| Ok(Box::new(app::OrionApp::new(cc)))))
+    eframe::run_native(
+        "Orion Store",
+        options,
+        Box::new(|cc| Ok(Box::new(app::OrionApp::new(cc)))),
+    )
 }

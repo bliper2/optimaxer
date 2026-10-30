@@ -6,7 +6,7 @@ use super::backend::System;
 use std::fs;
 use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use windows_sys::Win32::UI::Shell::{SHEmptyRecycleBinW, SHQueryRecycleBinW, SHQUERYRBINFO};
+use windows_sys::Win32::UI::Shell::{SHEmptyRecycleBinW, SHQUERYRBINFO, SHQueryRecycleBinW};
 
 const REPARSE: u32 = 0x400;
 const MAX_PREVIEW_FILES: usize = 200;
@@ -95,7 +95,9 @@ pub fn category(target: &Target) -> Category {
         "chrome" | "edge" | "brave" | "opera" | "vivaldi" | "firefox" => Category::Browser,
         "shader" => Category::Shader,
         "vscode" | "npm" | "pip" | "nuget" => Category::Development,
-        "discord" | "teams" | "spotify" | "steam" | "office" | "storecache" => Category::Application,
+        "discord" | "teams" | "spotify" | "steam" | "office" | "storecache" => {
+            Category::Application
+        }
         "wer" | "dumps" | "logs" | "eventlogs" => Category::Logs,
         "recycle" => Category::Recycle,
         "thumbs" | "fontcache" | "inet" | "recent" | "winold" | "component" => Category::Other,
@@ -114,53 +116,329 @@ macro_rules! t {
 
 /// Path templates: {TEMP} {WINDIR} {LOCALAPPDATA} {APPDATA} {PROGRAMDATA} {SYSTEMDRIVE}; `*` matches within one segment.
 pub static TARGETS: &[Target] = &[
-    t!("usertemp", "User temp files", "Per-user temporary files left by apps and installers.", "Safe", ["{TEMP}"]),
-    t!("wintemp", "Windows temp files", "System-wide temporary files.", "Safe", [r"{WINDIR}\Temp"]),
+    t!(
+        "usertemp",
+        "User temp files",
+        "Per-user temporary files left by apps and installers.",
+        "Safe",
+        ["{TEMP}"]
+    ),
+    t!(
+        "wintemp",
+        "Windows temp files",
+        "System-wide temporary files.",
+        "Safe",
+        [r"{WINDIR}\Temp"]
+    ),
     t!("wu", "Windows Update download cache", "Already-installed update packages (re-downloaded if ever needed).", "Safe", [r"{WINDIR}\SoftwareDistribution\Download"], svc ["wuauserv", "bits"]),
-    t!("do", "Delivery Optimization cache", "Cached update files shared with other PCs.", "Safe", [r"{WINDIR}\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache"]),
-    t!("thumbs", "Thumbnail and icon cache", "Rebuilt automatically by Explorer.", "Safe", [r"{LOCALAPPDATA}\Microsoft\Windows\Explorer\thumbcache_*.db", r"{LOCALAPPDATA}\Microsoft\Windows\Explorer\iconcache_*.db"]),
-    t!("wer", "Error reports", "Windows Error Reporting archives and queues.", "Safe", [r"{PROGRAMDATA}\Microsoft\Windows\WER\ReportArchive", r"{PROGRAMDATA}\Microsoft\Windows\WER\ReportQueue", r"{LOCALAPPDATA}\Microsoft\Windows\WER"]),
-    t!("dumps", "Crash dumps", "Minidumps, kernel reports and MEMORY.DMP.", "Safe", [r"{WINDIR}\Minidump", r"{WINDIR}\LiveKernelReports", r"{WINDIR}\MEMORY.DMP", r"{LOCALAPPDATA}\CrashDumps"]),
-    t!("logs", "Windows log files", "CBS and DISM servicing logs.", "Safe", [r"{WINDIR}\Logs\CBS\*.log", r"{WINDIR}\Logs\DISM\*.log", r"{WINDIR}\Logs\WindowsUpdate\*"]),
-    t!("shader", "GPU shader caches", "DirectX/NVIDIA/AMD shader caches. Games recompile shaders on next launch.", "Moderate", [r"{LOCALAPPDATA}\D3DSCache", r"{LOCALAPPDATA}\NVIDIA\DXCache", r"{LOCALAPPDATA}\NVIDIA\GLCache", r"{LOCALAPPDATA}\AMD\DxCache", r"{LOCALAPPDATA}\AMD\GLCache"]),
-    t!("chrome", "Google Chrome cache", "Close Chrome first. Logins and bookmarks are kept.", "Safe", [r"{LOCALAPPDATA}\Google\Chrome\User Data\*\Cache", r"{LOCALAPPDATA}\Google\Chrome\User Data\*\Code Cache", r"{LOCALAPPDATA}\Google\Chrome\User Data\*\GPUCache"]),
-    t!("edge", "Microsoft Edge cache", "Close Edge first. Logins and bookmarks are kept.", "Safe", [r"{LOCALAPPDATA}\Microsoft\Edge\User Data\*\Cache", r"{LOCALAPPDATA}\Microsoft\Edge\User Data\*\Code Cache", r"{LOCALAPPDATA}\Microsoft\Edge\User Data\*\GPUCache"]),
-    t!("brave", "Brave cache", "Close Brave first.", "Safe", [r"{LOCALAPPDATA}\BraveSoftware\Brave-Browser\User Data\*\Cache", r"{LOCALAPPDATA}\BraveSoftware\Brave-Browser\User Data\*\Code Cache", r"{LOCALAPPDATA}\BraveSoftware\Brave-Browser\User Data\*\GPUCache"]),
-    t!("opera", "Opera / Opera GX cache", "Close Opera first.", "Safe", [r"{LOCALAPPDATA}\Opera Software\Opera Stable\Cache", r"{LOCALAPPDATA}\Opera Software\Opera GX Stable\Cache", r"{APPDATA}\Opera Software\Opera Stable\Cache", r"{APPDATA}\Opera Software\Opera Stable\Code Cache", r"{APPDATA}\Opera Software\Opera Stable\GPUCache", r"{APPDATA}\Opera Software\Opera GX Stable\Cache", r"{APPDATA}\Opera Software\Opera GX Stable\Code Cache", r"{APPDATA}\Opera Software\Opera GX Stable\GPUCache"]),
-    t!("vivaldi", "Vivaldi cache", "Close Vivaldi first.", "Safe", [r"{LOCALAPPDATA}\Vivaldi\User Data\*\Cache", r"{LOCALAPPDATA}\Vivaldi\User Data\*\Code Cache", r"{LOCALAPPDATA}\Vivaldi\User Data\*\GPUCache"]),
-    t!("firefox", "Firefox cache", "Close Firefox first.", "Safe", [r"{LOCALAPPDATA}\Mozilla\Firefox\Profiles\*\cache2"]),
-    t!("discord", "Discord cache", "Close Discord first.", "Safe", [r"{APPDATA}\discord\Cache", r"{APPDATA}\discord\Code Cache", r"{APPDATA}\discord\GPUCache"]),
-    t!("teams", "Teams cache", "Close Teams first. Chats and sign-in are kept.", "Safe", [r"{APPDATA}\Microsoft\Teams\Cache", r"{APPDATA}\Microsoft\Teams\Code Cache", r"{APPDATA}\Microsoft\Teams\GPUCache", r"{LOCALAPPDATA}\Microsoft\Teams\Cache"]),
-    t!("inet", "Windows web and certificate caches", "WinInet temporary files and the Cryptnet URL cache. Rebuilt when Windows checks certificates.", "Safe", [r"{LOCALAPPDATA}\Microsoft\Windows\INetCache", r"{WINDIR}\System32\config\systemprofile\AppData\LocalLow\Microsoft\CryptnetUrlCache\Content", r"{WINDIR}\System32\config\systemprofile\AppData\LocalLow\Microsoft\CryptnetUrlCache\MetaData"]),
-    t!("spotify", "Spotify cache", "Offline downloads are kept.", "Safe", [r"{LOCALAPPDATA}\Spotify\Data"]),
-    t!("steam", "Steam web cache", "Steam browser/html cache.", "Safe", [r"{LOCALAPPDATA}\Steam\htmlcache"]),
-    t!("fontcache", "Windows font cache", "Rebuilt on demand. Fixes garbled fonts.", "Safe", [r"{WINDIR}\ServiceProfiles\LocalService\AppData\Local\FontCache\*", r"{WINDIR}\System32\FNTCACHE.DAT"], svc ["FontCache"]),
-    t!("recent", "Recent files and jump lists", "Clears the Recent items list and taskbar jump lists (privacy).", "Safe", [r"{APPDATA}\Microsoft\Windows\Recent\*"]),
-    t!("storecache", "Microsoft Store cache", "Local Store download cache.", "Safe", [r"{LOCALAPPDATA}\Packages\Microsoft.WindowsStore_8wekyb3d8bbwe\LocalCache\*"]),
-    t!("vscode", "VS Code cache", "Close VS Code first. Settings and extensions are kept.", "Safe", [r"{APPDATA}\Code\Cache", r"{APPDATA}\Code\CachedData", r"{APPDATA}\Code\GPUCache", r"{APPDATA}\Code\Code Cache"]),
-    t!("npm", "npm cache", "Downloaded packages; re-fetched when needed.", "Safe", [r"{LOCALAPPDATA}\npm-cache"]),
-    t!("pip", "pip cache", "Python package download cache.", "Safe", [r"{LOCALAPPDATA}\pip\cache"]),
-    t!("nuget", "NuGet HTTP cache", "NuGet v3 feed cache.", "Safe", [r"{LOCALAPPDATA}\NuGet\v3-cache"]),
-    t!("office", "Microsoft Office file cache", "Close Office first.", "Safe", [r"{LOCALAPPDATA}\Microsoft\Office\16.0\OfficeFileCache"]),
-    Target { id: "eventlogs", name: "Windows event logs", desc: "Clears every event log. You lose troubleshooting history.", risk: "Moderate", paths: &[r"{WINDIR}\System32\winevt\Logs\*.evtx"], kind: Kind::EventLogs, services: &[] },
-    Target { id: "winold", name: "Previous Windows installation (Windows.old)", desc: "Frees many GB after a Windows upgrade. You can no longer roll back to the previous version.", risk: "Advanced", paths: &[r"{SYSTEMDRIVE}\Windows.old"], kind: Kind::WinOld, services: &[] },
-    Target { id: "recycle", name: "Recycle Bin", desc: "Permanently deletes everything in the Recycle Bin.", risk: "Moderate", paths: &[], kind: Kind::Recycle, services: &[] },
-    Target { id: "component", name: "Windows component store", desc: "DISM StartComponentCleanup: removes superseded system components (slow).", risk: "Safe", paths: &[], kind: Kind::Component, services: &[] },
+    t!(
+        "do",
+        "Delivery Optimization cache",
+        "Cached update files shared with other PCs.",
+        "Safe",
+        [
+            r"{WINDIR}\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache"
+        ]
+    ),
+    t!(
+        "thumbs",
+        "Thumbnail and icon cache",
+        "Rebuilt automatically by Explorer.",
+        "Safe",
+        [
+            r"{LOCALAPPDATA}\Microsoft\Windows\Explorer\thumbcache_*.db",
+            r"{LOCALAPPDATA}\Microsoft\Windows\Explorer\iconcache_*.db"
+        ]
+    ),
+    t!(
+        "wer",
+        "Error reports",
+        "Windows Error Reporting archives and queues.",
+        "Safe",
+        [
+            r"{PROGRAMDATA}\Microsoft\Windows\WER\ReportArchive",
+            r"{PROGRAMDATA}\Microsoft\Windows\WER\ReportQueue",
+            r"{LOCALAPPDATA}\Microsoft\Windows\WER"
+        ]
+    ),
+    t!(
+        "dumps",
+        "Crash dumps",
+        "Minidumps, kernel reports and MEMORY.DMP.",
+        "Safe",
+        [
+            r"{WINDIR}\Minidump",
+            r"{WINDIR}\LiveKernelReports",
+            r"{WINDIR}\MEMORY.DMP",
+            r"{LOCALAPPDATA}\CrashDumps"
+        ]
+    ),
+    t!(
+        "logs",
+        "Windows log files",
+        "CBS and DISM servicing logs.",
+        "Safe",
+        [
+            r"{WINDIR}\Logs\CBS\*.log",
+            r"{WINDIR}\Logs\DISM\*.log",
+            r"{WINDIR}\Logs\WindowsUpdate\*"
+        ]
+    ),
+    t!(
+        "shader",
+        "GPU shader caches",
+        "DirectX/NVIDIA/AMD shader caches. Games recompile shaders on next launch.",
+        "Moderate",
+        [
+            r"{LOCALAPPDATA}\D3DSCache",
+            r"{LOCALAPPDATA}\NVIDIA\DXCache",
+            r"{LOCALAPPDATA}\NVIDIA\GLCache",
+            r"{LOCALAPPDATA}\AMD\DxCache",
+            r"{LOCALAPPDATA}\AMD\GLCache"
+        ]
+    ),
+    t!(
+        "chrome",
+        "Google Chrome cache",
+        "Close Chrome first. Logins and bookmarks are kept.",
+        "Safe",
+        [
+            r"{LOCALAPPDATA}\Google\Chrome\User Data\*\Cache",
+            r"{LOCALAPPDATA}\Google\Chrome\User Data\*\Code Cache",
+            r"{LOCALAPPDATA}\Google\Chrome\User Data\*\GPUCache"
+        ]
+    ),
+    t!(
+        "edge",
+        "Microsoft Edge cache",
+        "Close Edge first. Logins and bookmarks are kept.",
+        "Safe",
+        [
+            r"{LOCALAPPDATA}\Microsoft\Edge\User Data\*\Cache",
+            r"{LOCALAPPDATA}\Microsoft\Edge\User Data\*\Code Cache",
+            r"{LOCALAPPDATA}\Microsoft\Edge\User Data\*\GPUCache"
+        ]
+    ),
+    t!(
+        "brave",
+        "Brave cache",
+        "Close Brave first.",
+        "Safe",
+        [
+            r"{LOCALAPPDATA}\BraveSoftware\Brave-Browser\User Data\*\Cache",
+            r"{LOCALAPPDATA}\BraveSoftware\Brave-Browser\User Data\*\Code Cache",
+            r"{LOCALAPPDATA}\BraveSoftware\Brave-Browser\User Data\*\GPUCache"
+        ]
+    ),
+    t!(
+        "opera",
+        "Opera / Opera GX cache",
+        "Close Opera first.",
+        "Safe",
+        [
+            r"{LOCALAPPDATA}\Opera Software\Opera Stable\Cache",
+            r"{LOCALAPPDATA}\Opera Software\Opera GX Stable\Cache",
+            r"{APPDATA}\Opera Software\Opera Stable\Cache",
+            r"{APPDATA}\Opera Software\Opera Stable\Code Cache",
+            r"{APPDATA}\Opera Software\Opera Stable\GPUCache",
+            r"{APPDATA}\Opera Software\Opera GX Stable\Cache",
+            r"{APPDATA}\Opera Software\Opera GX Stable\Code Cache",
+            r"{APPDATA}\Opera Software\Opera GX Stable\GPUCache"
+        ]
+    ),
+    t!(
+        "vivaldi",
+        "Vivaldi cache",
+        "Close Vivaldi first.",
+        "Safe",
+        [
+            r"{LOCALAPPDATA}\Vivaldi\User Data\*\Cache",
+            r"{LOCALAPPDATA}\Vivaldi\User Data\*\Code Cache",
+            r"{LOCALAPPDATA}\Vivaldi\User Data\*\GPUCache"
+        ]
+    ),
+    t!(
+        "firefox",
+        "Firefox cache",
+        "Close Firefox first.",
+        "Safe",
+        [r"{LOCALAPPDATA}\Mozilla\Firefox\Profiles\*\cache2"]
+    ),
+    t!(
+        "discord",
+        "Discord cache",
+        "Close Discord first.",
+        "Safe",
+        [
+            r"{APPDATA}\discord\Cache",
+            r"{APPDATA}\discord\Code Cache",
+            r"{APPDATA}\discord\GPUCache"
+        ]
+    ),
+    t!(
+        "teams",
+        "Teams cache",
+        "Close Teams first. Chats and sign-in are kept.",
+        "Safe",
+        [
+            r"{APPDATA}\Microsoft\Teams\Cache",
+            r"{APPDATA}\Microsoft\Teams\Code Cache",
+            r"{APPDATA}\Microsoft\Teams\GPUCache",
+            r"{LOCALAPPDATA}\Microsoft\Teams\Cache"
+        ]
+    ),
+    t!(
+        "inet",
+        "Windows web and certificate caches",
+        "WinInet temporary files and the Cryptnet URL cache. Rebuilt when Windows checks certificates.",
+        "Safe",
+        [
+            r"{LOCALAPPDATA}\Microsoft\Windows\INetCache",
+            r"{WINDIR}\System32\config\systemprofile\AppData\LocalLow\Microsoft\CryptnetUrlCache\Content",
+            r"{WINDIR}\System32\config\systemprofile\AppData\LocalLow\Microsoft\CryptnetUrlCache\MetaData"
+        ]
+    ),
+    t!(
+        "spotify",
+        "Spotify cache",
+        "Offline downloads are kept.",
+        "Safe",
+        [r"{LOCALAPPDATA}\Spotify\Data"]
+    ),
+    t!(
+        "steam",
+        "Steam web cache",
+        "Steam browser/html cache.",
+        "Safe",
+        [r"{LOCALAPPDATA}\Steam\htmlcache"]
+    ),
+    t!(
+        "fontcache",
+        "Windows font cache",
+        "Rebuilt on demand. Fixes garbled fonts.",
+        "Safe",
+        [
+            r"{WINDIR}\ServiceProfiles\LocalService\AppData\Local\FontCache\*",
+            r"{WINDIR}\System32\FNTCACHE.DAT"
+        ],
+        svc["FontCache"]
+    ),
+    t!(
+        "recent",
+        "Recent files and jump lists",
+        "Clears the Recent items list and taskbar jump lists (privacy).",
+        "Safe",
+        [r"{APPDATA}\Microsoft\Windows\Recent\*"]
+    ),
+    t!(
+        "storecache",
+        "Microsoft Store cache",
+        "Local Store download cache.",
+        "Safe",
+        [r"{LOCALAPPDATA}\Packages\Microsoft.WindowsStore_8wekyb3d8bbwe\LocalCache\*"]
+    ),
+    t!(
+        "vscode",
+        "VS Code cache",
+        "Close VS Code first. Settings and extensions are kept.",
+        "Safe",
+        [
+            r"{APPDATA}\Code\Cache",
+            r"{APPDATA}\Code\CachedData",
+            r"{APPDATA}\Code\GPUCache",
+            r"{APPDATA}\Code\Code Cache"
+        ]
+    ),
+    t!(
+        "npm",
+        "npm cache",
+        "Downloaded packages; re-fetched when needed.",
+        "Safe",
+        [r"{LOCALAPPDATA}\npm-cache"]
+    ),
+    t!(
+        "pip",
+        "pip cache",
+        "Python package download cache.",
+        "Safe",
+        [r"{LOCALAPPDATA}\pip\cache"]
+    ),
+    t!(
+        "nuget",
+        "NuGet HTTP cache",
+        "NuGet v3 feed cache.",
+        "Safe",
+        [r"{LOCALAPPDATA}\NuGet\v3-cache"]
+    ),
+    t!(
+        "office",
+        "Microsoft Office file cache",
+        "Close Office first.",
+        "Safe",
+        [r"{LOCALAPPDATA}\Microsoft\Office\16.0\OfficeFileCache"]
+    ),
+    Target {
+        id: "eventlogs",
+        name: "Windows event logs",
+        desc: "Clears every event log. You lose troubleshooting history.",
+        risk: "Moderate",
+        paths: &[r"{WINDIR}\System32\winevt\Logs\*.evtx"],
+        kind: Kind::EventLogs,
+        services: &[],
+    },
+    Target {
+        id: "winold",
+        name: "Previous Windows installation (Windows.old)",
+        desc: "Frees many GB after a Windows upgrade. You can no longer roll back to the previous version.",
+        risk: "Advanced",
+        paths: &[r"{SYSTEMDRIVE}\Windows.old"],
+        kind: Kind::WinOld,
+        services: &[],
+    },
+    Target {
+        id: "recycle",
+        name: "Recycle Bin",
+        desc: "Permanently deletes everything in the Recycle Bin.",
+        risk: "Moderate",
+        paths: &[],
+        kind: Kind::Recycle,
+        services: &[],
+    },
+    Target {
+        id: "component",
+        name: "Windows component store",
+        desc: "DISM StartComponentCleanup: removes superseded system components (slow).",
+        risk: "Safe",
+        paths: &[],
+        kind: Kind::Component,
+        services: &[],
+    },
 ];
 
 // region path handling
 fn env(name: &str) -> String {
     match name {
-        "TEMP" => std::env::var("TEMP").or_else(|_| std::env::var("TMP")).unwrap_or_default(),
+        "TEMP" => std::env::var("TEMP")
+            .or_else(|_| std::env::var("TMP"))
+            .unwrap_or_default(),
         "SYSTEMDRIVE" => std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into()),
-        "WINDIR" => std::env::var("WINDIR").or_else(|_| std::env::var("SystemRoot")).unwrap_or_else(|_| r"C:\Windows".into()),
+        "WINDIR" => std::env::var("WINDIR")
+            .or_else(|_| std::env::var("SystemRoot"))
+            .unwrap_or_else(|_| r"C:\Windows".into()),
         other => std::env::var(other).unwrap_or_default(),
     }
 }
 
 pub fn expand_template(t: &str) -> Option<String> {
     let mut out = t.to_string();
-    for var in ["TEMP", "WINDIR", "LOCALAPPDATA", "APPDATA", "PROGRAMDATA", "SYSTEMDRIVE"] {
+    for var in [
+        "TEMP",
+        "WINDIR",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "PROGRAMDATA",
+        "SYSTEMDRIVE",
+    ] {
         let token = format!("{{{var}}}");
         if out.contains(&token) {
             let v = env(var);
@@ -210,7 +488,9 @@ fn expand_limited(pattern: &str, limit: usize) -> (Vec<PathBuf>, bool) {
 
 fn expand_inner(pattern: &str, limit: usize) -> (Vec<PathBuf>, bool) {
     let mut segs = pattern.split('\\').filter(|s| !s.is_empty());
-    let Some(root) = segs.next() else { return (Vec::new(), false) };
+    let Some(root) = segs.next() else {
+        return (Vec::new(), false);
+    };
     let mut current = vec![PathBuf::from(format!("{root}\\"))];
     let mut truncated = false;
     for seg in segs {
@@ -220,7 +500,11 @@ fn expand_inner(pattern: &str, limit: usize) -> (Vec<PathBuf>, bool) {
                 continue;
             }
             if seg.contains('*') {
-                for e in fs::read_dir(base).into_iter().flatten().filter_map(Result::ok) {
+                for e in fs::read_dir(base)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Result::ok)
+                {
                     if wild_match(seg, &e.file_name().to_string_lossy()) {
                         if next.len() == limit {
                             truncated = true;
@@ -239,7 +523,9 @@ fn expand_inner(pattern: &str, limit: usize) -> (Vec<PathBuf>, bool) {
                     next.push(p);
                 }
             }
-            if truncated { break; }
+            if truncated {
+                break;
+            }
         }
         current = next;
     }
@@ -262,12 +548,22 @@ pub fn dir_size(dir: &Path) -> u64 {
     let mut total = 0u64;
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
-        for e in fs::read_dir(&d).into_iter().flatten().filter_map(Result::ok) {
-            let Ok(m) = fs::symlink_metadata(e.path()) else { continue };
+        for e in fs::read_dir(&d)
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+        {
+            let Ok(m) = fs::symlink_metadata(e.path()) else {
+                continue;
+            };
             if is_reparse(&m) {
                 continue;
             }
-            if m.is_dir() { stack.push(e.path()) } else { total += m.len() }
+            if m.is_dir() {
+                stack.push(e.path())
+            } else {
+                total += m.len()
+            }
         }
     }
     total
@@ -284,14 +580,21 @@ fn item_size(p: &Path) -> u64 {
 // endregion
 
 fn concrete_paths(t: &Target) -> Vec<PathBuf> {
-    t.paths.iter().filter_map(|p| expand_template(p)).flat_map(|p| expand(&p)).filter(|p| deep_enough(p)).collect()
+    t.paths
+        .iter()
+        .filter_map(|p| expand_template(p))
+        .flat_map(|p| expand(&p))
+        .filter(|p| deep_enough(p))
+        .collect()
 }
 
 fn preview_concrete_paths(target: &Target) -> (Vec<PathBuf>, bool) {
     let mut paths = Vec::new();
     let mut truncated = false;
     for pattern in target.paths {
-        let Some(pattern) = expand_template(pattern) else { continue };
+        let Some(pattern) = expand_template(pattern) else {
+            continue;
+        };
         let remaining = MAX_PREVIEW_NODES.saturating_sub(paths.len());
         let (matches, more) = expand_limited(&pattern, remaining);
         paths.extend(matches.into_iter().filter(|path| deep_enough(path)));
@@ -315,12 +618,19 @@ fn preview_paths(paths: &[PathBuf], initially_truncated: bool) -> (Vec<PreviewFi
             break;
         }
         visited += 1;
-        let Ok(metadata) = fs::symlink_metadata(&path) else { continue };
-        if is_reparse(&metadata) { continue; }
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if is_reparse(&metadata) {
+            continue;
+        }
         if metadata.is_dir() {
             let entries = match fs::read_dir(&path) {
                 Ok(entries) => entries,
-                Err(_) => { unreadable_directories += 1; continue; }
+                Err(_) => {
+                    unreadable_directories += 1;
+                    continue;
+                }
             };
             let mut children = Vec::new();
             for entry in entries.filter_map(Result::ok) {
@@ -331,14 +641,19 @@ fn preview_paths(paths: &[PathBuf], initially_truncated: bool) -> (Vec<PreviewFi
                 children.push(entry.path());
             }
             children.sort();
-            for child in children.into_iter().rev() { pending.push(child); }
+            for child in children.into_iter().rev() {
+                pending.push(child);
+            }
             continue;
         }
         if files.len() == MAX_PREVIEW_FILES {
             truncated = true;
             break;
         }
-        files.push(PreviewFile { path: path.to_string_lossy().into_owned(), bytes: metadata.len() });
+        files.push(PreviewFile {
+            path: path.to_string_lossy().into_owned(),
+            bytes: metadata.len(),
+        });
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));
     (files, truncated, unreadable_directories)
@@ -347,14 +662,48 @@ fn preview_paths(paths: &[PathBuf], initially_truncated: bool) -> (Vec<PreviewFi
 /// Preview file paths without mutation. System-managed operations return a scope summary.
 pub fn preview(target: &Target) -> Preview {
     let (paths, summary, path_truncated) = match target.kind {
-        Kind::Paths => { let (paths, truncated) = preview_concrete_paths(target); (paths, "Matched files are listed below. Cleaner empties matched directories but keeps their roots; junctions and symlinks are skipped.", truncated) },
-        Kind::EventLogs => { let (paths, truncated) = preview_concrete_paths(target); (paths, "Accessible .evtx files are listed. Cleaner clears event logs through wevtutil; Windows may deny access to some log files.", truncated) },
-        Kind::WinOld => { let (paths, truncated) = preview_concrete_paths(target); (paths, "Files found under Windows.old are listed. Cleaning this target removes the previous installation and its rollback option.", truncated) },
-        Kind::Recycle => (Vec::new(), "All current Recycle Bin items are affected. The Windows shell API reports total size, not per-item paths.", false),
-        Kind::Component => (Vec::new(), "DISM removes superseded Windows components. Windows does not provide affected component paths through this operation.", false),
+        Kind::Paths => {
+            let (paths, truncated) = preview_concrete_paths(target);
+            (
+                paths,
+                "Matched files are listed below. Cleaner empties matched directories but keeps their roots; junctions and symlinks are skipped.",
+                truncated,
+            )
+        }
+        Kind::EventLogs => {
+            let (paths, truncated) = preview_concrete_paths(target);
+            (
+                paths,
+                "Accessible .evtx files are listed. Cleaner clears event logs through wevtutil; Windows may deny access to some log files.",
+                truncated,
+            )
+        }
+        Kind::WinOld => {
+            let (paths, truncated) = preview_concrete_paths(target);
+            (
+                paths,
+                "Files found under Windows.old are listed. Cleaning this target removes the previous installation and its rollback option.",
+                truncated,
+            )
+        }
+        Kind::Recycle => (
+            Vec::new(),
+            "All current Recycle Bin items are affected. The Windows shell API reports total size, not per-item paths.",
+            false,
+        ),
+        Kind::Component => (
+            Vec::new(),
+            "DISM removes superseded Windows components. Windows does not provide affected component paths through this operation.",
+            false,
+        ),
     };
     let (files, truncated, unreadable_directories) = preview_paths(&paths, path_truncated);
-    Preview { files, truncated, unreadable_directories, summary }
+    Preview {
+        files,
+        truncated,
+        unreadable_directories,
+        summary,
+    }
 }
 
 /// Bytes that cleaning would free. `None` means the size cannot be known up front (component store).
@@ -362,21 +711,36 @@ pub fn scan(t: &Target) -> Option<u64> {
     match t.kind {
         Kind::Component => None,
         Kind::Recycle => Some(recycle_size()),
-        Kind::WinOld => Some(expand_template(t.paths[0]).map(|d| Path::new(&d).to_path_buf()).filter(|d| d.exists()).map_or(0, |d| dir_size(&d))),
+        Kind::WinOld => Some(
+            expand_template(t.paths[0])
+                .map(|d| Path::new(&d).to_path_buf())
+                .filter(|d| d.exists())
+                .map_or(0, |d| dir_size(&d)),
+        ),
         Kind::Paths | Kind::EventLogs => Some(concrete_paths(t).iter().map(|p| item_size(p)).sum()),
     }
 }
 
 fn recycle_size() -> u64 {
-    let mut info = SHQUERYRBINFO { cbSize: std::mem::size_of::<SHQUERYRBINFO>() as u32, i64Size: 0, i64NumItems: 0 };
+    let mut info = SHQUERYRBINFO {
+        cbSize: std::mem::size_of::<SHQUERYRBINFO>() as u32,
+        i64Size: 0,
+        i64NumItems: 0,
+    };
     // SAFETY: cbSize is set and `info` is a valid out-pointer; a null root queries every drive.
     let hr = unsafe { SHQueryRecycleBinW(std::ptr::null(), &mut info) };
-    if hr == 0 { info.i64Size.max(0) as u64 } else { 0 }
+    if hr == 0 {
+        info.i64Size.max(0) as u64
+    } else {
+        0
+    }
 }
 
 /// Deletes what is inside a directory (or the file itself). Locked files are skipped. Returns bytes freed.
 fn clear_item(p: &Path) -> u64 {
-    let Ok(m) = fs::symlink_metadata(p) else { return 0 };
+    let Ok(m) = fs::symlink_metadata(p) else {
+        return 0;
+    };
     if is_reparse(&m) {
         return 0;
     }
@@ -387,7 +751,9 @@ fn clear_item(p: &Path) -> u64 {
     let mut freed = 0;
     for e in fs::read_dir(p).into_iter().flatten().filter_map(Result::ok) {
         let path = e.path();
-        let Ok(em) = fs::symlink_metadata(&path) else { continue };
+        let Ok(em) = fs::symlink_metadata(&path) else {
+            continue;
+        };
         if is_reparse(&em) {
             continue;
         }
@@ -422,9 +788,15 @@ pub fn clean(sys: &dyn System, t: &Target, log: &mut dyn FnMut(&str)) -> u64 {
             before.saturating_sub(recycle_size())
         }
         Kind::Component => {
-            let out = sys.run("dism.exe", &["/Online", "/Cleanup-Image", "/StartComponentCleanup"]);
+            let out = sys.run(
+                "dism.exe",
+                &["/Online", "/Cleanup-Image", "/StartComponentCleanup"],
+            );
             if out.code != 0 {
-                log(&format!("WARN Component cleanup failed: {}", out.text.trim()));
+                log(&format!(
+                    "WARN Component cleanup failed: {}",
+                    out.text.trim()
+                ));
             }
             0
         }
@@ -432,19 +804,27 @@ pub fn clean(sys: &dyn System, t: &Target, log: &mut dyn FnMut(&str)) -> u64 {
             let before = scan(t).unwrap_or(0);
             let listed = sys.run("wevtutil.exe", &["el"]);
             if listed.code != 0 {
-                log(&format!("WARN Could not list event logs: {}", listed.text.trim()));
+                log(&format!(
+                    "WARN Could not list event logs: {}",
+                    listed.text.trim()
+                ));
                 return 0;
             }
             for l in listed.text.lines().map(str::trim).filter(|l| !l.is_empty()) {
                 let out = sys.run("wevtutil.exe", &["cl", l]);
                 if out.code != 0 {
-                    log(&format!("WARN Could not clear event log {l}: {}", out.text.trim()));
+                    log(&format!(
+                        "WARN Could not clear event log {l}: {}",
+                        out.text.trim()
+                    ));
                 }
             }
             before.saturating_sub(scan(t).unwrap_or(before))
         }
         Kind::WinOld => {
-            let Some(dir) = expand_template(t.paths[0]) else { return 0 };
+            let Some(dir) = expand_template(t.paths[0]) else {
+                return 0;
+            };
             if !Path::new(&dir).exists() {
                 return 0;
             }
@@ -454,12 +834,20 @@ pub fn clean(sys: &dyn System, t: &Target, log: &mut dyn FnMut(&str)) -> u64 {
             }
             let before = dir_size(Path::new(&dir));
             sys.run("takeown.exe", &["/F", &dir, "/R", "/A", "/D", "Y"]);
-            sys.run("icacls.exe", &[&dir, "/grant", "Administrators:F", "/T", "/C", "/Q"]);
+            sys.run(
+                "icacls.exe",
+                &[&dir, "/grant", "Administrators:F", "/T", "/C", "/Q"],
+            );
             sys.run("cmd.exe", &["/c", "rd", "/s", "/q", &dir]);
             if Path::new(&dir).exists() { 0 } else { before }
         }
         Kind::Paths => {
-            let running: Vec<&str> = t.services.iter().copied().filter(|s| sys.run("sc.exe", &["query", s]).text.contains("RUNNING")).collect();
+            let running: Vec<&str> = t
+                .services
+                .iter()
+                .copied()
+                .filter(|s| sys.run("sc.exe", &["query", s]).text.contains("RUNNING"))
+                .collect();
             let mut stopped = Vec::new();
             let mut stop_failed = false;
             for s in &running {
@@ -468,10 +856,17 @@ pub fn clean(sys: &dyn System, t: &Target, log: &mut dyn FnMut(&str)) -> u64 {
                     stopped.push(*s);
                 } else {
                     stop_failed = true;
-                    log(&format!("WARN Could not stop {s}; cleanup skipped: {}", out.text.trim()));
+                    log(&format!(
+                        "WARN Could not stop {s}; cleanup skipped: {}",
+                        out.text.trim()
+                    ));
                 }
             }
-            let freed = if stop_failed { 0 } else { concrete_paths(t).iter().map(|p| clear_item(p)).sum() };
+            let freed = if stop_failed {
+                0
+            } else {
+                concrete_paths(t).iter().map(|p| clear_item(p)).sum()
+            };
             for s in stopped {
                 let out = sys.run("net.exe", &["start", s]);
                 if out.code != 0 {
@@ -507,7 +902,12 @@ mod tests {
 
     #[test]
     fn templates_expand_and_unknown_environments_are_dropped() {
-        assert!(expand_template(r"{WINDIR}\Temp").unwrap().to_lowercase().ends_with(r"\temp"));
+        assert!(
+            expand_template(r"{WINDIR}\Temp")
+                .unwrap()
+                .to_lowercase()
+                .ends_with(r"\temp")
+        );
         assert!(expand_template("{TEMP}").is_some());
     }
 
@@ -573,14 +973,23 @@ mod tests {
         let victim = temp("victim");
         fs::write(victim.join("keep.txt"), b"important").unwrap();
         let link = d.join("link");
-        let ok = std::process::Command::new("cmd").args(["/c", "mklink", "/J"]).arg(&link).arg(&victim).output().map(|o| o.status.success()).unwrap_or(false);
+        let ok = std::process::Command::new("cmd")
+            .args(["/c", "mklink", "/J"])
+            .arg(&link)
+            .arg(&victim)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
         if !ok {
             return; // cannot create a junction here; nothing to verify
         }
         let (preview, _, _) = preview_paths(std::slice::from_ref(&d), false);
         assert!(preview.is_empty(), "the preview must not follow a junction");
         assert_eq!(clear_item(&d), 0);
-        assert!(victim.join("keep.txt").exists(), "the junction target must survive");
+        assert!(
+            victim.join("keep.txt").exists(),
+            "the junction target must survive"
+        );
         assert_eq!(dir_size(&link), 0);
         assert!(expand(&format!(r"{}\*", link.display())).is_empty());
     }
@@ -595,13 +1004,25 @@ mod tests {
                 assert!(!t.paths.is_empty(), "{}", t.id);
             }
             for p in t.paths {
-                assert!(p.starts_with('{'), "{} path must start with an environment token: {p}", t.id);
+                assert!(
+                    p.starts_with('{'),
+                    "{} path must start with an environment token: {p}",
+                    t.id
+                );
             }
         }
         assert_eq!(TARGETS.len(), 32);
         let expected = [2, 2, 6, 1, 4, 6, 4, 1, 6];
         for (category, expected_count) in Category::ALL.into_iter().zip(expected) {
-            assert_eq!(TARGETS.iter().filter(|target| self::category(target) == category).count(), expected_count, "{}", category.label());
+            assert_eq!(
+                TARGETS
+                    .iter()
+                    .filter(|target| self::category(target) == category)
+                    .count(),
+                expected_count,
+                "{}",
+                category.label()
+            );
         }
     }
 
@@ -613,7 +1034,10 @@ mod tests {
         clean(&sys, t, &mut |_| {});
         assert!(sys.ran("net.exe stop wuauserv"));
         assert!(sys.ran("net.exe start wuauserv"));
-        assert!(!sys.ran("net.exe start bits"), "bits was not running before, so it stays stopped");
+        assert!(
+            !sys.ran("net.exe start bits"),
+            "bits was not running before, so it stays stopped"
+        );
     }
 
     #[test]

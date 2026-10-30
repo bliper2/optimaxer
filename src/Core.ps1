@@ -841,24 +841,337 @@ function Set-StartupItem {
 }
 
 # ---------------------------------------------------------------- DNS
-function Set-DnsProvider {
-    param([string]$Name, [string[]]$V4, [string[]]$V6, [string]$Doh)
-    $adapters = @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' -and $_.HardwareInterface })
-    if (-not $adapters) { Write-Log 'No active network adapter found' 'WARN'; return }
-    foreach ($a in $adapters) {
-        try {
-            if (-not $V4) { Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ResetServerAddresses -ErrorAction Stop }
-            else { Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ServerAddresses ($V4 + $V6) -ErrorAction Stop }
-            Write-Log "  DNS on $($a.Name): $(if($V4){$name}else{'automatic'})"
-        } catch { Write-Log "  DNS on $($a.Name): $($_.Exception.Message)" 'WARN' }
+function Get-OptiDnsBackupPath { Join-Path $global:OptiBackupDir 'dns-backup.json' }
+
+function Get-OptiDnsSnapshot {
+    param([bool]$RequireDoh = $false)
+    $ErrorActionPreference = 'Stop'
+    $excluded = 'virtual|vmware|vethernet|tap-|tap |wintun|wireguard|loopback|bluetooth|vpn|tailscale|zerotier'
+    $interfaces = @(Get-NetAdapter -IncludeHidden -ErrorAction Stop | Where-Object {
+        $_.HardwareInterface -and "$($_.Name) $($_.InterfaceDescription)" -notmatch $excluded
+    } | ForEach-Object {
+        $guid = ([guid]$_.InterfaceGuid).ToString('D')
+        $path4 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\{$guid}"
+        $path6 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters\Interfaces\{$guid}"
+        $raw4 = [string](Get-ItemProperty -LiteralPath $path4 -ErrorAction Stop).NameServer
+        $raw6 = [string](Get-ItemProperty -LiteralPath $path6 -ErrorAction Stop).NameServer
+        [pscustomobject]@{
+            interface_guid = $guid
+            name = $_.Name
+            status = [string]$_.Status
+            ipv4 = [pscustomobject]@{ dhcp = [string]::IsNullOrWhiteSpace($raw4); servers = @($raw4 -split '[,; ]+' | Where-Object { $_ }) }
+            ipv6 = [pscustomobject]@{ dhcp = [string]::IsNullOrWhiteSpace($raw6); servers = @($raw6 -split '[,; ]+' | Where-Object { $_ }) }
+        }
+    })
+    $dohSupported = $null -ne (Get-Command Get-DnsClientDohServerAddress -ErrorAction SilentlyContinue)
+    if ($RequireDoh -and -not $dohSupported) { throw 'This Windows version cannot read DNS-over-HTTPS settings; no DNS changes were made.' }
+    $doh = @()
+    if ($dohSupported) {
+        $doh = @(Get-DnsClientDohServerAddress -ErrorAction Stop | ForEach-Object {
+            [pscustomobject]@{
+                server_address = [string]$_.ServerAddress
+                doh_template = [string]$_.DohTemplate
+                auto_upgrade = [bool]$_.AutoUpgrade
+                allow_fallback_to_udp = [bool]$_.AllowFallbackToUdp
+            }
+        })
     }
-    if ($Doh -and (Get-Command Add-DnsClientDohServerAddress -ErrorAction SilentlyContinue)) {
-        foreach ($ip in ($V4 + $V6)) {
-            try { Add-DnsClientDohServerAddress -ServerAddress $ip -DohTemplate $Doh -AllowFallbackToUdp $true -AutoUpgrade $true -ErrorAction Stop | Out-Null }
-            catch { Write-Log "  DNS-over-HTTPS registration failed for ${ip}: $($_.Exception.Message)" 'WARN' }
+    [pscustomobject]@{ interfaces = $interfaces; doh_supported = $dohSupported; doh_servers = $doh }
+}
+
+function Test-OptiDnsFamilyEqual {
+    param($Left, $Right)
+    if ($null -eq $Left -or $null -eq $Right -or [bool]$Left.dhcp -ne [bool]$Right.dhcp) { return $false }
+    if ($Left.dhcp) { return $true }
+    $leftServers, $rightServers = @($Left.servers), @($Right.servers)
+    if ($leftServers.Count -ne $rightServers.Count) { return $false }
+    for ($i = 0; $i -lt $leftServers.Count; $i++) {
+        if (-not [string]::Equals([string]$leftServers[$i], [string]$rightServers[$i], [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    return $leftServers.Count -gt 0
+}
+
+function Test-OptiDnsFamilyKnown {
+    param($Current, $Original, $Applied)
+    if (Test-OptiDnsFamilyEqual $Current $Original) { return $true }
+    foreach ($target in @($Applied)) { if (Test-OptiDnsFamilyEqual $Current $target) { return $true } }
+    return $false
+}
+
+function Test-OptiDnsFamilyValid {
+    param($Family, [Net.Sockets.AddressFamily]$AddressFamily)
+    if ($null -eq $Family -or $Family.dhcp -isnot [bool] -or $Family.servers -isnot [Array]) { return $false }
+    $servers = @($Family.servers)
+    if ($Family.dhcp) { return $servers.Count -eq 0 }
+    if (-not $servers.Count) { return $false }
+    foreach ($server in $servers) {
+        $parsed = $null
+        if (-not [Net.IPAddress]::TryParse([string]$server, [ref]$parsed) -or $parsed.AddressFamily -ne $AddressFamily) { return $false }
+    }
+    return $true
+}
+
+function Test-OptiDohRecordValid {
+    param($Record, [string]$Address)
+    if ($null -eq $Record) { return $true }
+    $parsedAddress = $null; $template = $null
+    return [Net.IPAddress]::TryParse([string]$Record.server_address, [ref]$parsedAddress) -and
+        [string]::Equals([string]$Record.server_address, $Address, [StringComparison]::OrdinalIgnoreCase) -and
+        $Record.auto_upgrade -is [bool] -and $Record.allow_fallback_to_udp -is [bool] -and
+        [Uri]::TryCreate([string]$Record.doh_template, [UriKind]::Absolute, [ref]$template) -and
+        $template.Scheme -eq 'https' -and -not [string]::IsNullOrWhiteSpace($template.Host) -and -not $template.UserInfo
+}
+
+function Test-OptiDohEqual {
+    param($Left, $Right)
+    if ($null -eq $Left -or $null -eq $Right) { return $false }
+    return ([string]$Left.server_address -ieq [string]$Right.server_address) -and
+        ([string]$Left.doh_template -ceq [string]$Right.doh_template) -and
+        ([bool]$Left.auto_upgrade -eq [bool]$Right.auto_upgrade) -and
+        ([bool]$Left.allow_fallback_to_udp -eq [bool]$Right.allow_fallback_to_udp)
+}
+
+function Get-OptiDohRecord {
+    param($Snapshot, [string]$Address)
+    $matches = @($Snapshot.doh_servers | Where-Object { [string]$_.server_address -ieq $Address })
+    if ($matches.Count -gt 1) { throw "Windows returned duplicate DNS-over-HTTPS entries for $Address." }
+    if ($matches.Count) { return $matches[0] }
+    return $null
+}
+
+function Read-OptiDnsBackup {
+    $path = Get-OptiDnsBackupPath
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    try { $backup = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
+    catch { throw "Saved DNS backup is invalid and was kept: $($_.Exception.Message)" }
+    if ($backup.version -ne 1 -or $backup.interfaces -isnot [Array] -or -not $backup.interfaces.Count -or $backup.doh_changes -isnot [Array]) {
+        throw 'Saved DNS backup is incomplete or unsupported; it was kept.'
+    }
+    $seenInterfaces = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($saved in $backup.interfaces) {
+        $guid = [guid]::Empty
+        if (-not [guid]::TryParse([string]$saved.interface_guid, [ref]$guid) -or -not $saved.name -or
+            -not $seenInterfaces.Add($guid.ToString('D')) -or $saved.applied -isnot [Array] -or -not $saved.applied.Count -or
+            -not (Test-OptiDnsFamilyValid $saved.original_ipv4 ([Net.Sockets.AddressFamily]::InterNetwork)) -or
+            -not (Test-OptiDnsFamilyValid $saved.original_ipv6 ([Net.Sockets.AddressFamily]::InterNetworkV6))) {
+            throw 'Saved DNS backup contains an invalid interface record; it was kept.'
+        }
+        foreach ($applied in $saved.applied) {
+            if (-not (Test-OptiDnsFamilyValid $applied.ipv4 ([Net.Sockets.AddressFamily]::InterNetwork)) -or
+                -not (Test-OptiDnsFamilyValid $applied.ipv6 ([Net.Sockets.AddressFamily]::InterNetworkV6))) {
+                throw 'Saved DNS backup contains an invalid applied DNS state; it was kept.'
+            }
         }
     }
-    Clear-DnsClientCache
+    $seenDoh = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($change in $backup.doh_changes) {
+        $address = [string]$change.server_address
+        if (-not $address -or -not $seenDoh.Add($address) -or -not (Test-OptiDohRecordValid $change.original $address) -or
+            $change.applied -isnot [Array] -or -not $change.applied.Count) {
+            throw 'Saved DNS backup contains an invalid DNS-over-HTTPS record; it was kept.'
+        }
+        foreach ($applied in $change.applied) {
+            if (-not (Test-OptiDohRecordValid $applied $address)) { throw 'Saved DNS backup contains an invalid applied DNS-over-HTTPS record; it was kept.' }
+        }
+    }
+    return $backup
+}
+
+function Save-OptiDnsBackup {
+    param($Backup)
+    $path = Get-OptiDnsBackupPath
+    $temp = "$path.tmp-$PID"
+    $json = ConvertTo-Json -InputObject $Backup -Depth 10
+    try {
+        [IO.File]::WriteAllText($temp, $json, (New-Object Text.UTF8Encoding($false)))
+        if (Test-Path -LiteralPath $path) { [IO.File]::Replace($temp, $path, $null) }
+        else { [IO.File]::Move($temp, $path) }
+    } catch {
+        Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+        throw "Could not save original DNS settings before changing them: $($_.Exception.Message)"
+    }
+}
+
+function Invoke-OptiDnsNetsh {
+    param([string[]]$Arguments)
+    $output = & netsh.exe @Arguments 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "netsh $($Arguments -join ' ') failed (exit $LASTEXITCODE): $($output -join ' ')" }
+}
+
+function Set-OptiDnsFamily {
+    param([string]$Adapter, [string]$Protocol, $Family)
+    if ($Family.dhcp) {
+        Invoke-OptiDnsNetsh @('interface', $Protocol, 'set', 'dnsservers', "name=$Adapter", 'source=dhcp')
+        return
+    }
+    $servers = @($Family.servers)
+    if (-not $servers.Count) { throw "No static DNS servers are saved for $Adapter ($Protocol)." }
+    for ($i = 0; $i -lt $servers.Count; $i++) {
+        $verb = if ($i -eq 0) { 'set' } else { 'add' }
+        $arguments = @('interface', $Protocol, $verb, 'dnsservers', "name=$Adapter")
+        if ($i -eq 0) { $arguments += 'source=static' }
+        $arguments += "address=$($servers[$i])"
+        if ($i -gt 0) { $arguments += "index=$($i + 1)" }
+        $arguments += 'validate=no'
+        Invoke-OptiDnsNetsh $arguments
+    }
+}
+
+function Set-DnsProvider {
+    param([string]$Name, [string[]]$V4, [string[]]$V6, [string]$Doh)
+    $backup = Read-OptiDnsBackup
+    $requireDoh = [bool]$Doh -or (@($backup.doh_changes).Count -gt 0)
+    $snapshot = Get-OptiDnsSnapshot -RequireDoh $requireDoh
+    $adapters = @($snapshot.interfaces | Where-Object { $_.status -eq 'Up' })
+    if (-not $adapters.Count) { Write-Log 'No active physical network adapter found; DNS was not changed.' 'WARN'; return $false }
+    foreach ($server in $V4) {
+        $parsed = $null
+        if (-not [Net.IPAddress]::TryParse([string]$server, [ref]$parsed) -or $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { throw "Invalid IPv4 DNS server address: $server" }
+    }
+    foreach ($server in $V6) {
+        $parsed = $null
+        if (-not [Net.IPAddress]::TryParse([string]$server, [ref]$parsed) -or $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetworkV6) { throw "Invalid IPv6 DNS server address: $server" }
+    }
+    if ($Doh) {
+        $template = $null
+        if (-not [Uri]::TryCreate($Doh, [UriKind]::Absolute, [ref]$template) -or $template.Scheme -ne 'https' -or -not $template.Host -or $template.UserInfo) {
+            throw 'Invalid DNS-over-HTTPS template; no DNS changes were made.'
+        }
+    }
+    if (-not $backup) { $backup = [pscustomobject]@{ version = 1; interfaces = @(); doh_changes = @() } }
+    $target = [pscustomobject]@{
+        ipv4 = [pscustomobject]@{ dhcp = (@($V4).Count -eq 0); servers = @($V4) }
+        ipv6 = [pscustomobject]@{ dhcp = (@($V6).Count -eq 0); servers = @($V6) }
+    }
+    foreach ($adapter in $adapters) {
+        $savedCurrent = @($backup.interfaces | Where-Object { $_.interface_guid -ieq $adapter.interface_guid }) | Select-Object -First 1
+        if ($savedCurrent) {
+            $known4 = Test-OptiDnsFamilyKnown $adapter.ipv4 $savedCurrent.original_ipv4 @($savedCurrent.applied | ForEach-Object { $_.ipv4 })
+            $known6 = Test-OptiDnsFamilyKnown $adapter.ipv6 $savedCurrent.original_ipv6 @($savedCurrent.applied | ForEach-Object { $_.ipv6 })
+            if (-not $known4 -or -not $known6) { throw "DNS on $($adapter.name) changed outside Optimaxer since the saved backup." }
+            if (-not @($savedCurrent.applied | Where-Object { (Test-OptiDnsFamilyEqual $_.ipv4 $target.ipv4) -and (Test-OptiDnsFamilyEqual $_.ipv6 $target.ipv6) }).Count) {
+                $savedCurrent.applied = @($savedCurrent.applied) + $target
+            }
+        } else {
+            $backup.interfaces = @($backup.interfaces) + [pscustomobject]@{
+                interface_guid = $adapter.interface_guid
+                name = $adapter.name
+                original_ipv4 = $adapter.ipv4
+                original_ipv6 = $adapter.ipv6
+                applied = @($target)
+            }
+        }
+    }
+    if ($Doh) {
+        foreach ($server in @($V4) + @($V6)) {
+            $expected = [pscustomobject]@{ server_address = $server; doh_template = $Doh; auto_upgrade = $true; allow_fallback_to_udp = $true }
+            $change = @($backup.doh_changes | Where-Object { $_.server_address -ieq $server }) | Select-Object -First 1
+            $current = Get-OptiDohRecord $snapshot $server
+            if ($change) {
+                $known = ($null -eq $current -and $null -eq $change.original) -or
+                    (Test-OptiDohEqual $current $change.original) -or @($change.applied | Where-Object { Test-OptiDohEqual $current $_ }).Count -gt 0
+                if (-not $known) { throw "DNS-over-HTTPS for $server changed outside Optimaxer since the saved backup." }
+                if (-not @($change.applied | Where-Object { Test-OptiDohEqual $_ $expected }).Count) { $change.applied = @($change.applied) + $expected }
+            } else {
+                $backup.doh_changes = @($backup.doh_changes) + [pscustomobject]@{ server_address = $server; original = $current; applied = @($expected) }
+            }
+        }
+    }
+    Save-OptiDnsBackup $backup
+    Write-Log "Saved original DNS settings for $($adapters.Count) adapter(s)."
+    try {
+        foreach ($adapter in $adapters) {
+            Set-OptiDnsFamily $adapter.name 'ipv4' $target.ipv4
+            Set-OptiDnsFamily $adapter.name 'ipv6' $target.ipv6
+            Write-Log "  DNS on $($adapter.name): $Name"
+        }
+        if ($Doh) {
+            foreach ($server in @($V4) + @($V6)) {
+                $verb = if ($null -eq (Get-OptiDohRecord $snapshot $server)) { 'add' } else { 'set' }
+                Invoke-OptiDnsNetsh @('dns', $verb, 'encryption', "server=$server", "dohtemplate=$Doh", 'autoupgrade=yes', 'udpfallback=yes')
+            }
+        }
+    } catch {
+        Write-Log "DNS change incomplete; original backup kept: $($_.Exception.Message)" 'WARN'
+        return $false
+    }
+    try { Clear-DnsClientCache -ErrorAction Stop } catch { Write-Log "DNS cache flush failed: $($_.Exception.Message)" 'WARN' }
+    $after = Get-OptiDnsSnapshot -RequireDoh $requireDoh
+    foreach ($adapter in $adapters) {
+        $current = @($after.interfaces | Where-Object { $_.interface_guid -ieq $adapter.interface_guid }) | Select-Object -First 1
+        if (-not $current -or -not (Test-OptiDnsFamilyEqual $current.ipv4 $target.ipv4) -or -not (Test-OptiDnsFamilyEqual $current.ipv6 $target.ipv6)) {
+            Write-Log "Windows did not report the requested DNS settings on $($adapter.name); backup kept." 'WARN'
+            return $false
+        }
+    }
+    if ($Doh) {
+        foreach ($server in @($V4) + @($V6)) {
+            $expected = [pscustomobject]@{ server_address = $server; doh_template = $Doh; auto_upgrade = $true; allow_fallback_to_udp = $true }
+            if (-not (Test-OptiDohEqual (Get-OptiDohRecord $after $server) $expected)) {
+                Write-Log "Windows did not report the requested DNS-over-HTTPS settings for $server; backup kept." 'WARN'
+                return $false
+            }
+        }
+    }
+    Write-Log 'DNS provider applied and verified. Use Restore saved DNS to return to the original settings.' 'OK'
+    return $true
+}
+
+function Restore-DnsProvider {
+    $backup = Read-OptiDnsBackup
+    if (-not $backup) { Write-Log 'No saved DNS backup found.' 'WARN'; return $false }
+    $snapshot = Get-OptiDnsSnapshot -RequireDoh (@($backup.doh_changes).Count -gt 0)
+    $plan = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($saved in $backup.interfaces) {
+        $current = @($snapshot.interfaces | Where-Object { $_.interface_guid -ieq $saved.interface_guid }) | Select-Object -First 1
+        if (-not $current) { Write-Log "Adapter $($saved.name) is unavailable; backup kept." 'WARN'; return $false }
+        $known4 = Test-OptiDnsFamilyKnown $current.ipv4 $saved.original_ipv4 @($saved.applied | ForEach-Object { $_.ipv4 })
+        $known6 = Test-OptiDnsFamilyKnown $current.ipv6 $saved.original_ipv6 @($saved.applied | ForEach-Object { $_.ipv6 })
+        if (-not $known4 -or -not $known6) { Write-Log "DNS on $($current.name) changed outside Optimaxer; left untouched." 'WARN'; return $false }
+        if (-not (Test-OptiDnsFamilyEqual $current.ipv4 $saved.original_ipv4)) { $plan.Add([pscustomobject]@{ kind = 'dns'; adapter = $current.name; protocol = 'ipv4'; family = $saved.original_ipv4 }) }
+        if (-not (Test-OptiDnsFamilyEqual $current.ipv6 $saved.original_ipv6)) { $plan.Add([pscustomobject]@{ kind = 'dns'; adapter = $current.name; protocol = 'ipv6'; family = $saved.original_ipv6 }) }
+    }
+    foreach ($change in $backup.doh_changes) {
+        $current = Get-OptiDohRecord $snapshot $change.server_address
+        $alreadyOriginal = ($null -eq $current -and $null -eq $change.original) -or (Test-OptiDohEqual $current $change.original)
+        if ($alreadyOriginal) { continue }
+        $known = @($change.applied | Where-Object { Test-OptiDohEqual $current $_ }).Count -gt 0
+        if (-not $known) { Write-Log "DNS-over-HTTPS for $($change.server_address) changed outside Optimaxer; left untouched." 'WARN'; return $false }
+        $plan.Add([pscustomobject]@{ kind = 'doh'; change = $change; current = $current })
+    }
+    try {
+        foreach ($item in $plan) {
+            if ($item.kind -eq 'dns') { Set-OptiDnsFamily $item.adapter $item.protocol $item.family; continue }
+            if ($item.change.original) {
+                $original = $item.change.original
+                Invoke-OptiDnsNetsh @('dns', 'set', 'encryption', "server=$($original.server_address)", "dohtemplate=$($original.doh_template)", "autoupgrade=$(if($original.auto_upgrade){'yes'}else{'no'})", "udpfallback=$(if($original.allow_fallback_to_udp){'yes'}else{'no'})")
+            } elseif ($item.current) {
+                Invoke-OptiDnsNetsh @('dns', 'delete', 'encryption', "server=$($item.change.server_address)")
+            }
+        }
+    } catch {
+        Write-Log "DNS restore incomplete; original backup kept: $($_.Exception.Message)" 'WARN'
+        return $false
+    }
+    try { Clear-DnsClientCache -ErrorAction Stop } catch { Write-Log "DNS cache flush failed after restore: $($_.Exception.Message)" 'WARN' }
+    $after = Get-OptiDnsSnapshot -RequireDoh (@($backup.doh_changes).Count -gt 0)
+    foreach ($saved in $backup.interfaces) {
+        $current = @($after.interfaces | Where-Object { $_.interface_guid -ieq $saved.interface_guid }) | Select-Object -First 1
+        if (-not $current -or -not (Test-OptiDnsFamilyEqual $current.ipv4 $saved.original_ipv4) -or -not (Test-OptiDnsFamilyEqual $current.ipv6 $saved.original_ipv6)) {
+            Write-Log "Windows did not report the saved original DNS settings for $($saved.name); backup kept." 'WARN'
+            return $false
+        }
+    }
+    foreach ($change in $backup.doh_changes) {
+        $current = Get-OptiDohRecord $after $change.server_address
+        if (-not (($null -eq $current -and $null -eq $change.original) -or (Test-OptiDohEqual $current $change.original))) {
+            Write-Log "Windows did not report the saved original DNS-over-HTTPS settings for $($change.server_address); backup kept." 'WARN'
+            return $false
+        }
+    }
+    Remove-Item -LiteralPath (Get-OptiDnsBackupPath) -ErrorAction Stop
+    Write-Log 'Original DNS settings restored and verified.' 'OK'
+    return $true
 }
 
 # ---------------------------------------------------------------- cleanup

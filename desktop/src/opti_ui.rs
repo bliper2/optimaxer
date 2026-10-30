@@ -3,7 +3,7 @@
 //! never blocks. Every change goes through a confirmation window that lists exactly what will happen.
 
 use crate::kit;
-use crate::model::{format_size, AppItem};
+use crate::model::{AppItem, format_size};
 use crate::net::{self, Settings};
 use crate::opti::backend::{RegData, System, WinSystem};
 use crate::opti::backup_integrity::{self, Check as BackupCheck, Status as BackupStatus};
@@ -11,26 +11,32 @@ use crate::opti::catalog::{Catalog, Tweak};
 use crate::opti::cleaner::{self, Target};
 use crate::opti::diagnostics::{self, Check as DiagnosticCheck, Result as DiagnosticResult};
 use crate::opti::engine::{Change, Engine};
-use crate::opti::hw::{self, Traits};
-use crate::opti::history::{
-    self, Action as HistoryAction, Change as HistoryChange, Entry as HistoryEntry,
-    OperationEntry, OperationStatus,
-};
 use crate::opti::gaming::{self, GameProfile, GraphicsPreference, ProfileState};
+use crate::opti::history::{
+    self, Action as HistoryAction, Change as HistoryChange, Entry as HistoryEntry, OperationEntry,
+    OperationStatus,
+};
+use crate::opti::hw::{self, Traits};
 use crate::opti::network;
 use crate::opti::processes::{self, CpuTimes, ProcessInfo};
 use crate::opti::profiles::{self, Profile};
 use crate::opti::services::{self, Data, DnsProvider, SvcRow};
 use crate::opti::snapshots::{self, SystemSnapshot};
 use crate::opti::startup;
-use crate::opti::state::{backup_dir, State};
+use crate::opti::state::{State, backup_dir};
 use crate::opti::tools::{self, Tool};
-use crate::theme::{self, mix, semibold, tokens, Tone, S1, S2, S3, S4, S5, T_BODY, T_CAPTION, T_HEADING, T_SMALL, T_TITLE};
-use egui::{Align, Color32, CornerRadius, FontId, Layout, Margin, RichText, Sense, Stroke, StrokeKind, Ui, vec2};
+use crate::theme::{
+    self, S1, S2, S3, S4, S5, T_BODY, T_CAPTION, T_HEADING, T_SMALL, T_TITLE, Tone, mix, semibold,
+    tokens,
+};
+use egui::{
+    Align, Color32, CornerRadius, FontId, Layout, Margin, RichText, Sense, Stroke, StrokeKind, Ui,
+    vec2,
+};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -127,8 +133,15 @@ impl Page {
 
     fn group(self) -> PageGroup {
         match self {
-            Self::Overview | Self::Performance | Self::Processes | Self::Activity => PageGroup::Workspace,
-            Self::Gaming | Self::Tweaks | Self::Services | Self::Startup | Self::Cleaner | Self::Network => PageGroup::Optimization,
+            Self::Overview | Self::Performance | Self::Processes | Self::Activity => {
+                PageGroup::Workspace
+            }
+            Self::Gaming
+            | Self::Tweaks
+            | Self::Services
+            | Self::Startup
+            | Self::Cleaner
+            | Self::Network => PageGroup::Optimization,
             Self::Diagnostics | Self::Snapshots | Self::Tools => PageGroup::System,
         }
     }
@@ -149,16 +162,28 @@ enum Action {
     UndoAll,
     /// Second step after a failed restore point: the user confirmed to go on without one.
     ApplyWithoutRestore(Vec<String>),
-    SetServices { names: Vec<String>, start: u32 },
+    SetServices {
+        names: Vec<String>,
+        start: u32,
+    },
     RestoreServices,
-    SetStartup { items: Vec<startup::Item>, enable: bool },
+    SetStartup {
+        items: Vec<startup::Item>,
+        enable: bool,
+    },
     Clean(Vec<&'static str>),
     SetDns(DnsProvider),
+    RestoreDns,
     ResetNetwork,
     RunTool(Tool),
     RunInstaller(PathBuf),
-    ApplyGameGraphics { executable: String, expected_current: Option<RegData> },
-    UndoGameGraphics { executable: String },
+    ApplyGameGraphics {
+        executable: String,
+        expected_current: Option<RegData>,
+    },
+    UndoGameGraphics {
+        executable: String,
+    },
 }
 
 struct Line {
@@ -213,7 +238,13 @@ struct Worker {
 
 fn operation_log_severity(line: &str) -> u8 {
     let line = line.trim_start();
-    if line.starts_with("ERROR") { 2 } else if line.starts_with("WARN") { 1 } else { 0 }
+    if line.starts_with("ERROR") {
+        2
+    } else if line.starts_with("WARN") {
+        1
+    } else {
+        0
+    }
 }
 
 fn catch_worker_panic(job: impl FnOnce()) -> Result<(), String> {
@@ -251,9 +282,15 @@ impl Worker {
 fn refresh_game_profile_messages(worker: &Worker, store_path: &std::path::Path) {
     match gaming::load_store(store_path) {
         Ok(profiles) => {
-            let states = profiles.iter().map(|profile| {
-                (profile.executable.clone(), gaming::state(&WinSystem, profile))
-            }).collect();
+            let states = profiles
+                .iter()
+                .map(|profile| {
+                    (
+                        profile.executable.clone(),
+                        gaming::state(&WinSystem, profile),
+                    )
+                })
+                .collect();
             worker.send(Msg::GameProfiles(Ok(profiles)));
             worker.send(Msg::GameStates(states));
         }
@@ -351,8 +388,15 @@ pub struct OptiUi {
 /// (active, applicable) among the recommended tweaks that fit this PC.
 pub fn score(cat: &Catalog, tr: &Traits, status: &HashMap<String, bool>) -> (usize, usize) {
     // the same tweaks Smart optimize would tick on this PC
-    let applicable: Vec<&Tweak> = cat.tweaks.iter().filter(|t| t.auto_pick() && hw::fits(t, tr)).collect();
-    let on = applicable.iter().filter(|t| status.get(&t.id).copied().unwrap_or(false)).count();
+    let applicable: Vec<&Tweak> = cat
+        .tweaks
+        .iter()
+        .filter(|t| t.auto_pick() && hw::fits(t, tr))
+        .collect();
+    let on = applicable
+        .iter()
+        .filter(|t| status.get(&t.id).copied().unwrap_or(false))
+        .count();
     (on, applicable.len())
 }
 
@@ -385,7 +429,15 @@ fn setting_match_label(value: Option<bool>) -> &'static str {
     }
 }
 
-fn tweak_matches_view(tweak: &Tweak, applied: bool, fits: bool, favorite: bool, state: usize, view: usize, compatibility: usize) -> bool {
+fn tweak_matches_view(
+    tweak: &Tweak,
+    applied: bool,
+    fits: bool,
+    favorite: bool,
+    state: usize,
+    view: usize,
+    compatibility: usize,
+) -> bool {
     let state_matches = match state {
         1 => applied,
         2 => !applied,
@@ -436,9 +488,7 @@ fn history_entry_matches(entry: &HistoryEntry, query: &str) -> bool {
     query.is_empty()
         || entry.time.to_lowercase().contains(&query)
         || match entry.action {
-            HistoryAction::Apply => {
-                "apply".contains(&query) || "applied".contains(&query)
-            }
+            HistoryAction::Apply => "apply".contains(&query) || "applied".contains(&query),
             HistoryAction::Undo => "undo".contains(&query) || "undid".contains(&query),
         }
         || entry.changes.iter().any(|change| {
@@ -456,7 +506,10 @@ fn operation_entry_matches(entry: &OperationEntry, query: &str) -> bool {
     query.is_empty()
         || entry.time.to_lowercase().contains(&query)
         || entry.title.to_lowercase().contains(&query)
-        || entry.details.iter().any(|detail| detail.to_lowercase().contains(&query))
+        || entry
+            .details
+            .iter()
+            .any(|detail| detail.to_lowercase().contains(&query))
 }
 
 fn game_preference_history(entries: &[OperationEntry], executable: &str) -> Vec<OperationEntry> {
@@ -603,22 +656,38 @@ fn draw_profile_difference(
     tokens: &theme::Tokens,
 ) {
     ui.vertical(|ui| {
-        ui.label(RichText::new(format!("Only in {profile_name} · {}", ids.len()))
-            .font(FontId::new(T_SMALL, semibold())).color(tokens.muted));
+        ui.label(
+            RichText::new(format!("Only in {profile_name} · {}", ids.len()))
+                .font(FontId::new(T_SMALL, semibold()))
+                .color(tokens.muted),
+        );
         if ids.is_empty() {
-            ui.label(RichText::new("No unique tweaks").size(T_CAPTION).color(tokens.subtle));
+            ui.label(
+                RichText::new("No unique tweaks")
+                    .size(T_CAPTION)
+                    .color(tokens.subtle),
+            );
         } else {
-            egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
-                for id in ids {
-                    if let Some(tweak) = catalog.find(&id) {
-                        ui.label(RichText::new(&tweak.name).size(T_CAPTION).color(tokens.text))
+            egui::ScrollArea::vertical()
+                .max_height(120.0)
+                .show(ui, |ui| {
+                    for id in ids {
+                        if let Some(tweak) = catalog.find(&id) {
+                            ui.label(
+                                RichText::new(&tweak.name)
+                                    .size(T_CAPTION)
+                                    .color(tokens.text),
+                            )
                             .on_hover_text(&tweak.desc);
-                    } else {
-                        ui.label(RichText::new(format!("Unknown tweak · {id}"))
-                            .size(T_CAPTION).color(tokens.warn));
+                        } else {
+                            ui.label(
+                                RichText::new(format!("Unknown tweak · {id}"))
+                                    .size(T_CAPTION)
+                                    .color(tokens.warn),
+                            );
+                        }
                     }
-                }
-            });
+                });
         }
     });
 }
@@ -650,13 +719,25 @@ fn tweak_notes(t: &Tweak) -> String {
         n.push(format!("one choice per group: {}", t.conflict));
     }
     if !t.retired.is_empty() {
-        n.push(format!("retired: {} Undo it to put your old value back", t.retired));
+        n.push(format!(
+            "retired: {} Undo it to put your old value back",
+            t.retired
+        ));
     }
     n.join(", ")
 }
 
 /// Groups the Tweaks page can be filtered by. The first entry shows everything.
-const TWEAK_GROUPS: [&str; 8] = ["All", "Recommended", "Gaming", "Privacy", "AI and debloat", "Opt-in", "Applied", "Not applied"];
+const TWEAK_GROUPS: [&str; 8] = [
+    "All",
+    "Recommended",
+    "Gaming",
+    "Privacy",
+    "AI and debloat",
+    "Opt-in",
+    "Applied",
+    "Not applied",
+];
 
 /// Whether a tweak belongs to the chosen group (an index into `TWEAK_GROUPS`).
 fn in_group(tw: &Tweak, group: usize, applied: bool) -> bool {
@@ -675,15 +756,41 @@ fn in_group(tw: &Tweak, group: usize, applied: bool) -> bool {
 /// The exact changes a tweak makes, for the expandable technical details: registry values, services, tasks and flags.
 fn tweak_technical(t: &Tweak) -> Vec<String> {
     use crate::opti::catalog::RegVal;
-    let mut out = vec![format!("id {}   risk {}   tags {}", t.id, t.risk, if t.tags.is_empty() { "none".to_string() } else { t.tags.join(", ") })];
+    let mut out = vec![format!(
+        "id {}   risk {}   tags {}",
+        t.id,
+        t.risk,
+        if t.tags.is_empty() {
+            "none".to_string()
+        } else {
+            t.tags.join(", ")
+        }
+    )];
     for r in &t.reg {
         let (value, kind) = match &r.v {
-            RegVal::Num(n) => (format!("{n} (0x{:X})", n & 0xFFFF_FFFF), if r.t.is_empty() { "REG_DWORD".to_string() } else { format!("REG_{}", r.t.to_uppercase()) }),
-            RegVal::Text(v) => (format!("\"{v}\""), if r.t == "ExpandString" { "REG_EXPAND_SZ".to_string() } else { "REG_SZ".to_string() }),
+            RegVal::Num(n) => (
+                format!("{n} (0x{:X})", n & 0xFFFF_FFFF),
+                if r.t.is_empty() {
+                    "REG_DWORD".to_string()
+                } else {
+                    format!("REG_{}", r.t.to_uppercase())
+                },
+            ),
+            RegVal::Text(v) => (
+                format!("\"{v}\""),
+                if r.t == "ExpandString" {
+                    "REG_EXPAND_SZ".to_string()
+                } else {
+                    "REG_SZ".to_string()
+                },
+            ),
             RegVal::Bytes(b) => (format!("{} bytes", b.len()), "REG_BINARY".to_string()),
             RegVal::Multi(m) => (m.join(" | "), "REG_MULTI_SZ".to_string()),
         };
-        out.push(format!("registry  {}\\{} = {}  [{}]", r.p, r.n, value, kind));
+        out.push(format!(
+            "registry  {}\\{} = {}  [{}]",
+            r.p, r.n, value, kind
+        ));
     }
     for sv in &t.svc {
         let start = match sv.start {
@@ -694,13 +801,18 @@ fn tweak_technical(t: &Tweak) -> Vec<String> {
             4 => "Disabled",
             _ => "other",
         };
-        out.push(format!("service  {} start type -> {} ({})", sv.name, start, sv.start));
+        out.push(format!(
+            "service  {} start type -> {} ({})",
+            sv.name, start, sv.start
+        ));
     }
     for tk in &t.task {
         out.push(format!("scheduled task  {tk} -> disabled"));
     }
     if t.special.is_some() || t.script.apply {
-        out.push("also runs a built-in routine (not only registry, service and task changes)".into());
+        out.push(
+            "also runs a built-in routine (not only registry, service and task changes)".into(),
+        );
     }
     let mut flags: Vec<&str> = Vec::new();
     if t.restart {
@@ -732,9 +844,27 @@ struct Batch {
 
 /// Applies or undoes a list of tweaks. With a requested restore point that fails, nothing is changed and
 /// `restore_failed` is set, so the window can ask before going on without one.
-fn run_batch(eng: &Engine, cat: &Catalog, ids: &[String], apply: bool, restore_point: bool, st: &mut State, log: &mut dyn FnMut(&str)) -> Batch {
-    let mut b = Batch { restore_failed: false, ok: 0, restart: false, explorer: false, now: HashMap::new(), changes: Vec::new() };
-    if apply && restore_point && !tools::create_restore_point(eng.sys, "Optimaxer - before tweaks", log) {
+fn run_batch(
+    eng: &Engine,
+    cat: &Catalog,
+    ids: &[String],
+    apply: bool,
+    restore_point: bool,
+    st: &mut State,
+    log: &mut dyn FnMut(&str),
+) -> Batch {
+    let mut b = Batch {
+        restore_failed: false,
+        ok: 0,
+        restart: false,
+        explorer: false,
+        now: HashMap::new(),
+        changes: Vec::new(),
+    };
+    if apply
+        && restore_point
+        && !tools::create_restore_point(eng.sys, "Optimaxer - before tweaks", log)
+    {
         log("WARN No restore point, so nothing was changed.");
         b.restore_failed = true;
         return b;
@@ -747,7 +877,11 @@ fn run_batch(eng: &Engine, cat: &Catalog, ids: &[String], apply: bool, restore_p
         } else {
             st.records.get(id).map(|record| vec![format!("Saved originals: {} registry values, {} service settings, {} scheduled tasks", record.reg.len(), record.svc.len(), record.task.len())]).unwrap_or_default()
         };
-        let (on, failed) = if apply { (eng.apply(t, st, log), Vec::new()) } else { eng.undo_checked(t, st, log) };
+        let (on, failed) = if apply {
+            (eng.apply(t, st, log), Vec::new())
+        } else {
+            eng.undo_checked(t, st, log)
+        };
         let verified = on == apply && failed.is_empty();
         let changed_state = planned_before != eng.plan(t);
         b.restart |= t.restart && changed_state;
@@ -755,7 +889,13 @@ fn run_batch(eng: &Engine, cat: &Catalog, ids: &[String], apply: bool, restore_p
         if verified {
             b.ok += 1;
         }
-        b.changes.push(HistoryChange { id: t.id.clone(), name: t.name.clone(), verified, undo_available: st.contains(id), details });
+        b.changes.push(HistoryChange {
+            id: t.id.clone(),
+            name: t.name.clone(),
+            verified,
+            undo_available: st.contains(id),
+            details,
+        });
     }
     // A changed value can also change the status of another tweak that uses it.
     b.now = eng.status_all(&cat.tweaks, st);
@@ -765,13 +905,25 @@ fn run_batch(eng: &Engine, cat: &Catalog, ids: &[String], apply: bool, restore_p
 fn plan_lines(eng: &Engine, tweaks: &[&Tweak]) -> Vec<Line> {
     let mut out = Vec::new();
     for t in tweaks {
-        out.push(Line { text: format!("{}  ({})", t.name, t.risk), warn: t.risk == "Advanced", head: true });
+        out.push(Line {
+            text: format!("{}  ({})", t.name, t.risk),
+            warn: t.risk == "Advanced",
+            head: true,
+        });
         let changes = eng.plan(t);
         if changes.is_empty() {
-            out.push(Line { text: "already in effect, nothing to change".into(), warn: false, head: false });
+            out.push(Line {
+                text: "already in effect, nothing to change".into(),
+                warn: false,
+                head: false,
+            });
         }
         for c in changes {
-            out.push(Line { warn: matches!(c, Change::Note(_)), text: c.describe(), head: false });
+            out.push(Line {
+                warn: matches!(c, Change::Note(_)),
+                text: c.describe(),
+                head: false,
+            });
         }
     }
     out
@@ -789,10 +941,11 @@ impl OptiUi {
             Ok(entries) => (entries, None),
             Err(error) => (Vec::new(), Some(error)),
         };
-        let (profiles, profiles_error) = match profiles::load_store(&net::data_dir().join("profiles.json")) {
-            Ok(profiles) => (profiles, None),
-            Err(error) => (Vec::new(), Some(error)),
-        };
+        let (profiles, profiles_error) =
+            match profiles::load_store(&net::data_dir().join("profiles.json")) {
+                Ok(profiles) => (profiles, None),
+                Err(error) => (Vec::new(), Some(error)),
+            };
         let (game_profiles, game_profiles_error) = match gaming::load_store(&gaming::store_path()) {
             Ok(profiles) => (profiles, None),
             Err(error) => (Vec::new(), Some(error)),
@@ -887,7 +1040,11 @@ impl OptiUi {
 
     /// Switches page by name. Used by the screenshot runner.
     pub fn show_page(&mut self, ctx: &egui::Context, name: &str) {
-        if let Some(p) = Page::ALL.iter().copied().find(|p| p.label().eq_ignore_ascii_case(name)) {
+        if let Some(p) = Page::ALL
+            .iter()
+            .copied()
+            .find(|p| p.label().eq_ignore_ascii_case(name))
+        {
             self.set_page(ctx, p);
         }
     }
@@ -913,12 +1070,23 @@ impl OptiUi {
     }
 
     pub fn status_text(&self) -> String {
-        let admin = if self.elevated { "Administrator" } else { "Not elevated" };
+        let admin = if self.elevated {
+            "Administrator"
+        } else {
+            "Not elevated"
+        };
         match &self.busy {
             Some(b) => format!("Working: {b}   ·   {admin}"),
             None => {
-                let (on, total) = self.traits.as_ref().map(|t| score(&self.cat, t, &self.status)).unwrap_or((0, 0));
-                format!("{} tweaks in the catalog  ·  {on} of {total} recommended active  ·  {admin}", self.cat.tweaks.len())
+                let (on, total) = self
+                    .traits
+                    .as_ref()
+                    .map(|t| score(&self.cat, t, &self.status))
+                    .unwrap_or((0, 0));
+                format!(
+                    "{} tweaks in the catalog  ·  {on} of {total} recommended active  ·  {admin}",
+                    self.cat.tweaks.len()
+                )
             }
         }
     }
@@ -933,11 +1101,20 @@ impl OptiUi {
 
     /// Open a downloaded installer from the store through Optimaxer: a restore point first, then the file.
     pub fn request_run_installer(&mut self, path: PathBuf) {
-        let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
         self.pending = Some(Pending {
             title: "Create a restore point, then open the installer".into(),
-            intro: format!("Optimaxer will create a System Restore point and then open {name}. You decide inside the installer whether to continue. Only run files you trust."),
-            lines: vec![Line { text: path.to_string_lossy().to_string(), warn: false, head: false }],
+            intro: format!(
+                "Optimaxer will create a System Restore point and then open {name}. You decide inside the installer whether to continue. Only run files you trust."
+            ),
+            lines: vec![Line {
+                text: path.to_string_lossy().to_string(),
+                warn: false,
+                head: false,
+            }],
             action: Action::RunInstaller(path),
             restore_option: false,
             ok_label: "Create restore point and open".into(),
@@ -945,21 +1122,44 @@ impl OptiUi {
     }
 
     fn worker(&self, ctx: &egui::Context) -> Worker {
-        Worker { tx: self.tx.clone(), ctx: ctx.clone(), operation_details: None, operation_status: None }
+        Worker {
+            tx: self.tx.clone(),
+            ctx: ctx.clone(),
+            operation_details: None,
+            operation_status: None,
+        }
     }
 
     /// Starts a background job. One job at a time, like the PowerShell edition.
-    fn spawn(&mut self, ctx: &egui::Context, title: &str, job: impl FnOnce(&Worker) + Send + 'static) -> bool {
+    fn spawn(
+        &mut self,
+        ctx: &egui::Context,
+        title: &str,
+        job: impl FnOnce(&Worker) + Send + 'static,
+    ) -> bool {
         self.spawn_inner(ctx, title, false, job)
     }
 
-    fn spawn_recorded(&mut self, ctx: &egui::Context, title: &str, job: impl FnOnce(&Worker) + Send + 'static) -> bool {
+    fn spawn_recorded(
+        &mut self,
+        ctx: &egui::Context,
+        title: &str,
+        job: impl FnOnce(&Worker) + Send + 'static,
+    ) -> bool {
         self.spawn_inner(ctx, title, true, job)
     }
 
-    fn spawn_inner(&mut self, ctx: &egui::Context, title: &str, record: bool, job: impl FnOnce(&Worker) + Send + 'static) -> bool {
+    fn spawn_inner(
+        &mut self,
+        ctx: &egui::Context,
+        title: &str,
+        record: bool,
+        job: impl FnOnce(&Worker) + Send + 'static,
+    ) -> bool {
         if self.busy.is_some() {
-            self.events.push(OptiEvent::Toast("Another task is running, please wait.".into()));
+            self.events.push(OptiEvent::Toast(
+                "Another task is running, please wait.".into(),
+            ));
             return false;
         }
         self.busy = Some(title.to_string());
@@ -975,7 +1175,9 @@ impl OptiUi {
         let title = title.to_owned();
         std::thread::spawn(move || {
             if let Err(message) = catch_worker_panic(|| job(&w)) {
-                w.log(&format!("ERROR Background operation stopped unexpectedly: {message}"));
+                w.log(&format!(
+                    "ERROR Background operation stopped unexpectedly: {message}"
+                ));
             }
             if let Some(details) = operation_details {
                 let details = match details.lock() {
@@ -985,7 +1187,10 @@ impl OptiUi {
                         Vec::new()
                     }
                 };
-                let status = match operation_status.as_ref().map_or(0, |status| status.load(Ordering::Relaxed)) {
+                let status = match operation_status
+                    .as_ref()
+                    .map_or(0, |status| status.load(Ordering::Relaxed))
+                {
                     2 => OperationStatus::Error,
                     1 => OperationStatus::Warnings,
                     _ => OperationStatus::Finished,
@@ -998,7 +1203,9 @@ impl OptiUi {
                 };
                 match history::append_operation(entry) {
                     Ok(entries) => w.send(Msg::OperationHistory(Ok(entries))),
-                    Err(error) => w.log(&format!("WARN Operation ran, but its activity record could not be saved: {error}")),
+                    Err(error) => w.log(&format!(
+                        "WARN Operation ran, but its activity record could not be saved: {error}"
+                    )),
                 }
             }
             w.send(Msg::Idle);
@@ -1039,7 +1246,10 @@ impl OptiUi {
                 Msg::Scan(v) => {
                     self.clean_sel.clear();
                     for (id, size) in v {
-                        let risk_ok = cleaner::TARGETS.iter().find(|t| t.id == id).is_some_and(|t| t.risk == "Safe");
+                        let risk_ok = cleaner::TARGETS
+                            .iter()
+                            .find(|t| t.id == id)
+                            .is_some_and(|t| t.risk == "Safe");
                         if size.is_some_and(|s| s > 0) && risk_ok {
                             self.clean_sel.insert(id);
                         }
@@ -1130,14 +1340,18 @@ impl OptiUi {
 
     fn refresh_processes(&mut self, ctx: &egui::Context) {
         if self.process_loading
-            || self.process_last_scan.is_some_and(|last| last.elapsed() < Duration::from_secs(3))
+            || self
+                .process_last_scan
+                .is_some_and(|last| last.elapsed() < Duration::from_secs(3))
         {
             return;
         }
         self.process_loading = true;
         self.process_last_scan = Some(Instant::now());
         let previous = self.process_cpu.clone();
-        let cores = std::thread::available_parallelism().map(|count| count.get() as u32).unwrap_or(1);
+        let cores = std::thread::available_parallelism()
+            .map(|count| count.get() as u32)
+            .unwrap_or(1);
         let worker = self.worker(ctx);
         std::thread::spawn(move || worker.send(Msg::Processes(processes::scan(&previous, cores))));
     }
@@ -1165,40 +1379,63 @@ impl OptiUi {
         self.spawn(ctx, "Reading startup items", move |w| {
             let listing = startup::list(&WinSystem);
             w.log(&format!("Found {} startup items.", listing.items.len()));
-            if let Some(warning) = &listing.warning { w.log(&format!("WARN {warning}")); }
+            if let Some(warning) = &listing.warning {
+                w.log(&format!("WARN {warning}"));
+            }
             w.send(Msg::Startup(listing));
         });
     }
 
     fn scan_cleaner(&mut self, ctx: &egui::Context) {
         self.spawn(ctx, "Scanning for junk", move |w| {
-            let sizes: Vec<_> = cleaner::TARGETS.iter().map(|t| (t.id, cleaner::scan(t))).collect();
+            let sizes: Vec<_> = cleaner::TARGETS
+                .iter()
+                .map(|t| (t.id, cleaner::scan(t)))
+                .collect();
             let total: u64 = sizes.iter().filter_map(|s| s.1).sum();
-            w.log(&format!("Scan finished: {} can be reclaimed.", format_size(Some(total))));
+            w.log(&format!(
+                "Scan finished: {} can be reclaimed.",
+                format_size(Some(total))
+            ));
             w.send(Msg::Scan(sizes));
         });
     }
 
     fn preview_cleaner(&mut self, ctx: &egui::Context, id: &'static str) {
-        let Some(target) = cleaner::TARGETS.iter().find(|target| target.id == id).cloned() else { return };
+        let Some(target) = cleaner::TARGETS
+            .iter()
+            .find(|target| target.id == id)
+            .cloned()
+        else {
+            return;
+        };
         self.clean_preview = None;
         self.clean_preview_error = None;
         self.spawn(ctx, "Listing affected paths", move |worker| {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cleaner::preview(&target)))
-                .map_err(|_| "Path preview could not be completed.".to_string());
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                cleaner::preview(&target)
+            }))
+            .map_err(|_| "Path preview could not be completed.".to_string());
             worker.send(Msg::CleanPreview(id, result));
         });
     }
 
     /// Builds the confirmation for applying tweaks. Reads only; nothing changes until the user confirms.
     fn preview_apply(&mut self, ctx: &egui::Context) {
-        let ids: Vec<String> = self.cat.tweaks.iter().filter(|t| self.selected.contains(&t.id)).map(|t| t.id.clone()).collect();
+        let ids: Vec<String> = self
+            .cat
+            .tweaks
+            .iter()
+            .filter(|t| self.selected.contains(&t.id))
+            .map(|t| t.id.clone())
+            .collect();
         self.preview_apply_ids(ctx, ids);
     }
 
     fn preview_apply_ids(&mut self, ctx: &egui::Context, ids: Vec<String>) {
         if ids.is_empty() {
-            self.events.push(OptiEvent::Toast("No tweaks selected.".into()));
+            self.events
+                .push(OptiEvent::Toast("No tweaks selected.".into()));
             return;
         }
         if !self.need_admin() {
@@ -1210,32 +1447,66 @@ impl OptiUi {
             let eng = Engine::new(&sys, backup_dir());
             let tweaks: Vec<&Tweak> = ids.iter().filter_map(|i| cat.find(i)).collect();
             let adv = tweaks.iter().filter(|t| t.risk == "Advanced").count();
-            let mut intro = format!("Apply {} tweak(s)? Each one saves your current values first, so it can be undone.", tweaks.len());
+            let mut intro = format!(
+                "Apply {} tweak(s)? Each one saves your current values first, so it can be undone.",
+                tweaks.len()
+            );
             if adv > 0 {
-                intro.push_str(&format!(" {adv} Advanced tweak(s) are marked in red: read them."));
+                intro.push_str(&format!(
+                    " {adv} Advanced tweak(s) are marked in red: read them."
+                ));
             }
-            w.send(Msg::Plan(Pending { title: "Apply tweaks".into(), intro, lines: plan_lines(&eng, &tweaks), action: Action::ApplyTweaks(ids), restore_option: true, ok_label: format!("Apply {} tweak{}", tweaks.len(), if tweaks.len() == 1 { "" } else { "s" }) }));
+            w.send(Msg::Plan(Pending {
+                title: "Apply tweaks".into(),
+                intro,
+                lines: plan_lines(&eng, &tweaks),
+                action: Action::ApplyTweaks(ids),
+                restore_option: true,
+                ok_label: format!(
+                    "Apply {} tweak{}",
+                    tweaks.len(),
+                    if tweaks.len() == 1 { "" } else { "s" }
+                ),
+            }));
         });
     }
 
     fn preview_undo(&mut self) {
-        let ids: Vec<String> = self.cat.tweaks.iter().filter(|t| self.selected.contains(&t.id)).map(|t| t.id.clone()).collect();
+        let ids: Vec<String> = self
+            .cat
+            .tweaks
+            .iter()
+            .filter(|t| self.selected.contains(&t.id))
+            .map(|t| t.id.clone())
+            .collect();
         self.preview_undo_ids(ids);
     }
 
     fn preview_undo_ids(&mut self, ids: Vec<String>) {
         if ids.is_empty() {
-            self.events.push(OptiEvent::Toast("No tweaks selected.".into()));
+            self.events
+                .push(OptiEvent::Toast("No tweaks selected.".into()));
             return;
         }
         if !self.need_admin() {
             return;
         }
-        let lines = ids.iter().filter_map(|i| self.cat.find(i)).map(|t| Line { text: t.name.clone(), warn: false, head: false }).collect();
+        let lines = ids
+            .iter()
+            .filter_map(|i| self.cat.find(i))
+            .map(|t| Line {
+                text: t.name.clone(),
+                warn: false,
+                head: false,
+            })
+            .collect();
         let n = ids.len();
         self.pending = Some(Pending {
             title: "Undo tweaks".into(),
-            intro: format!("Restore the original values saved for {} tweak(s)? Tweaks that were not applied by Optimaxer have nothing to restore.", ids.len()),
+            intro: format!(
+                "Restore the original values saved for {} tweak(s)? Tweaks that were not applied by Optimaxer have nothing to restore.",
+                ids.len()
+            ),
             lines,
             action: Action::UndoTweaks(ids),
             restore_option: false,
@@ -1287,7 +1558,14 @@ impl OptiUi {
             Action::SetServices { names, start } => {
                 let data = self.data.clone();
                 self.spawn_recorded(ctx, "Changing services", move |w| {
-                    let n = services::set_start(&WinSystem, &data, &names, start, &backup_dir(), &mut |l| w.log(l));
+                    let n = services::set_start(
+                        &WinSystem,
+                        &data,
+                        &names,
+                        start,
+                        &backup_dir(),
+                        &mut |l| w.log(l),
+                    );
                     w.log(&format!("{n} service(s) changed."));
                     w.send(Msg::Services(services::list(&WinSystem, &data)));
                 });
@@ -1300,29 +1578,48 @@ impl OptiUi {
                 });
             }
             Action::SetStartup { items, enable } => {
-                self.spawn_recorded(ctx, if enable { "Enabling startup items" } else { "Disabling startup items" }, move |w| {
-                    let sys = WinSystem;
-                    for i in &items {
-                        match startup::set_enabled(&sys, i, enable) {
-                            Ok(()) => w.log(&format!("  {}: {}", i.name, if enable { "enabled" } else { "disabled" })),
-                            Err(e) => w.log(&format!("  WARN {}: {e}", i.name)),
+                self.spawn_recorded(
+                    ctx,
+                    if enable {
+                        "Enabling startup items"
+                    } else {
+                        "Disabling startup items"
+                    },
+                    move |w| {
+                        let sys = WinSystem;
+                        for i in &items {
+                            match startup::set_enabled(&sys, i, enable) {
+                                Ok(()) => w.log(&format!(
+                                    "  {}: {}",
+                                    i.name,
+                                    if enable { "enabled" } else { "disabled" }
+                                )),
+                                Err(e) => w.log(&format!("  WARN {}: {e}", i.name)),
+                            }
                         }
-                    }
-                    w.send(Msg::Startup(startup::list(&sys)));
-                });
+                        w.send(Msg::Startup(startup::list(&sys)));
+                    },
+                );
             }
             Action::Clean(ids) => {
                 self.spawn_recorded(ctx, "Cleaning", move |w| {
                     let sys = WinSystem;
                     let mut sum = 0u64;
                     for id in &ids {
-                        let Some(t) = cleaner::TARGETS.iter().find(|t| t.id == *id) else { continue };
+                        let Some(t) = cleaner::TARGETS.iter().find(|t| t.id == *id) else {
+                            continue;
+                        };
                         let freed = cleaner::clean(&sys, t, &mut |l| w.log(l));
                         sum += freed;
                         w.log(&format!("  {}: freed {}", t.name, format_size(Some(freed))));
                     }
                     w.log(&format!("Total freed: {}", format_size(Some(sum))));
-                    w.send(Msg::Scan(cleaner::TARGETS.iter().map(|t| (t.id, cleaner::scan(t))).collect()));
+                    w.send(Msg::Scan(
+                        cleaner::TARGETS
+                            .iter()
+                            .map(|t| (t.id, cleaner::scan(t)))
+                            .collect(),
+                    ));
                 });
             }
             Action::SetDns(provider) => {
@@ -1331,12 +1628,24 @@ impl OptiUi {
                     network::apply_dns(&WinSystem, &adapters, &provider, &mut |l| w.log(l));
                 });
             }
+            Action::RestoreDns => {
+                self.spawn_recorded(ctx, "Restore original DNS", move |w| {
+                    network::restore_dns(&WinSystem, &mut |l| w.log(l))
+                });
+            }
             Action::ResetNetwork => {
-                self.spawn_recorded(ctx, "Reset network stack", move |w| network::reset_stack(&WinSystem, &mut |l| w.log(l)));
+                self.spawn_recorded(ctx, "Reset network stack", move |w| {
+                    network::reset_stack(&WinSystem, &mut |l| w.log(l))
+                });
             }
             Action::RunTool(tool) => {
-                let title = tools::TOOLS.iter().find(|info| info.tool == tool).map_or("Running tool", |info| info.title);
-                self.spawn_recorded(ctx, title, move |w| tools::run(&WinSystem, tool, &backup_dir(), &mut |l| w.log(l)));
+                let title = tools::TOOLS
+                    .iter()
+                    .find(|info| info.tool == tool)
+                    .map_or("Running tool", |info| info.title);
+                self.spawn_recorded(ctx, title, move |w| {
+                    tools::run(&WinSystem, tool, &backup_dir(), &mut |l| w.log(l))
+                });
             }
             Action::RunInstaller(path) => {
                 self.spawn_recorded(ctx, "Restore point, then installer", move |w| {
@@ -1351,19 +1660,43 @@ impl OptiUi {
                     }
                 });
             }
-            Action::ApplyGameGraphics { executable, expected_current } => {
+            Action::ApplyGameGraphics {
+                executable,
+                expected_current,
+            } => {
                 self.spawn_recorded(ctx, "Setting per-game graphics preference", move |w| {
                     let store_path = gaming::store_path();
                     match gaming::load_store(&store_path) {
                         Ok(mut profiles) => {
-                            let requested = profiles.iter().find(|profile| profile.executable.eq_ignore_ascii_case(&executable))
+                            let requested = profiles
+                                .iter()
+                                .find(|profile| {
+                                    profile.executable.eq_ignore_ascii_case(&executable)
+                                })
                                 .map(|profile| profile.preference.label().to_owned());
                             w.log(&format!("Executable: {executable}"));
-                            w.log(&format!("Previous value: {}", expected_current.as_ref().map_or("not set".into(), RegData::show)));
-                            if let Some(requested) = requested { w.log(&format!("Requested preference: {requested}")); }
-                            match gaming::apply(&WinSystem, &store_path, &mut profiles, &executable, &expected_current) {
-                                Ok(()) => w.log("Windows graphics preference applied and verified."),
-                                Err(error) => w.log(&format!("WARN Could not apply the graphics preference: {error}")),
+                            w.log(&format!(
+                                "Previous value: {}",
+                                expected_current
+                                    .as_ref()
+                                    .map_or("not set".into(), RegData::show)
+                            ));
+                            if let Some(requested) = requested {
+                                w.log(&format!("Requested preference: {requested}"));
+                            }
+                            match gaming::apply(
+                                &WinSystem,
+                                &store_path,
+                                &mut profiles,
+                                &executable,
+                                &expected_current,
+                            ) {
+                                Ok(()) => {
+                                    w.log("Windows graphics preference applied and verified.")
+                                }
+                                Err(error) => w.log(&format!(
+                                    "WARN Could not apply the graphics preference: {error}"
+                                )),
                             }
                         }
                         Err(error) => w.log(&format!("WARN Could not read game profiles: {error}")),
@@ -1400,9 +1733,19 @@ impl OptiUi {
         }
     }
 
-    fn run_tweaks(&mut self, ctx: &egui::Context, ids: Vec<String>, apply: bool, restore_point: bool) {
+    fn run_tweaks(
+        &mut self,
+        ctx: &egui::Context,
+        ids: Vec<String>,
+        apply: bool,
+        restore_point: bool,
+    ) {
         let cat = self.cat.clone();
-        let title = format!("{} {} tweak(s)", if apply { "Apply" } else { "Undo" }, ids.len());
+        let title = format!(
+            "{} {} tweak(s)",
+            if apply { "Apply" } else { "Undo" },
+            ids.len()
+        );
         self.spawn(ctx, &title, move |w| {
             let sys = WinSystem;
             let mut st = State::load();
@@ -1449,7 +1792,9 @@ impl OptiUi {
 
     fn select_preset(&mut self, preset: &str) {
         let Some(tr) = self.traits.clone() else {
-            self.events.push(OptiEvent::Toast("Still analyzing, try again in a moment.".into()));
+            self.events.push(OptiEvent::Toast(
+                "Still analyzing, try again in a moment.".into(),
+            ));
             return;
         };
         self.selected.clear();
@@ -1462,13 +1807,23 @@ impl OptiUi {
                     self.say(&format!("  {n}"));
                 }
                 for (id, why) in &plan.skipped {
-                    let name = self.cat.find(id).map(|t| t.name.clone()).unwrap_or_else(|| id.clone());
+                    let name = self
+                        .cat
+                        .find(id)
+                        .map(|t| t.name.clone())
+                        .unwrap_or_else(|| id.clone());
                     self.say(&format!("  not ticked: {name} ({why})"));
                 }
                 self.tw_skip = plan.skipped.clone();
-                self.say(&format!("Auto-detect: {} tweak(s) selected for this PC ({}).", plan.ids.len(), profile_summary(&tr)));
+                self.say(&format!(
+                    "Auto-detect: {} tweak(s) selected for this PC ({}).",
+                    plan.ids.len(),
+                    profile_summary(&tr)
+                ));
                 if plan.ids.is_empty() {
-                    self.events.push(OptiEvent::Toast("This PC is already optimized: every fitting tweak is applied.".into()));
+                    self.events.push(OptiEvent::Toast(
+                        "This PC is already optimized: every fitting tweak is applied.".into(),
+                    ));
                 }
                 self.selected.extend(plan.ids);
             }
@@ -1482,7 +1837,9 @@ impl OptiUi {
             return;
         }
         if self.selected.is_empty() {
-            self.events.push(OptiEvent::Toast("Select at least one tweak before saving a profile.".into()));
+            self.events.push(OptiEvent::Toast(
+                "Select at least one tweak before saving a profile.".into(),
+            ));
             return;
         }
         let ids = self.selected.iter().cloned().collect::<Vec<_>>();
@@ -1493,8 +1850,15 @@ impl OptiUi {
                 return;
             }
         };
-        if self.profiles.iter().any(|saved| saved.name.eq_ignore_ascii_case(&profile.name)) {
-            self.profile_error(format!("A profile named '{}' already exists. Remove it before saving a replacement.", profile.name));
+        if self
+            .profiles
+            .iter()
+            .any(|saved| saved.name.eq_ignore_ascii_case(&profile.name))
+        {
+            self.profile_error(format!(
+                "A profile named '{}' already exists. Remove it before saving a replacement.",
+                profile.name
+            ));
             return;
         }
         let mut updated = self.profiles.clone();
@@ -1520,22 +1884,37 @@ impl OptiUi {
 
     fn select_profile(&mut self, profile: &Profile) {
         let Some(traits) = self.traits.as_ref() else {
-            self.events.push(OptiEvent::Toast("Still analyzing this PC. Try again in a moment.".into()));
+            self.events.push(OptiEvent::Toast(
+                "Still analyzing this PC. Try again in a moment.".into(),
+            ));
             return;
         };
         match profiles::compatible_ids(profile, &self.cat, traits) {
             Ok((ids, skipped)) if !ids.is_empty() => {
                 self.selected = ids.into_iter().collect();
                 self.tw_skip.clear();
-                self.say(&format!("Selected profile '{}': {} tweak(s) fit this PC; {} skipped.", profile.name, self.selected.len(), skipped));
+                self.say(&format!(
+                    "Selected profile '{}': {} tweak(s) fit this PC; {} skipped.",
+                    profile.name,
+                    self.selected.len(),
+                    skipped
+                ));
             }
-            Ok((_, skipped)) => self.events.push(OptiEvent::Toast(format!("No tweaks in '{}' fit this PC ({skipped} skipped).", profile.name))),
+            Ok((_, skipped)) => self.events.push(OptiEvent::Toast(format!(
+                "No tweaks in '{}' fit this PC ({skipped} skipped).",
+                profile.name
+            ))),
             Err(error) => self.profile_error(error),
         }
     }
 
     fn import_profile(&mut self) {
-        let Some(path) = rfd::FileDialog::new().add_filter("Optimaxer profile", &["json"]).pick_file() else { return };
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Optimaxer profile", &["json"])
+            .pick_file()
+        else {
+            return;
+        };
         let profile = match profiles::read_export(&path) {
             Ok(profile) => profile,
             Err(error) => {
@@ -1544,7 +1923,9 @@ impl OptiUi {
             }
         };
         let Some(traits) = self.traits.as_ref() else {
-            self.events.push(OptiEvent::Toast("Still analyzing this PC. Try again in a moment.".into()));
+            self.events.push(OptiEvent::Toast(
+                "Still analyzing this PC. Try again in a moment.".into(),
+            ));
             return;
         };
         match profiles::compatible_ids(&profile, &self.cat, traits) {
@@ -1552,11 +1933,18 @@ impl OptiUi {
                 self.selected = ids.into_iter().collect();
                 self.tw_skip.clear();
                 self.profile_name = profile.name.clone();
-                let message = format!("Imported '{}': {} tweak(s) selected; {} unavailable or incompatible tweak(s) skipped. Review the list before applying.", profile.name, self.selected.len(), skipped);
+                let message = format!(
+                    "Imported '{}': {} tweak(s) selected; {} unavailable or incompatible tweak(s) skipped. Review the list before applying.",
+                    profile.name,
+                    self.selected.len(),
+                    skipped
+                );
                 self.say(&message);
                 self.events.push(OptiEvent::Toast(message));
             }
-            Ok((_, skipped)) => self.events.push(OptiEvent::Toast(format!("No imported tweaks fit this PC ({skipped} skipped). Existing selection kept."))),
+            Ok((_, skipped)) => self.events.push(OptiEvent::Toast(format!(
+                "No imported tweaks fit this PC ({skipped} skipped). Existing selection kept."
+            ))),
             Err(error) => self.profile_error(error),
         }
     }
@@ -1570,14 +1958,20 @@ impl OptiUi {
             return;
         };
         match profiles::write_export(&path, profile) {
-            Ok(()) => self.say(&format!("Exported profile '{}' to {}.", profile.name, path.display())),
+            Ok(()) => self.say(&format!(
+                "Exported profile '{}' to {}.",
+                profile.name,
+                path.display()
+            )),
             Err(error) => self.profile_error(error),
         }
     }
 
     fn export_selected_profile(&mut self) {
         if self.selected.is_empty() {
-            self.events.push(OptiEvent::Toast("Select at least one tweak before exporting a profile.".into()));
+            self.events.push(OptiEvent::Toast(
+                "Select at least one tweak before exporting a profile.".into(),
+            ));
             return;
         }
         let ids = self.selected.iter().cloned().collect::<Vec<_>>();
@@ -1589,15 +1983,25 @@ impl OptiUi {
 
     fn profiles_section(&mut self, ui: &mut Ui) {
         let t = tokens(ui.ctx());
-        let screenshot_open = std::env::var_os("ORION_SHOTS").is_some() && std::env::var_os("ORION_SHOTS_PROFILE_OPEN").is_some();
+        let screenshot_open = std::env::var_os("ORION_SHOTS").is_some()
+            && std::env::var_os("ORION_SHOTS_PROFILE_OPEN").is_some();
         if self.profiles.len() >= 2 {
-            if !self.profiles.iter().any(|profile| profile.name == self.compare_profile_left) {
+            if !self
+                .profiles
+                .iter()
+                .any(|profile| profile.name == self.compare_profile_left)
+            {
                 self.compare_profile_left = self.profiles[0].name.clone();
             }
-            if !self.profiles.iter().any(|profile| profile.name == self.compare_profile_right)
+            if !self
+                .profiles
+                .iter()
+                .any(|profile| profile.name == self.compare_profile_right)
                 || self.compare_profile_right == self.compare_profile_left
             {
-                self.compare_profile_right = self.profiles.iter()
+                self.compare_profile_right = self
+                    .profiles
+                    .iter()
                     .find(|profile| profile.name != self.compare_profile_left)
                     .map(|profile| profile.name.clone())
                     .unwrap_or_default();
@@ -1699,31 +2103,57 @@ impl OptiUi {
         let t = tokens(ctx);
         ui.add_space(S3);
         if !collapsed {
-            ui.label(RichText::new("Optimaxer").font(FontId::new(T_SMALL, semibold())).color(t.subtle));
+            ui.label(
+                RichText::new("Optimaxer")
+                    .font(FontId::new(T_SMALL, semibold()))
+                    .color(t.subtle),
+            );
             ui.add_space(S1);
         }
         for group in PageGroup::ALL {
             if !collapsed {
                 ui.add_space(S2);
-                ui.label(RichText::new(group.label()).font(FontId::new(T_CAPTION, semibold())).color(t.subtle));
+                ui.label(
+                    RichText::new(group.label())
+                        .font(FontId::new(T_CAPTION, semibold()))
+                        .color(t.subtle),
+                );
                 ui.add_space(S1);
             }
             for page in Page::ALL.into_iter().filter(|page| page.group() == group) {
-                if kit::nav_item_icon(ui, self.page == page, Some(page.icon()), page.label(), None).clicked() && self.page != page {
+                if kit::nav_item_icon(ui, self.page == page, Some(page.icon()), page.label(), None)
+                    .clicked()
+                    && self.page != page
+                {
                     self.set_page(ctx, page);
                 }
             }
         }
         if !collapsed && let Some(tr) = &self.traits {
             ui.add_space(S4);
-            ui.label(RichText::new("This PC").font(FontId::new(T_SMALL, semibold())).color(t.subtle));
+            ui.label(
+                RichText::new("This PC")
+                    .font(FontId::new(T_SMALL, semibold()))
+                    .color(t.subtle),
+            );
             ui.add_space(S1);
-            ui.label(RichText::new(format!("{:.0} GB RAM, {} threads", tr.ram_gb, tr.threads)).size(T_SMALL).color(t.muted));
+            ui.label(
+                RichText::new(format!("{:.0} GB RAM, {} threads", tr.ram_gb, tr.threads))
+                    .size(T_SMALL)
+                    .color(t.muted),
+            );
             for g in &tr.gpus {
                 ui.add(egui::Label::new(RichText::new(g).size(T_SMALL).color(t.muted)).wrap());
             }
             ui.add_space(S1);
-            ui.add(egui::Label::new(RichText::new(profile_summary(tr)).size(T_CAPTION).color(t.subtle)).wrap());
+            ui.add(
+                egui::Label::new(
+                    RichText::new(profile_summary(tr))
+                        .size(T_CAPTION)
+                        .color(t.subtle),
+                )
+                .wrap(),
+            );
         }
     }
 
@@ -1734,70 +2164,117 @@ impl OptiUi {
             .resizable(true)
             .exact_size(44.0)
             .show_separator_line(false)
-            .frame(egui::Frame::new().fill(t.surface1).inner_margin(Margin::symmetric(S4 as i8, S1 as i8)));
+            .frame(
+                egui::Frame::new()
+                    .fill(t.surface1)
+                    .inner_margin(Margin::symmetric(S4 as i8, S1 as i8)),
+            );
         let expanded = egui::Panel::bottom("opti-log-expanded")
             .resizable(true)
             .default_size(216.0)
             .min_size(120.0)
             .max_size(max_height)
             .show_separator_line(false)
-            .frame(egui::Frame::new().fill(t.surface1).inner_margin(Margin::symmetric(S4 as i8, S1 as i8)));
+            .frame(
+                egui::Frame::new()
+                    .fill(t.surface1)
+                    .inner_margin(Margin::symmetric(S4 as i8, S1 as i8)),
+            );
 
         let mut expansion_change = None;
         let mut open_activity = false;
-        egui::Panel::show_switched(root, &mut self.log_expanded, collapsed, expanded, |ui, is_expanded| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Operation center").font(FontId::new(T_BODY, semibold())).color(t.text));
-                if let Some(job) = &self.busy {
-                    kit::chip(ui, "Running", Tone::Brand);
-                    ui.add(egui::Label::new(RichText::new(job).size(T_CAPTION).color(t.muted)).truncate());
-                }
-                if !self.log.is_empty() {
-                    kit::chip(ui, &format!("{} entries", self.log.len()), Tone::Neutral);
-                }
-                if self.busy.is_some() {
-                    ui.add(egui::Spinner::new().size(12.0).color(t.brand_text));
-                }
-                if is_expanded {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if kit::ghost(ui, "Hide", true).clicked() {
-                            expansion_change = Some(false);
-                        }
-                        if kit::ghost(ui, "View history", true).clicked() {
-                            open_activity = true;
-                        }
-                        let has = !self.log.is_empty();
-                        if kit::ghost(ui, "Copy", has).clicked() {
-                            ui.ctx().copy_text(self.log.join("\n"));
-                        }
-                        if kit::ghost(ui, "Clear", has).clicked() {
-                            self.log.clear();
-                        }
-                    });
-                } else {
-                    let latest = self.log.last().map(String::as_str).unwrap_or("No recent activity");
-                    let summary = self.busy.as_deref().unwrap_or(latest);
-                    let color = if summary.contains("WARN") || summary.contains("failed") { t.warn } else { t.subtle };
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if kit::ghost(ui, "Show", true).clicked() {
-                            expansion_change = Some(true);
-                        }
-                        ui.add(egui::Label::new(RichText::new(summary).size(T_CAPTION).color(color)).truncate());
-                    });
-                }
-            });
-            if is_expanded {
-                if self.log.is_empty() {
-                    ui.label(RichText::new("Output from the actions you run appears here.").size(T_SMALL).color(t.subtle));
-                }
-                egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
-                    for l in &self.log {
-                        let color = if l.contains("WARN") || l.contains("failed") { t.warn } else if l.starts_with("==") { t.brand_text } else { t.muted };
-                        ui.label(RichText::new(l).monospace().size(T_CAPTION).color(color));
+        egui::Panel::show_switched(
+            root,
+            &mut self.log_expanded,
+            collapsed,
+            expanded,
+            |ui, is_expanded| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("Operation center")
+                            .font(FontId::new(T_BODY, semibold()))
+                            .color(t.text),
+                    );
+                    if let Some(job) = &self.busy {
+                        kit::chip(ui, "Running", Tone::Brand);
+                        ui.add(
+                            egui::Label::new(RichText::new(job).size(T_CAPTION).color(t.muted))
+                                .truncate(),
+                        );
+                    }
+                    if !self.log.is_empty() {
+                        kit::chip(ui, &format!("{} entries", self.log.len()), Tone::Neutral);
+                    }
+                    if self.busy.is_some() {
+                        ui.add(egui::Spinner::new().size(12.0).color(t.brand_text));
+                    }
+                    if is_expanded {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if kit::ghost(ui, "Hide", true).clicked() {
+                                expansion_change = Some(false);
+                            }
+                            if kit::ghost(ui, "View history", true).clicked() {
+                                open_activity = true;
+                            }
+                            let has = !self.log.is_empty();
+                            if kit::ghost(ui, "Copy", has).clicked() {
+                                ui.ctx().copy_text(self.log.join("\n"));
+                            }
+                            if kit::ghost(ui, "Clear", has).clicked() {
+                                self.log.clear();
+                            }
+                        });
+                    } else {
+                        let latest = self
+                            .log
+                            .last()
+                            .map(String::as_str)
+                            .unwrap_or("No recent activity");
+                        let summary = self.busy.as_deref().unwrap_or(latest);
+                        let color = if summary.contains("WARN") || summary.contains("failed") {
+                            t.warn
+                        } else {
+                            t.subtle
+                        };
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if kit::ghost(ui, "Show", true).clicked() {
+                                expansion_change = Some(true);
+                            }
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(summary).size(T_CAPTION).color(color),
+                                )
+                                .truncate(),
+                            );
+                        });
                     }
                 });
-            }
-        });
+                if is_expanded {
+                    if self.log.is_empty() {
+                        ui.label(
+                            RichText::new("Output from the actions you run appears here.")
+                                .size(T_SMALL)
+                                .color(t.subtle),
+                        );
+                    }
+                    egui::ScrollArea::vertical()
+                        .stick_to_bottom(true)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            for l in &self.log {
+                                let color = if l.contains("WARN") || l.contains("failed") {
+                                    t.warn
+                                } else if l.starts_with("==") {
+                                    t.brand_text
+                                } else {
+                                    t.muted
+                                };
+                                ui.label(RichText::new(l).monospace().size(T_CAPTION).color(color));
+                            }
+                        });
+                }
+            },
+        );
         if let Some(expanded) = expansion_change {
             self.log_expanded = expanded;
         }
@@ -1838,7 +2315,13 @@ impl OptiUi {
         self.restart_pending = self.restart_pending || settings.opti_restart_required;
     }
 
-    pub fn central(&mut self, ui: &mut Ui, ctx: &egui::Context, suggestions: &[AppItem], settings: &mut Settings) {
+    pub fn central(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        suggestions: &[AppItem],
+        settings: &mut Settings,
+    ) {
         if !self.started {
             self.load_first_time(ctx);
         }
@@ -1874,28 +2357,40 @@ impl OptiUi {
             ui.add_enabled_ui(self.pending.is_none(), |ui| {
                 if self.page == Page::Tweaks {
                     ui.vertical(|ui| {
-                        let action_height = if ui.available_width() < 680.0 { 104.0 } else { 68.0 };
+                        let action_height = if ui.available_width() < 680.0 {
+                            104.0
+                        } else {
+                            68.0
+                        };
                         let scroll_height = (ui.available_height() - action_height).max(120.0);
-                        egui::ScrollArea::vertical().id_salt(("optimaxer-page", self.page.label())).auto_shrink([false, false])
-                            .max_height(scroll_height).show(ui, |ui| self.tweaks_page(ui, ctx, settings));
+                        egui::ScrollArea::vertical()
+                            .id_salt(("optimaxer-page", self.page.label()))
+                            .auto_shrink([false, false])
+                            .max_height(scroll_height)
+                            .show(ui, |ui| self.tweaks_page(ui, ctx, settings));
                         self.tweak_action_bar(ui, ctx);
                     });
                 } else {
-                    egui::ScrollArea::vertical().id_salt(("optimaxer-page", self.page.label())).auto_shrink([false, false]).show(ui, |ui| match self.page {
-                        Page::Overview => self.overview_page(ui, ctx),
-                        Page::Performance => self.performance_page(ui, ctx),
-                        Page::Diagnostics => self.diagnostics_page(ui, ctx),
-                        Page::Snapshots => self.snapshots_page(ui, ctx),
-                        Page::Processes => self.processes_page(ui, ctx),
-                        Page::Gaming => self.gaming_page(ui, ctx),
-                        Page::Activity => self.activity_page(ui, ctx),
-                        Page::Tweaks => unreachable!("Tweaks uses its pinned action bar layout"),
-                        Page::Services => self.services_page(ui, ctx),
-                        Page::Startup => self.startup_page(ui, ctx),
-                        Page::Cleaner => self.cleaner_page(ui, ctx),
-                        Page::Network => self.network_page(ui, ctx),
-                        Page::Tools => self.tools_page(ui, ctx, suggestions),
-                    });
+                    egui::ScrollArea::vertical()
+                        .id_salt(("optimaxer-page", self.page.label()))
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| match self.page {
+                            Page::Overview => self.overview_page(ui, ctx),
+                            Page::Performance => self.performance_page(ui, ctx),
+                            Page::Diagnostics => self.diagnostics_page(ui, ctx),
+                            Page::Snapshots => self.snapshots_page(ui, ctx),
+                            Page::Processes => self.processes_page(ui, ctx),
+                            Page::Gaming => self.gaming_page(ui, ctx),
+                            Page::Activity => self.activity_page(ui, ctx),
+                            Page::Tweaks => {
+                                unreachable!("Tweaks uses its pinned action bar layout")
+                            }
+                            Page::Services => self.services_page(ui, ctx),
+                            Page::Startup => self.startup_page(ui, ctx),
+                            Page::Cleaner => self.cleaner_page(ui, ctx),
+                            Page::Network => self.network_page(ui, ctx),
+                            Page::Tools => self.tools_page(ui, ctx, suggestions),
+                        });
                 }
             });
         });
@@ -1905,10 +2400,17 @@ impl OptiUi {
         let t = tokens(ctx);
         let selected = self.selected.len();
         let recommendation = self.traits.as_ref().map(|traits| {
-            self.selected.iter().filter_map(|id| self.cat.find(id))
-                .filter(|tweak| tweak.auto_pick() && hw::fits(tweak, traits)).count()
+            self.selected
+                .iter()
+                .filter_map(|id| self.cat.find(id))
+                .filter(|tweak| tweak.auto_pick() && hw::fits(tweak, traits))
+                .count()
         });
-        let undoable = self.selected.iter().filter(|id| self.status.get(*id).copied().unwrap_or(false)).count();
+        let undoable = self
+            .selected
+            .iter()
+            .filter(|id| self.status.get(*id).copied().unwrap_or(false))
+            .count();
         ui.add_space(S1);
         kit::card(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -1940,70 +2442,103 @@ impl OptiUi {
     }
 
     fn confirm_window(&mut self, ctx: &egui::Context) {
-        let Some(p) = self.pending.as_ref() else { return };
+        let Some(p) = self.pending.as_ref() else {
+            return;
+        };
         let t = tokens(ctx);
         let mut decision: Option<bool> = None;
         let mut restore = self.restore_first;
-        let resp = egui::Modal::new(egui::Id::unique("opti-confirm")).backdrop_color(Color32::from_black_alpha(if t.dark { 150 } else { 70 })).show(ctx, |ui| {
-            ui.set_width(640.0);
-            ui.label(RichText::new(&p.title).font(FontId::new(theme::T_TITLE, semibold())).color(t.text));
-            ui.add_space(S1);
-            ui.add(egui::Label::new(RichText::new(&p.intro).color(t.muted)).wrap());
-            if !p.lines.is_empty() {
-                ui.add_space(S3);
-                kit::card(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    egui::ScrollArea::vertical().max_height(330.0).auto_shrink([false, true]).show(ui, |ui| {
-                        for l in &p.lines {
-                            if l.head {
-                                ui.add_space(S1);
-                                ui.label(RichText::new(&l.text).font(FontId::new(T_BODY, semibold())).color(if l.warn { t.bad } else { t.text }));
-                            } else {
-                                ui.add(egui::Label::new(RichText::new(&l.text).size(T_SMALL).color(if l.warn { t.warn } else { t.muted })).wrap());
-                            }
+        let resp = egui::Modal::new(egui::Id::unique("opti-confirm"))
+            .backdrop_color(Color32::from_black_alpha(if t.dark { 150 } else { 70 }))
+            .show(ctx, |ui| {
+                ui.set_width(640.0);
+                ui.label(
+                    RichText::new(&p.title)
+                        .font(FontId::new(theme::T_TITLE, semibold()))
+                        .color(t.text),
+                );
+                ui.add_space(S1);
+                ui.add(egui::Label::new(RichText::new(&p.intro).color(t.muted)).wrap());
+                if !p.lines.is_empty() {
+                    ui.add_space(S3);
+                    kit::card(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        egui::ScrollArea::vertical()
+                            .max_height(330.0)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                for l in &p.lines {
+                                    if l.head {
+                                        ui.add_space(S1);
+                                        ui.label(
+                                            RichText::new(&l.text)
+                                                .font(FontId::new(T_BODY, semibold()))
+                                                .color(if l.warn { t.bad } else { t.text }),
+                                        );
+                                    } else {
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(&l.text)
+                                                    .size(T_SMALL)
+                                                    .color(if l.warn { t.warn } else { t.muted }),
+                                            )
+                                            .wrap(),
+                                        );
+                                    }
+                                }
+                            });
+                    });
+                }
+                if p.restore_option {
+                    ui.add_space(S3);
+                    ui.checkbox(&mut restore, "Create a System Restore point first");
+                }
+                ui.add_space(S4);
+                ui.horizontal(|ui| {
+                    if kit::primary(ui, &p.ok_label, true).clicked() {
+                        decision = Some(true);
+                    }
+                    if kit::ghost(ui, "Cancel", true).clicked() {
+                        decision = Some(false);
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let copied_id = egui::Id::NULL.with("opti-confirm-copied");
+                        let now = ui.input(|i| i.time);
+                        let copied = ui
+                            .data(|d| d.get_temp::<f64>(copied_id))
+                            .is_some_and(|at| now - at < 1.6);
+                        if copied {
+                            ui.ctx()
+                                .request_repaint_after(std::time::Duration::from_millis(1700));
+                        }
+                        if kit::ghost(ui, if copied { "Copied" } else { "Copy details" }, true)
+                            .clicked()
+                        {
+                            ui.ctx().copy_text(confirm_text(p));
+                            ui.data_mut(|d| d.insert_temp(copied_id, now));
                         }
                     });
                 });
-            }
-            if p.restore_option {
-                ui.add_space(S3);
-                ui.checkbox(&mut restore, "Create a System Restore point first");
-            }
-            ui.add_space(S4);
-            ui.horizontal(|ui| {
-                if kit::primary(ui, &p.ok_label, true).clicked() {
-                    decision = Some(true);
-                }
-                if kit::ghost(ui, "Cancel", true).clicked() {
-                    decision = Some(false);
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let copied_id = egui::Id::NULL.with("opti-confirm-copied");
-                    let now = ui.input(|i| i.time);
-                    let copied = ui.data(|d| d.get_temp::<f64>(copied_id)).is_some_and(|at| now - at < 1.6);
-                    if copied {
-                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(1700));
-                    }
-                    if kit::ghost(ui, if copied { "Copied" } else { "Copy details" }, true).clicked() {
-                        ui.ctx().copy_text(confirm_text(p));
-                        ui.data_mut(|d| d.insert_temp(copied_id, now));
-                    }
-                });
             });
-        });
         if resp.should_close() && decision.is_none() {
             decision = Some(false);
         }
         self.restore_first = restore;
         if let Some(ok) = decision
             && let Some(p) = self.pending.take()
-            && ok {
+            && ok
+        {
             self.confirm(ctx, p, restore);
         }
     }
 
     fn toolbar_search(&self, ui: &mut Ui, text: &mut String, hint: &str) {
-        ui.add_sized([260.0, 34.0], egui::TextEdit::singleline(text).hint_text(hint).margin(Margin::symmetric(S3 as i8, 8)));
+        ui.add_sized(
+            [260.0, 34.0],
+            egui::TextEdit::singleline(text)
+                .hint_text(hint)
+                .margin(Margin::symmetric(S3 as i8, 8)),
+        );
     }
 
     fn tick_telemetry(&mut self, ctx: &egui::Context) {
@@ -2023,9 +2558,16 @@ impl OptiUi {
         use crate::opti::sysmon::{format_uptime, read_info};
         let t = tokens(ctx);
         self.tick_telemetry(ctx);
-        let info = self.info.get_or_insert_with(|| read_info(&WinSystem)).clone();
+        let info = self
+            .info
+            .get_or_insert_with(|| read_info(&WinSystem))
+            .clone();
         let s = self.sampler.latest;
-        kit::page_header(ui, "Overview", "Live readings from this PC, and the quickest ways to tune it.");
+        kit::page_header(
+            ui,
+            "Overview",
+            "Live readings from this PC, and the quickest ways to tune it.",
+        );
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let gap = S3;
             ui.spacing_mut().item_spacing = vec2(gap, gap);
@@ -2187,7 +2729,11 @@ impl OptiUi {
         kit::card(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(RichText::new(title).size(T_SMALL).color(t.muted));
-            ui.label(RichText::new(value).font(FontId::new(T_TITLE, semibold())).color(t.text));
+            ui.label(
+                RichText::new(value)
+                    .font(FontId::new(T_TITLE, semibold()))
+                    .color(t.text),
+            );
             ui.label(RichText::new(detail).size(T_CAPTION).color(t.subtle));
         });
     }
@@ -2204,9 +2750,14 @@ impl OptiUi {
         kit::card(ui, |ui| {
             ui.set_width(width - 2.0 * S4 - 2.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new(title).font(FontId::new(T_BODY, semibold())).color(t.text));
+                ui.label(
+                    RichText::new(title)
+                        .font(FontId::new(T_BODY, semibold()))
+                        .color(t.text),
+                );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let value = value.map_or_else(|| "Unavailable".into(), |value| format!("{value:.0}%"));
+                    let value =
+                        value.map_or_else(|| "Unavailable".into(), |value| format!("{value:.0}%"));
                     ui.label(RichText::new(value).size(T_SMALL).color(t.muted));
                 });
             });
@@ -2224,34 +2775,64 @@ impl OptiUi {
             "Performance",
             "Live CPU, memory, disk, adapter traffic and Windows GPU engine readings. GPU load is the busiest reported physical engine across adapters.",
         );
-        let processor = if snapshot.cpu_available { format!("{:.0}%", snapshot.cpu) } else { "Unavailable".into() };
-        let processor_detail: String = if snapshot.cpu_available { "total logical CPU capacity".into() } else { "Windows CPU counters unavailable".into() };
-        let memory = if snapshot.ram_available { format!("{:.1}%", snapshot.ram_fraction() * 100.0) } else { "Unavailable".into() };
+        let processor = if snapshot.cpu_available {
+            format!("{:.0}%", snapshot.cpu)
+        } else {
+            "Unavailable".into()
+        };
+        let processor_detail: String = if snapshot.cpu_available {
+            "total logical CPU capacity".into()
+        } else {
+            "Windows CPU counters unavailable".into()
+        };
+        let memory = if snapshot.ram_available {
+            format!("{:.1}%", snapshot.ram_fraction() * 100.0)
+        } else {
+            "Unavailable".into()
+        };
         let memory_detail: String = if snapshot.ram_available {
-            format!("{} of {}", format_size(Some(snapshot.ram_used)), format_size(Some(snapshot.ram_total)))
+            format!(
+                "{} of {}",
+                format_size(Some(snapshot.ram_used)),
+                format_size(Some(snapshot.ram_total))
+            )
         } else {
             "Windows memory counters unavailable".into()
         };
-        let gpu = snapshot.gpu_busiest_engine.map_or_else(|| "Unavailable".into(), |value| format!("{value:.1}%"));
+        let gpu = snapshot
+            .gpu_busiest_engine
+            .map_or_else(|| "Unavailable".into(), |value| format!("{value:.1}%"));
         let gpu_memory = snapshot.gpu_dedicated_memory_bytes.map_or_else(
             || "Dedicated GPU memory unavailable".into(),
             |bytes| format!("Dedicated GPU memory in use: {}", format_size(Some(bytes))),
         );
         let (network, network_detail): (String, String) = if let Some(sample) = snapshot.network {
             (
-                format!("{} / {}", crate::opti::sysmon::format_bytes_per_second(sample.received_bytes_per_sec), crate::opti::sysmon::format_bytes_per_second(sample.sent_bytes_per_sec)),
+                format!(
+                    "{} / {}",
+                    crate::opti::sysmon::format_bytes_per_second(sample.received_bytes_per_sec),
+                    crate::opti::sysmon::format_bytes_per_second(sample.sent_bytes_per_sec)
+                ),
                 "aggregate active adapters".into(),
             )
         } else {
             (
-                if snapshot.network_available { "Collecting first sample".into() } else { "Unavailable".into() },
+                if snapshot.network_available {
+                    "Collecting first sample".into()
+                } else {
+                    "Unavailable".into()
+                },
                 "Windows adapter counters".into(),
             )
         };
         let metrics = [
             ("Processor", processor.as_str(), processor_detail.as_str()),
             ("Memory", memory.as_str(), memory_detail.as_str()),
-            ("Adapter receive / send", network.as_str(), network_detail.as_str()),
+            (
+                "Adapter receive / send",
+                network.as_str(),
+                network_detail.as_str(),
+            ),
             ("Busiest GPU engine", gpu.as_str(), gpu_memory.as_str()),
         ];
         if ui.available_width() < 960.0 {
@@ -2268,9 +2849,28 @@ impl OptiUi {
         }
         ui.add_space(S2);
         let load_charts = [
-            ("Processor, last 60 seconds", &self.sampler.cpu_history, snapshot.cpu_available.then_some(snapshot.cpu), kit::load_color(&t, snapshot.cpu)),
-            ("Memory, last 60 seconds", &self.sampler.ram_history, snapshot.ram_available.then_some(snapshot.ram_fraction() * 100.0), kit::load_color(&t, snapshot.ram_fraction() * 100.0)),
-            ("Busiest GPU engine, last 60 seconds", &self.sampler.gpu_history, snapshot.gpu_busiest_engine, snapshot.gpu_busiest_engine.map_or(t.muted, |value| kit::load_color(&t, value))),
+            (
+                "Processor, last 60 seconds",
+                &self.sampler.cpu_history,
+                snapshot.cpu_available.then_some(snapshot.cpu),
+                kit::load_color(&t, snapshot.cpu),
+            ),
+            (
+                "Memory, last 60 seconds",
+                &self.sampler.ram_history,
+                snapshot
+                    .ram_available
+                    .then_some(snapshot.ram_fraction() * 100.0),
+                kit::load_color(&t, snapshot.ram_fraction() * 100.0),
+            ),
+            (
+                "Busiest GPU engine, last 60 seconds",
+                &self.sampler.gpu_history,
+                snapshot.gpu_busiest_engine,
+                snapshot
+                    .gpu_busiest_engine
+                    .map_or(t.muted, |value| kit::load_color(&t, value)),
+            ),
         ];
         if ui.available_width() < 900.0 {
             for (title, history, value, color) in load_charts {
@@ -2279,7 +2879,8 @@ impl OptiUi {
             }
         } else {
             ui.columns(3, |columns| {
-                for (column, (title, history, value, color)) in columns.iter_mut().zip(load_charts) {
+                for (column, (title, history, value, color)) in columns.iter_mut().zip(load_charts)
+                {
                     Self::performance_load_chart(column, title, value, history, color);
                 }
             });
@@ -2292,18 +2893,50 @@ impl OptiUi {
             kit::card(ui, |ui| {
                 ui.set_width(width - 2.0 * S4 - 2.0);
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new("Adapter traffic, last 60 seconds").font(FontId::new(T_BODY, semibold())).color(t.text));
+                    ui.label(
+                        RichText::new("Adapter traffic, last 60 seconds")
+                            .font(FontId::new(T_BODY, semibold()))
+                            .color(t.text),
+                    );
                     if let Some(sample) = snapshot.network {
-                        ui.label(RichText::new(format!("↓ {}", crate::opti::sysmon::format_bytes_per_second(sample.received_bytes_per_sec))).size(T_SMALL).color(t.brand_text));
-                        ui.label(RichText::new(format!("↑ {}", crate::opti::sysmon::format_bytes_per_second(sample.sent_bytes_per_sec))).size(T_SMALL).color(t.good));
+                        ui.label(
+                            RichText::new(format!(
+                                "↓ {}",
+                                crate::opti::sysmon::format_bytes_per_second(
+                                    sample.received_bytes_per_sec
+                                )
+                            ))
+                            .size(T_SMALL)
+                            .color(t.brand_text),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "↑ {}",
+                                crate::opti::sysmon::format_bytes_per_second(
+                                    sample.sent_bytes_per_sec
+                                )
+                            ))
+                            .size(T_SMALL)
+                            .color(t.good),
+                        );
                     } else {
-                        let status = if snapshot.network_available { "Sampling adapter counters…" } else { "Adapter counters unavailable" };
+                        let status = if snapshot.network_available {
+                            "Sampling adapter counters…"
+                        } else {
+                            "Adapter counters unavailable"
+                        };
                         ui.label(RichText::new(status).size(T_SMALL).color(t.muted));
                     }
                 });
                 ui.label(RichText::new("Aggregate active adapter counters. Virtual adapters may be included; this is not internet throughput.").size(T_CAPTION).color(t.subtle));
                 ui.add_space(S1);
-                kit::network_chart(ui, vec2(ui.available_width(), 100.0), network_history, t.brand_text, t.good);
+                kit::network_chart(
+                    ui,
+                    vec2(ui.available_width(), 100.0),
+                    network_history,
+                    t.brand_text,
+                    t.good,
+                );
             });
         };
         let draw_disk = |ui: &mut Ui| {
@@ -2311,15 +2944,31 @@ impl OptiUi {
             kit::card(ui, |ui| {
                 ui.set_width(width - 2.0 * S4 - 2.0);
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new("Disk activity, last 60 seconds").font(FontId::new(T_BODY, semibold())).color(t.text));
-                    let status = snapshot.disk_activity
+                    ui.label(
+                        RichText::new("Disk activity, last 60 seconds")
+                            .font(FontId::new(T_BODY, semibold()))
+                            .color(t.text),
+                    );
+                    let status = snapshot
+                        .disk_activity
                         .map(crate::opti::sysmon::format_bytes_per_second)
-                        .unwrap_or_else(|| if snapshot.disk_counter_available { "Collecting first sample".into() } else { "Unavailable".into() });
+                        .unwrap_or_else(|| {
+                            if snapshot.disk_counter_available {
+                                "Collecting first sample".into()
+                            } else {
+                                "Unavailable".into()
+                            }
+                        });
                     ui.label(RichText::new(status).size(T_SMALL).color(t.brand_text));
                 });
                 ui.label(RichText::new("Aggregate physical-disk read and write throughput from Windows performance counters.").size(T_CAPTION).color(t.subtle));
                 ui.add_space(S1);
-                kit::rate_chart(ui, vec2(ui.available_width(), 100.0), disk_history, t.brand_text);
+                kit::rate_chart(
+                    ui,
+                    vec2(ui.available_width(), 100.0),
+                    disk_history,
+                    t.brand_text,
+                );
             });
         };
         if ui.available_width() < 680.0 {
@@ -2334,7 +2983,13 @@ impl OptiUi {
         }
         ui.add_space(S2);
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Process-level CPU and working-set readings are available in Processes.").size(T_SMALL).color(t.muted));
+            ui.label(
+                RichText::new(
+                    "Process-level CPU and working-set readings are available in Processes.",
+                )
+                .size(T_SMALL)
+                .color(t.muted),
+            );
             if kit::secondary(ui, "Open Processes", true).clicked() {
                 self.set_page(ctx, Page::Processes);
             }
@@ -2342,13 +2997,24 @@ impl OptiUi {
         ui.add_space(S2);
         kit::card(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new("Game frame-time comparison").font(FontId::new(T_HEADING, semibold())).color(t.text));
+            ui.label(
+                RichText::new("Game frame-time comparison")
+                    .font(FontId::new(T_HEADING, semibold()))
+                    .color(t.text),
+            );
             ui.label(RichText::new("PresentMon records 30 seconds, then samples system counters and up to 10 TCP connections to 1.1.1.1:53. Keep the same game and scene running for both captures. First use downloads a SHA-256 verified tool.").size(T_SMALL).color(t.muted));
             ui.label(RichText::new("Results are observations, not proof a tweak caused a change. DNS endpoint TCP timings are not ICMP ping or game-server latency. Boot time comes from the latest Windows startup event; compare it only across different boot timestamps. Unsupported counters show Unavailable.").size(T_CAPTION).color(t.subtle));
             ui.add_space(S1);
             ui.horizontal_wrapped(|ui| {
-                ui.add_sized([240.0, 32.0], egui::TextEdit::singleline(&mut self.measurement_process).hint_text("Game process, for example game.exe").interactive(self.busy.is_none()));
-                let valid = crate::opti::measurements::validate_process_name(&self.measurement_process).is_ok();
+                ui.add_sized(
+                    [240.0, 32.0],
+                    egui::TextEdit::singleline(&mut self.measurement_process)
+                        .hint_text("Game process, for example game.exe")
+                        .interactive(self.busy.is_none()),
+                );
+                let valid =
+                    crate::opti::measurements::validate_process_name(&self.measurement_process)
+                        .is_ok();
                 if kit::secondary(ui, "Record before", valid && self.busy.is_none()).clicked() {
                     let process = self.measurement_process.trim().to_string();
                     self.start_measurement(ctx, process, "before");
@@ -2359,59 +3025,189 @@ impl OptiUi {
                 }
             });
             if let Some(error) = &self.measurements_error {
-                ui.label(RichText::new(format!("Measurement history unavailable: {error}")).size(T_SMALL).color(t.warn));
+                ui.label(
+                    RichText::new(format!("Measurement history unavailable: {error}"))
+                        .size(T_SMALL)
+                        .color(t.warn),
+                );
             }
             let process = self.measurement_process.trim();
-            let (before, after) = crate::opti::measurements::latest_pair(&self.measurements, process);
+            let (before, after) =
+                crate::opti::measurements::latest_pair(&self.measurements, process);
             if process.is_empty() || (before.is_none() && after.is_none()) {
-                kit::empty_state(ui, "No matching captures", "Record a before capture, change settings and restart if needed, then record after using the same process name.");
-            } else if let (Some(before), Some(after)) = (before, after) && after.time >= before.time {
-                egui::Grid::new("frame-measurement-comparison").num_columns(3).spacing(vec2(S4, S1)).show(ui, |ui| {
-                    ui.label(RichText::new("Metric").size(T_SMALL).color(t.muted));
-                    ui.label(RichText::new("Before").size(T_SMALL).color(t.muted));
-                    ui.label(RichText::new("After · observed").size(T_SMALL).color(t.muted));
-                    ui.end_row();
-                    for (name, first, second, unit) in [
-                        ("Average", before.average_fps, after.average_fps, "FPS"),
-                        ("1% low", before.low_1_fps, after.low_1_fps, "FPS"),
-                        ("0.1% low", before.low_01_fps, after.low_01_fps, "FPS"),
-                        ("99th percentile frame time", before.p99_frame_ms, after.p99_frame_ms, "ms"),
-                    ] {
-                        ui.label(RichText::new(name).size(T_SMALL).color(t.text));
-                        ui.label(RichText::new(format!("{first:.1} {unit}")).size(T_SMALL).color(t.text));
-                        ui.label(RichText::new(format!("{second:.1} {unit} ({:+.1})", second - first)).size(T_SMALL).color(t.text));
+                kit::empty_state(
+                    ui,
+                    "No matching captures",
+                    "Record a before capture, change settings and restart if needed, then record after using the same process name.",
+                );
+            } else if let (Some(before), Some(after)) = (before, after)
+                && after.time >= before.time
+            {
+                egui::Grid::new("frame-measurement-comparison")
+                    .num_columns(3)
+                    .spacing(vec2(S4, S1))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new("Metric").size(T_SMALL).color(t.muted));
+                        ui.label(RichText::new("Before").size(T_SMALL).color(t.muted));
+                        ui.label(
+                            RichText::new("After · observed")
+                                .size(T_SMALL)
+                                .color(t.muted),
+                        );
                         ui.end_row();
-                    }
-                    let metric = |value: Option<f64>, unit: &str| value.map_or_else(|| "Unavailable".into(), |value| format!("{value:.2} {unit}"));
-                    for (name, first, second, unit) in [
-                        ("DPC average", before.dpc_average_percent, after.dpc_average_percent, "%"),
-                        ("DPC maximum", before.dpc_max_percent, after.dpc_max_percent, "%"),
-                        ("Interrupt average", before.interrupt_average_percent, after.interrupt_average_percent, "%"),
-                        ("DNS endpoint TCP average", before.dns_tcp_average_ms, after.dns_tcp_average_ms, "ms"),
-                        ("DNS endpoint TCP jitter", before.dns_tcp_jitter_ms, after.dns_tcp_jitter_ms, "ms"),
-                        ("Timer resolution", before.timer_resolution_ms, after.timer_resolution_ms, "ms"),
-                        ("Last boot duration", before.boot_duration_ms.map(|ms| ms as f64), after.boot_duration_ms.map(|ms| ms as f64), "ms"),
-                    ] {
-                        ui.label(RichText::new(name).size(T_SMALL).color(t.text));
-                        ui.label(RichText::new(metric(first, unit)).size(T_SMALL).color(t.text));
-                        ui.label(RichText::new(metric(second, unit)).size(T_SMALL).color(t.text));
+                        for (name, first, second, unit) in [
+                            ("Average", before.average_fps, after.average_fps, "FPS"),
+                            ("1% low", before.low_1_fps, after.low_1_fps, "FPS"),
+                            ("0.1% low", before.low_01_fps, after.low_01_fps, "FPS"),
+                            (
+                                "99th percentile frame time",
+                                before.p99_frame_ms,
+                                after.p99_frame_ms,
+                                "ms",
+                            ),
+                        ] {
+                            ui.label(RichText::new(name).size(T_SMALL).color(t.text));
+                            ui.label(
+                                RichText::new(format!("{first:.1} {unit}"))
+                                    .size(T_SMALL)
+                                    .color(t.text),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "{second:.1} {unit} ({:+.1})",
+                                    second - first
+                                ))
+                                .size(T_SMALL)
+                                .color(t.text),
+                            );
+                            ui.end_row();
+                        }
+                        let metric = |value: Option<f64>, unit: &str| {
+                            value.map_or_else(
+                                || "Unavailable".into(),
+                                |value| format!("{value:.2} {unit}"),
+                            )
+                        };
+                        for (name, first, second, unit) in [
+                            (
+                                "DPC average",
+                                before.dpc_average_percent,
+                                after.dpc_average_percent,
+                                "%",
+                            ),
+                            (
+                                "DPC maximum",
+                                before.dpc_max_percent,
+                                after.dpc_max_percent,
+                                "%",
+                            ),
+                            (
+                                "Interrupt average",
+                                before.interrupt_average_percent,
+                                after.interrupt_average_percent,
+                                "%",
+                            ),
+                            (
+                                "DNS endpoint TCP average",
+                                before.dns_tcp_average_ms,
+                                after.dns_tcp_average_ms,
+                                "ms",
+                            ),
+                            (
+                                "DNS endpoint TCP jitter",
+                                before.dns_tcp_jitter_ms,
+                                after.dns_tcp_jitter_ms,
+                                "ms",
+                            ),
+                            (
+                                "Timer resolution",
+                                before.timer_resolution_ms,
+                                after.timer_resolution_ms,
+                                "ms",
+                            ),
+                            (
+                                "Last boot duration",
+                                before.boot_duration_ms.map(|ms| ms as f64),
+                                after.boot_duration_ms.map(|ms| ms as f64),
+                                "ms",
+                            ),
+                        ] {
+                            ui.label(RichText::new(name).size(T_SMALL).color(t.text));
+                            ui.label(
+                                RichText::new(metric(first, unit))
+                                    .size(T_SMALL)
+                                    .color(t.text),
+                            );
+                            ui.label(
+                                RichText::new(metric(second, unit))
+                                    .size(T_SMALL)
+                                    .color(t.text),
+                            );
+                            ui.end_row();
+                        }
+                        ui.label(
+                            RichText::new("Frames / stutters")
+                                .size(T_SMALL)
+                                .color(t.text),
+                        );
+                        ui.label(
+                            RichText::new(format!("{} / {}", before.frames, before.stutters))
+                                .size(T_SMALL)
+                                .color(t.text),
+                        );
+                        ui.label(
+                            RichText::new(format!("{} / {}", after.frames, after.stutters))
+                                .size(T_SMALL)
+                                .color(t.text),
+                        );
                         ui.end_row();
-                    }
-                    ui.label(RichText::new("Frames / stutters").size(T_SMALL).color(t.text));
-                    ui.label(RichText::new(format!("{} / {}", before.frames, before.stutters)).size(T_SMALL).color(t.text));
-                    ui.label(RichText::new(format!("{} / {}", after.frames, after.stutters)).size(T_SMALL).color(t.text));
-                    ui.end_row();
-                    ui.label(RichText::new("DNS TCP successes / failures").size(T_SMALL).color(t.text));
-                    ui.label(RichText::new(format!("{} / {}", before.dns_tcp_samples, before.dns_tcp_failures)).size(T_SMALL).color(t.text));
-                    ui.label(RichText::new(format!("{} / {}", after.dns_tcp_samples, after.dns_tcp_failures)).size(T_SMALL).color(t.text));
-                    ui.end_row();
-                });
+                        ui.label(
+                            RichText::new("DNS TCP successes / failures")
+                                .size(T_SMALL)
+                                .color(t.text),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "{} / {}",
+                                before.dns_tcp_samples, before.dns_tcp_failures
+                            ))
+                            .size(T_SMALL)
+                            .color(t.text),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "{} / {}",
+                                after.dns_tcp_samples, after.dns_tcp_failures
+                            ))
+                            .size(T_SMALL)
+                            .color(t.text),
+                        );
+                        ui.end_row();
+                    });
                 ui.label(RichText::new(format!("Before {} · After {} · {}-second frame captures; DPC/interrupt counters sample for 5 seconds when available", before.time, after.time, before.seconds)).size(T_CAPTION).color(t.subtle));
-                ui.label(RichText::new(format!("Boot events · {} · {}", before.boot_event_time.as_deref().unwrap_or("Unavailable"), after.boot_event_time.as_deref().unwrap_or("Unavailable"))).size(T_CAPTION).color(t.subtle));
+                ui.label(
+                    RichText::new(format!(
+                        "Boot events · {} · {}",
+                        before.boot_event_time.as_deref().unwrap_or("Unavailable"),
+                        after.boot_event_time.as_deref().unwrap_or("Unavailable")
+                    ))
+                    .size(T_CAPTION)
+                    .color(t.subtle),
+                );
             } else if before.is_some() && after.is_some() {
-                kit::empty_state(ui, "Capture order is reversed", "The latest after capture predates the before capture. Record after again to compare in order.");
+                kit::empty_state(
+                    ui,
+                    "Capture order is reversed",
+                    "The latest after capture predates the before capture. Record after again to compare in order.",
+                );
             } else {
-                ui.label(RichText::new("One capture saved. Record the other using the same process name.").size(T_SMALL).color(t.muted));
+                ui.label(
+                    RichText::new(
+                        "One capture saved. Record the other using the same process name.",
+                    )
+                    .size(T_SMALL)
+                    .color(t.muted),
+                );
             }
         });
     }
@@ -2427,26 +3223,38 @@ impl OptiUi {
 
     fn activity_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let t = tokens(ctx);
-        kit::page_header(ui, "Activity", "Search confirmed tweak changes and system-action results. Recorded warnings and errors describe operation output, not final Windows state.");
+        kit::page_header(
+            ui,
+            "Activity",
+            "Search confirmed tweak changes and system-action results. Recorded warnings and errors describe operation output, not final Windows state.",
+        );
         if let Some(job) = self.busy.clone() {
             kit::card(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal_wrapped(|ui| {
                     ui.add(egui::Spinner::new().size(14.0).color(t.brand_text));
                     kit::chip(ui, "Running", Tone::Brand);
-                    ui.label(RichText::new(job).font(FontId::new(T_BODY, semibold())).color(t.text));
+                    ui.label(
+                        RichText::new(job)
+                            .font(FontId::new(T_BODY, semibold()))
+                            .color(t.text),
+                    );
                     if kit::secondary(ui, "Show live output", true).clicked() {
                         self.log_expanded = true;
                     }
                 });
-                ui.label(RichText::new("Live output is available in the Operation center.").size(T_CAPTION).color(t.subtle));
+                ui.label(
+                    RichText::new("Live output is available in the Operation center.")
+                        .size(T_CAPTION)
+                        .color(t.subtle),
+                );
             });
             ui.add_space(S2);
         }
         ui.horizontal_wrapped(|ui| {
             ui.add_sized(
                 [280.0, 34.0],
-                    egui::TextEdit::singleline(&mut self.history_search)
+                egui::TextEdit::singleline(&mut self.history_search)
                     .hint_text("Search action, tweak, output or date"),
             );
             let visible = self
@@ -2467,29 +3275,51 @@ impl OptiUi {
         });
         ui.add_space(S2);
         if let Some(error) = &self.history_error {
-            ui.label(RichText::new(format!("Tweak history unavailable: {error}"))
-                .size(T_SMALL).color(t.warn));
+            ui.label(
+                RichText::new(format!("Tweak history unavailable: {error}"))
+                    .size(T_SMALL)
+                    .color(t.warn),
+            );
         }
         if let Some(error) = &self.operations_error {
-            ui.label(RichText::new(format!("System action history unavailable: {error}"))
-                .size(T_SMALL).color(t.warn));
+            ui.label(
+                RichText::new(format!("System action history unavailable: {error}"))
+                    .size(T_SMALL)
+                    .color(t.warn),
+            );
         }
         if self.history.is_empty() && self.operations.is_empty() {
             if self.history_error.is_none() && self.operations_error.is_none() {
-                kit::empty_state(ui, "No recorded activity", "Confirmed tweak changes and system-action output will appear here.");
+                kit::empty_state(
+                    ui,
+                    "No recorded activity",
+                    "Confirmed tweak changes and system-action output will appear here.",
+                );
             }
             return;
         }
         let entries = activity_entries(&self.history, &self.operations, &self.history_search);
         if entries.is_empty() {
-            kit::empty_state(ui, "No matching activity", "Try another search or clear the filter.");
+            kit::empty_state(
+                ui,
+                "No matching activity",
+                "Try another search or clear the filter.",
+            );
             return;
         }
         for (index, item) in entries.iter().enumerate() {
             match item {
                 ActivityEntry::Tweak(entry) => {
-                    let verified = entry.changes.iter().filter(|change| change.verified).count();
-                    let undoable = entry.changes.iter().filter(|change| change.undo_available).count();
+                    let verified = entry
+                        .changes
+                        .iter()
+                        .filter(|change| change.verified)
+                        .count();
+                    let undoable = entry
+                        .changes
+                        .iter()
+                        .filter(|change| change.undo_available)
+                        .count();
                     let action = match entry.action {
                         HistoryAction::Apply => "Applied",
                         HistoryAction::Undo => "Undid",
@@ -2505,13 +3335,30 @@ impl OptiUi {
                         for change in &entry.changes {
                             ui.horizontal_wrapped(|ui| {
                                 ui.label(RichText::new(&change.name).size(T_SMALL).color(t.text));
-                                kit::chip(ui, if change.verified { "Verified" } else { "Incomplete" }, if change.verified { Tone::Good } else { Tone::Warn });
+                                kit::chip(
+                                    ui,
+                                    if change.verified {
+                                        "Verified"
+                                    } else {
+                                        "Incomplete"
+                                    },
+                                    if change.verified {
+                                        Tone::Good
+                                    } else {
+                                        Tone::Warn
+                                    },
+                                );
                                 if change.undo_available {
                                     kit::chip(ui, "Undo available", Tone::Neutral);
                                 }
                             });
                             for detail in &change.details {
-                                ui.add(egui::Label::new(RichText::new(detail).size(T_CAPTION).color(t.muted)).wrap());
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(detail).size(T_CAPTION).color(t.muted),
+                                    )
+                                    .wrap(),
+                                );
                             }
                         }
                     });
@@ -2554,12 +3401,38 @@ impl OptiUi {
     fn processes_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         self.refresh_processes(ctx);
         let t = tokens(ctx);
-        kit::page_header(ui, "Processes", "Read-only process list. CPU is sampled over time; Windows may restrict paths and memory details for protected processes.");
+        kit::page_header(
+            ui,
+            "Processes",
+            "Read-only process list. CPU is sampled over time; Windows may restrict paths and memory details for protected processes.",
+        );
         ui.horizontal_wrapped(|ui| {
-            ui.add_sized([260.0, 32.0], egui::TextEdit::singleline(&mut self.process_search).hint_text("Search process, PID or path"));
-            ui.label(RichText::new(format!("{} processes", self.processes.len())).size(T_SMALL).color(t.muted));
-            ui.label(RichText::new("Refreshes every 3 seconds while open").size(T_CAPTION).color(t.subtle));
-            if kit::ghost(ui, if self.process_loading { "Refreshing" } else { "Refresh" }, !self.process_loading).clicked() {
+            ui.add_sized(
+                [260.0, 32.0],
+                egui::TextEdit::singleline(&mut self.process_search)
+                    .hint_text("Search process, PID or path"),
+            );
+            ui.label(
+                RichText::new(format!("{} processes", self.processes.len()))
+                    .size(T_SMALL)
+                    .color(t.muted),
+            );
+            ui.label(
+                RichText::new("Refreshes every 3 seconds while open")
+                    .size(T_CAPTION)
+                    .color(t.subtle),
+            );
+            if kit::ghost(
+                ui,
+                if self.process_loading {
+                    "Refreshing"
+                } else {
+                    "Refresh"
+                },
+                !self.process_loading,
+            )
+            .clicked()
+            {
                 self.process_last_scan = None;
             }
             ui.label(RichText::new("Sort").size(T_SMALL).color(t.muted));
@@ -2572,40 +3445,78 @@ impl OptiUi {
                 });
         });
         if let Some(error) = &self.process_error {
-            ui.label(RichText::new(format!("Process scan failed: {error}")).size(T_SMALL).color(t.warn));
+            ui.label(
+                RichText::new(format!("Process scan failed: {error}"))
+                    .size(T_SMALL)
+                    .color(t.warn),
+            );
         }
         if self.processes.is_empty() {
             if self.process_loading {
                 kit::skeleton(ui, 6);
             } else if self.process_error.is_some() {
-                kit::empty_state(ui, "Could not read processes", "Try Refresh after checking whether security software is blocking process queries.");
+                kit::empty_state(
+                    ui,
+                    "Could not read processes",
+                    "Try Refresh after checking whether security software is blocking process queries.",
+                );
             } else {
-                kit::empty_state(ui, "No processes returned", "Refresh to query the Windows process list.");
+                kit::empty_state(
+                    ui,
+                    "No processes returned",
+                    "Refresh to query the Windows process list.",
+                );
             }
             return;
         }
 
         let query = self.process_search.trim().to_lowercase();
-        let mut rows: Vec<&ProcessInfo> = self.processes.iter().filter(|process| {
-            query.is_empty()
-                || process.name.to_lowercase().contains(&query)
-                || process.pid.to_string().contains(&query)
-                || process.image_path.as_ref().is_some_and(|path| path.to_string_lossy().to_lowercase().contains(&query))
-        }).collect();
+        let mut rows: Vec<&ProcessInfo> =
+            self.processes
+                .iter()
+                .filter(|process| {
+                    query.is_empty()
+                        || process.name.to_lowercase().contains(&query)
+                        || process.pid.to_string().contains(&query)
+                        || process.image_path.as_ref().is_some_and(|path| {
+                            path.to_string_lossy().to_lowercase().contains(&query)
+                        })
+                })
+                .collect();
         match self.process_sort.min(2) {
             0 => rows.sort_by(|left, right| {
-                right.cpu_percent.unwrap_or(-1.0).total_cmp(&left.cpu_percent.unwrap_or(-1.0))
+                right
+                    .cpu_percent
+                    .unwrap_or(-1.0)
+                    .total_cmp(&left.cpu_percent.unwrap_or(-1.0))
                     .then(left.name.to_lowercase().cmp(&right.name.to_lowercase()))
             }),
             1 => rows.sort_by(|left, right| {
-                right.working_set.is_some().cmp(&left.working_set.is_some())
-                    .then(right.working_set.unwrap_or(0).cmp(&left.working_set.unwrap_or(0)))
+                right
+                    .working_set
+                    .is_some()
+                    .cmp(&left.working_set.is_some())
+                    .then(
+                        right
+                            .working_set
+                            .unwrap_or(0)
+                            .cmp(&left.working_set.unwrap_or(0)),
+                    )
                     .then(left.name.to_lowercase().cmp(&right.name.to_lowercase()))
             }),
-            _ => rows.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()).then(left.pid.cmp(&right.pid))),
+            _ => rows.sort_by(|left, right| {
+                left.name
+                    .to_lowercase()
+                    .cmp(&right.name.to_lowercase())
+                    .then(left.pid.cmp(&right.pid))
+            }),
         }
         if rows.is_empty() {
-            kit::empty_state(ui, "No matching processes", "Try a shorter search or clear the filter.");
+            kit::empty_state(
+                ui,
+                "No matching processes",
+                "Try a shorter search or clear the filter.",
+            );
             return;
         }
 
@@ -2613,15 +3524,39 @@ impl OptiUi {
             .striped(true)
             .resizable(true)
             .cell_layout(Layout::left_to_right(Align::Center))
-            .column(egui_extras::Column::initial(210.0).at_least(150.0).resizable(true))
-            .column(egui_extras::Column::initial(70.0).at_least(54.0).resizable(true))
-            .column(egui_extras::Column::initial(78.0).at_least(65.0).resizable(true))
-            .column(egui_extras::Column::initial(112.0).at_least(92.0).resizable(true))
-            .column(egui_extras::Column::remainder().at_least(200.0).resizable(true))
+            .column(
+                egui_extras::Column::initial(210.0)
+                    .at_least(150.0)
+                    .resizable(true),
+            )
+            .column(
+                egui_extras::Column::initial(70.0)
+                    .at_least(54.0)
+                    .resizable(true),
+            )
+            .column(
+                egui_extras::Column::initial(78.0)
+                    .at_least(65.0)
+                    .resizable(true),
+            )
+            .column(
+                egui_extras::Column::initial(112.0)
+                    .at_least(92.0)
+                    .resizable(true),
+            )
+            .column(
+                egui_extras::Column::remainder()
+                    .at_least(200.0)
+                    .resizable(true),
+            )
             .header(30.0, |mut header| {
                 for label in ["Process", "PID", "CPU", "Working set", "Image path"] {
                     header.col(|ui| {
-                        ui.label(RichText::new(label).font(FontId::new(T_SMALL, semibold())).color(t.muted));
+                        ui.label(
+                            RichText::new(label)
+                                .font(FontId::new(T_SMALL, semibold()))
+                                .color(t.muted),
+                        );
                     });
                 }
             })
@@ -2629,22 +3564,56 @@ impl OptiUi {
                 body.rows(29.0, rows.len(), |mut row| {
                     let process = rows[row.index()];
                     row.col(|ui| {
-                        ui.add(egui::Label::new(RichText::new(&process.name).size(T_SMALL).color(t.text)).truncate())
-                            .on_hover_text(&process.name);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&process.name).size(T_SMALL).color(t.text),
+                            )
+                            .truncate(),
+                        )
+                        .on_hover_text(&process.name);
                     });
-                    row.col(|ui| { ui.label(RichText::new(process.pid.to_string()).size(T_CAPTION).monospace().color(t.muted)); });
                     row.col(|ui| {
-                        let value = process.cpu_percent.map(|value| format!("{value:.1}%")).unwrap_or_else(|| "—".into());
+                        ui.label(
+                            RichText::new(process.pid.to_string())
+                                .size(T_CAPTION)
+                                .monospace()
+                                .color(t.muted),
+                        );
+                    });
+                    row.col(|ui| {
+                        let value = process
+                            .cpu_percent
+                            .map(|value| format!("{value:.1}%"))
+                            .unwrap_or_else(|| "—".into());
                         ui.label(RichText::new(value).size(T_SMALL).color(t.text));
                     });
                     row.col(|ui| {
-                        let value = process.working_set.map(|bytes| format_size(Some(bytes))).unwrap_or_else(|| "Unavailable".into());
-                        ui.label(RichText::new(value).size(T_SMALL).color(if process.working_set.is_some() { t.text } else { t.subtle }));
+                        let value = process
+                            .working_set
+                            .map(|bytes| format_size(Some(bytes)))
+                            .unwrap_or_else(|| "Unavailable".into());
+                        ui.label(RichText::new(value).size(T_SMALL).color(
+                            if process.working_set.is_some() {
+                                t.text
+                            } else {
+                                t.subtle
+                            },
+                        ));
                     });
                     row.col(|ui| {
-                        let value = process.image_path.as_ref().map(|path| path.display().to_string()).unwrap_or_else(|| "Unavailable".into());
-                        ui.add(egui::Label::new(RichText::new(value).size(T_CAPTION).color(t.muted)).truncate())
-                            .on_hover_text(process.image_path.as_ref().map_or("Windows denied access to this image path.".to_owned(), |path| path.display().to_string()));
+                        let value = process
+                            .image_path
+                            .as_ref()
+                            .map(|path| path.display().to_string())
+                            .unwrap_or_else(|| "Unavailable".into());
+                        ui.add(
+                            egui::Label::new(RichText::new(value).size(T_CAPTION).color(t.muted))
+                                .truncate(),
+                        )
+                        .on_hover_text(process.image_path.as_ref().map_or(
+                            "Windows denied access to this image path.".to_owned(),
+                            |path| path.display().to_string(),
+                        ));
                     });
                 });
             });
@@ -2653,7 +3622,10 @@ impl OptiUi {
     fn run_diagnostic(&mut self, ctx: &egui::Context, check: DiagnosticCheck) {
         let title = format!("Scan: {}", check.title());
         self.spawn_recorded(ctx, &title, move |worker| {
-            worker.log(&format!("Running {} with read-only options.", check.executable()));
+            worker.log(&format!(
+                "Running {} with read-only options.",
+                check.executable()
+            ));
             let result = diagnostics::run(&WinSystem, check);
             for line in result.output.lines() {
                 worker.log(line);
@@ -2669,7 +3641,10 @@ impl OptiUi {
         let backup_dir = optimaxer_dir.join("backups");
         self.backup_integrity = None;
         self.spawn(ctx, "Checking saved backups", move |worker| {
-            worker.send(Msg::BackupIntegrity(backup_integrity::inspect(&state_file, &backup_dir)));
+            worker.send(Msg::BackupIntegrity(backup_integrity::inspect(
+                &state_file,
+                &backup_dir,
+            )));
         });
     }
 
@@ -2678,7 +3653,10 @@ impl OptiUi {
             let snapshot = snapshots::capture(&WinSystem);
             let result = snapshots::append(snapshot);
             match &result {
-                Ok(entries) => worker.log(&format!("Saved local inventory snapshot. {} snapshots retained.", entries.len())),
+                Ok(entries) => worker.log(&format!(
+                    "Saved local inventory snapshot. {} snapshots retained.",
+                    entries.len()
+                )),
                 Err(error) => worker.log(&format!("ERROR Could not save system snapshot: {error}")),
             }
             worker.send(Msg::Snapshots(result));
@@ -2687,7 +3665,11 @@ impl OptiUi {
 
     fn snapshots_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let t = tokens(ctx);
-        kit::page_header(ui, "System Snapshot", "Capture and browse a local inventory of this PC. Snapshots are not backups and cannot restore Windows.");
+        kit::page_header(
+            ui,
+            "System Snapshot",
+            "Capture and browse a local inventory of this PC. Snapshots are not backups and cannot restore Windows.",
+        );
         ui.horizontal_wrapped(|ui| {
             if kit::primary(ui, if self.busy.as_deref() == Some("Capture system snapshot") { "Capturing…" } else { "Capture snapshot" }, self.busy.is_none()).clicked() {
                 self.capture_system_snapshot(ctx);
@@ -2704,7 +3686,11 @@ impl OptiUi {
             if self.snapshots_error.is_none() {
                 kit::card(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.label(RichText::new("No snapshots yet").font(FontId::new(T_BODY, semibold())).color(t.text));
+                    ui.label(
+                        RichText::new("No snapshots yet")
+                            .font(FontId::new(T_BODY, semibold()))
+                            .color(t.text),
+                    );
                     ui.label(RichText::new("Capture an inventory to record the current Windows build and detected hardware. No system settings are changed.").size(T_SMALL).color(t.muted));
                 });
             }
@@ -2713,19 +3699,39 @@ impl OptiUi {
 
         if self.snapshots.len() >= 2 {
             let changes = snapshots::compare_latest(&self.snapshots);
-            ui.label(RichText::new("Changes since previous capture").font(FontId::new(T_BODY, semibold())).color(t.text));
+            ui.label(
+                RichText::new("Changes since previous capture")
+                    .font(FontId::new(T_BODY, semibold()))
+                    .color(t.text),
+            );
             ui.add_space(S1);
             kit::card(ui, |ui| {
                 ui.set_width(ui.available_width());
                 if changes.is_empty() {
-                    ui.label(RichText::new("No inventory changes detected between the two newest captures.").size(T_SMALL).color(t.muted));
+                    ui.label(
+                        RichText::new(
+                            "No inventory changes detected between the two newest captures.",
+                        )
+                        .size(T_SMALL)
+                        .color(t.muted),
+                    );
                 } else {
                     for change in changes {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(RichText::new(change.label).size(T_SMALL).color(t.muted));
-                            ui.add(egui::Label::new(RichText::new(change.earlier).size(T_SMALL).color(t.text)).wrap());
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(change.earlier).size(T_SMALL).color(t.text),
+                                )
+                                .wrap(),
+                            );
                             ui.label(RichText::new("→").size(T_SMALL).color(t.subtle));
-                            ui.add(egui::Label::new(RichText::new(change.latest).size(T_SMALL).color(t.text)).wrap());
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(change.latest).size(T_SMALL).color(t.text),
+                                )
+                                .wrap(),
+                            );
                         });
                     }
                 }
@@ -2734,19 +3740,39 @@ impl OptiUi {
         }
 
         for (index, snapshot) in self.snapshots.iter().enumerate() {
-            let os = if snapshot.operating_system.is_empty() { "Operating system unavailable" } else { &snapshot.operating_system };
+            let os = if snapshot.operating_system.is_empty() {
+                "Operating system unavailable"
+            } else {
+                &snapshot.operating_system
+            };
             egui::CollapsingHeader::new(format!("{} · {os}", snapshot.captured_at))
                 .id_salt(("system-snapshot", index))
                 .default_open(index == 0)
                 .show(ui, |ui| {
-                    let processor = if snapshot.processor.is_empty() { "Unavailable" } else { &snapshot.processor };
-                    let graphics = if snapshot.graphics.is_empty() { "Unavailable".into() } else { snapshot.graphics.join(", ") };
+                    let processor = if snapshot.processor.is_empty() {
+                        "Unavailable"
+                    } else {
+                        &snapshot.processor
+                    };
+                    let graphics = if snapshot.graphics.is_empty() {
+                        "Unavailable".into()
+                    } else {
+                        snapshot.graphics.join(", ")
+                    };
                     let memory = match (snapshot.memory_used, snapshot.memory_total) {
-                        (Some(used), Some(total)) => format!("{} used of {}", format_size(Some(used)), format_size(Some(total))),
+                        (Some(used), Some(total)) => format!(
+                            "{} used of {}",
+                            format_size(Some(used)),
+                            format_size(Some(total))
+                        ),
                         _ => "Unavailable".into(),
                     };
                     let drive = match (snapshot.drive_used, snapshot.drive_total) {
-                        (Some(used), Some(total)) => format!("{} used of {}", format_size(Some(used)), format_size(Some(total))),
+                        (Some(used), Some(total)) => format!(
+                            "{} used of {}",
+                            format_size(Some(used)),
+                            format_size(Some(total))
+                        ),
                         _ => "Unavailable".into(),
                     };
                     for (label, value) in [
@@ -2754,12 +3780,25 @@ impl OptiUi {
                         ("Logical threads", snapshot.logical_threads.to_string()),
                         ("Graphics", graphics),
                         ("Memory", memory),
-                        ("System volume", if snapshot.system_drive.is_empty() { drive } else { format!("{} · {drive}", snapshot.system_drive) }),
-                        ("Uptime at capture", crate::opti::sysmon::format_uptime(snapshot.uptime_seconds)),
+                        (
+                            "System volume",
+                            if snapshot.system_drive.is_empty() {
+                                drive
+                            } else {
+                                format!("{} · {drive}", snapshot.system_drive)
+                            },
+                        ),
+                        (
+                            "Uptime at capture",
+                            crate::opti::sysmon::format_uptime(snapshot.uptime_seconds),
+                        ),
                     ] {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(RichText::new(label).size(T_SMALL).color(t.muted));
-                            ui.add(egui::Label::new(RichText::new(value).size(T_SMALL).color(t.text)).wrap());
+                            ui.add(
+                                egui::Label::new(RichText::new(value).size(T_SMALL).color(t.text))
+                                    .wrap(),
+                            );
                         });
                     }
                 });
@@ -2768,16 +3807,24 @@ impl OptiUi {
 
     fn diagnostics_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let t = tokens(ctx);
-        kit::page_header(ui, "Diagnostics", "Read-only Windows integrity scans. Review the command output; Optimaxer does not infer a system health score.");
+        kit::page_header(
+            ui,
+            "Diagnostics",
+            "Read-only Windows integrity scans. Review the command output; Optimaxer does not infer a system health score.",
+        );
         ui.label(RichText::new("Both checks require administrator access. They may keep CPU and storage busy for several minutes. They do not repair files or change registry settings.").size(T_SMALL).color(t.muted));
         ui.add_space(S3);
 
-        for check in [DiagnosticCheck::SystemFiles, DiagnosticCheck::ComponentStore] {
+        for check in [
+            DiagnosticCheck::SystemFiles,
+            DiagnosticCheck::ComponentStore,
+        ] {
             let result = self.diagnostic_results.get(&check).cloned();
-            let running = self.busy.as_deref() == Some(match check {
-                DiagnosticCheck::SystemFiles => "Scan: Windows system files",
-                DiagnosticCheck::ComponentStore => "Scan: Windows component store",
-            });
+            let running = self.busy.as_deref()
+                == Some(match check {
+                    DiagnosticCheck::SystemFiles => "Scan: Windows system files",
+                    DiagnosticCheck::ComponentStore => "Scan: Windows component store",
+                });
             kit::card(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal_wrapped(|ui| {
@@ -2805,10 +3852,29 @@ impl OptiUi {
                     } else {
                         "Command failed; review the error output"
                     };
-                    ui.label(RichText::new(format!("{status} · exit code {}", result.exit_code)).size(T_SMALL).color(if result.exit_code == 0 { t.muted } else { t.bad }));
-                    egui::ScrollArea::vertical().max_height(240.0).auto_shrink([false, true]).show(ui, |ui| {
-                        ui.add(egui::Label::new(RichText::new(result.output).monospace().size(T_SMALL).color(t.text)).wrap());
-                    });
+                    ui.label(
+                        RichText::new(format!("{status} · exit code {}", result.exit_code))
+                            .size(T_SMALL)
+                            .color(if result.exit_code == 0 {
+                                t.muted
+                            } else {
+                                t.bad
+                            }),
+                    );
+                    egui::ScrollArea::vertical()
+                        .max_height(240.0)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(result.output)
+                                        .monospace()
+                                        .size(T_SMALL)
+                                        .color(t.text),
+                                )
+                                .wrap(),
+                            );
+                        });
                 }
             });
             ui.add_space(S2);
@@ -2816,7 +3882,8 @@ impl OptiUi {
     }
 
     fn refresh_game_states(&mut self, ctx: &egui::Context) {
-        if self.game_status_loading || self.game_profiles_error.is_some() || self.game_states_loaded {
+        if self.game_status_loading || self.game_profiles_error.is_some() || self.game_states_loaded
+        {
             return;
         }
         if self.game_profiles.is_empty() {
@@ -2827,9 +3894,15 @@ impl OptiUi {
         let profiles = self.game_profiles.clone();
         let worker = self.worker(ctx);
         std::thread::spawn(move || {
-            let states = profiles.iter().map(|profile| {
-                (profile.executable.clone(), gaming::state(&WinSystem, profile))
-            }).collect();
+            let states = profiles
+                .iter()
+                .map(|profile| {
+                    (
+                        profile.executable.clone(),
+                        gaming::state(&WinSystem, profile),
+                    )
+                })
+                .collect();
             worker.send(Msg::GameStates(states));
         });
     }
@@ -2838,27 +3911,45 @@ impl OptiUi {
         self.add_game_executable_from(ctx, None);
     }
 
-    fn add_game_executable_from(&mut self, ctx: &egui::Context, directory: Option<&std::path::Path>) {
+    fn add_game_executable_from(
+        &mut self,
+        ctx: &egui::Context,
+        directory: Option<&std::path::Path>,
+    ) {
         if self.game_profiles_error.is_some() {
-            self.events.push(OptiEvent::Toast("Saved game profiles are unreadable. Recover the file before adding profiles.".into()));
+            self.events.push(OptiEvent::Toast(
+                "Saved game profiles are unreadable. Recover the file before adding profiles."
+                    .into(),
+            ));
             return;
         }
         let mut dialog = rfd::FileDialog::new().add_filter("Windows game executable", &["exe"]);
         if let Some(directory) = directory.filter(|directory| directory.is_dir()) {
             dialog = dialog.set_directory(directory);
         }
-        let Some(path) = dialog.pick_file() else { return };
+        let Some(path) = dialog.pick_file() else {
+            return;
+        };
         let canonical = match path.canonicalize() {
-            Ok(path) if path.is_file() && path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("exe")) => {
+            Ok(path)
+                if path.is_file()
+                    && path
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe")) =>
+            {
                 let text = path.to_string_lossy();
                 text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned()
             }
             Ok(_) => {
-                self.events.push(OptiEvent::Toast("Choose an existing Windows .exe file.".into()));
+                self.events.push(OptiEvent::Toast(
+                    "Choose an existing Windows .exe file.".into(),
+                ));
                 return;
             }
             Err(error) => {
-                self.events.push(OptiEvent::Toast(format!("Could not resolve that executable path: {error}")));
+                self.events.push(OptiEvent::Toast(format!(
+                    "Could not resolve that executable path: {error}"
+                )));
                 return;
             }
         };
@@ -2884,7 +3975,9 @@ impl OptiUi {
     }
 
     fn scan_game_libraries(&mut self, ctx: &egui::Context) {
-        if self.game_library_scanning { return; }
+        if self.game_library_scanning {
+            return;
+        }
         self.game_library_scanning = true;
         self.game_library_scan = None;
         let mut steam_roots = Vec::new();
@@ -2910,19 +4003,30 @@ impl OptiUi {
                 (r"HKLM:\SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"),
                 (r"HKLM:\SOFTWARE\Valve\Steam", "InstallPath"),
             ] {
-                if let Some(RegData::Str(path) | RegData::Expand(path)) = WinSystem.reg_get(key, value) {
+                if let Some(RegData::Str(path) | RegData::Expand(path)) =
+                    WinSystem.reg_get(key, value)
+                {
                     steam_roots.push(PathBuf::from(path));
                 }
             }
-            worker.send(Msg::GameLibraries(gaming::scan_libraries(&steam_roots, &epic_manifests)));
+            worker.send(Msg::GameLibraries(gaming::scan_libraries(
+                &steam_roots,
+                &epic_manifests,
+            )));
         });
     }
 
     fn export_game_preference(&mut self, profile: &GameProfile) {
-        let name = std::path::Path::new(&profile.executable).file_stem()
+        let name = std::path::Path::new(&profile.executable)
+            .file_stem()
             .map_or_else(|| "game".into(), |stem| stem.to_string_lossy().to_string());
-        let Some(path) = rfd::FileDialog::new().add_filter("Optimaxer graphics preset", &["json"])
-            .set_file_name(format!("{name}-graphics.json")).save_file() else { return };
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Optimaxer graphics preset", &["json"])
+            .set_file_name(format!("{name}-graphics.json"))
+            .save_file()
+        else {
+            return;
+        };
         if let Err(error) = gaming::write_export(&path, profile) {
             self.events.push(OptiEvent::Toast(error));
         }
@@ -2930,10 +4034,17 @@ impl OptiUi {
 
     fn import_game_preference(&mut self, profile: &GameProfile) {
         if !profile.can_remove() {
-            self.events.push(OptiEvent::Toast("Restore the active setting before importing another graphics preference.".into()));
+            self.events.push(OptiEvent::Toast(
+                "Restore the active setting before importing another graphics preference.".into(),
+            ));
             return;
         }
-        let Some(path) = rfd::FileDialog::new().add_filter("Optimaxer graphics preset", &["json"]).pick_file() else { return };
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Optimaxer graphics preset", &["json"])
+            .pick_file()
+        else {
+            return;
+        };
         let preference = match gaming::read_export(&path) {
             Ok(preference) => preference,
             Err(error) => {
@@ -2942,7 +4053,12 @@ impl OptiUi {
             }
         };
         let mut updated = self.game_profiles.clone();
-        match gaming::set_preference(&gaming::store_path(), &mut updated, &profile.executable, preference) {
+        match gaming::set_preference(
+            &gaming::store_path(),
+            &mut updated,
+            &profile.executable,
+            preference,
+        ) {
             Ok(()) => {
                 self.game_profiles = updated;
                 self.game_states_loaded = false;
@@ -3008,14 +4124,26 @@ impl OptiUi {
 
     fn gaming_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let t = tokens(ctx);
-        kit::page_header(ui, "Gaming", "Review the existing reversible Windows gaming settings. These switches do not promise higher frame rates.");
+        kit::page_header(
+            ui,
+            "Gaming",
+            "Review the existing reversible Windows gaming settings. These switches do not promise higher frame rates.",
+        );
         self.refresh_game_states(ctx);
 
-        let supported: Vec<_> = self.cat.tweaks.iter().filter(|tw| tw.has_tag("gaming") && tw.retired.is_empty() && !tw.has_tag("optin")).collect();
+        let supported: Vec<_> = self
+            .cat
+            .tweaks
+            .iter()
+            .filter(|tw| tw.has_tag("gaming") && tw.retired.is_empty() && !tw.has_tag("optin"))
+            .collect();
         let Some(traits) = self.traits.as_ref() else {
             kit::card(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.label(RichText::new("Reading this PC’s hardware and current settings…").color(t.muted));
+                ui.label(
+                    RichText::new("Reading this PC’s hardware and current settings…")
+                        .color(t.muted),
+                );
             });
             return;
         };
@@ -3027,10 +4155,15 @@ impl OptiUi {
             return;
         }
 
-        let to_apply: Vec<String> = hw::preset_ids(&self.cat, traits, "gaming").into_iter()
-            .filter(|id| !self.status.get(id).copied().unwrap_or(false)).collect();
-        let to_undo: Vec<String> = supported.iter().filter(|tw| self.status.get(&tw.id).copied().unwrap_or(false))
-            .map(|tw| tw.id.clone()).collect();
+        let to_apply: Vec<String> = hw::preset_ids(&self.cat, traits, "gaming")
+            .into_iter()
+            .filter(|id| !self.status.get(id).copied().unwrap_or(false))
+            .collect();
+        let to_undo: Vec<String> = supported
+            .iter()
+            .filter(|tw| self.status.get(&tw.id).copied().unwrap_or(false))
+            .map(|tw| tw.id.clone())
+            .collect();
         kit::card(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
@@ -3070,52 +4203,83 @@ impl OptiUi {
             for tw in &supported {
                 let applied = self.status.get(&tw.id).copied().unwrap_or(false);
                 let compatible = hw::fits(tw, traits);
-                egui::Frame::new().inner_margin(Margin::symmetric(S2 as i8, S1 as i8)).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    let details_width = (ui.available_width() - 96.0).max(120.0);
-                    ui.horizontal(|ui| {
-                        ui.scope(|ui| {
-                            ui.set_max_width(details_width);
-                            ui.vertical(|ui| {
-                                ui.label(RichText::new(&tw.name).font(FontId::new(T_BODY, semibold())).color(t.text));
-                                ui.add(egui::Label::new(RichText::new(&tw.desc).size(T_CAPTION).color(t.muted)).wrap());
+                egui::Frame::new()
+                    .inner_margin(Margin::symmetric(S2 as i8, S1 as i8))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        let details_width = (ui.available_width() - 96.0).max(120.0);
+                        ui.horizontal(|ui| {
+                            ui.scope(|ui| {
+                                ui.set_max_width(details_width);
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        RichText::new(&tw.name)
+                                            .font(FontId::new(T_BODY, semibold()))
+                                            .color(t.text),
+                                    );
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(&tw.desc).size(T_CAPTION).color(t.muted),
+                                        )
+                                        .wrap(),
+                                    );
+                                });
+                            });
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if applied {
+                                    kit::chip(ui, "Applied", Tone::Good);
+                                } else if !compatible {
+                                    kit::chip(ui, "Not applicable", Tone::Neutral);
+                                } else {
+                                    kit::chip(ui, "Available", Tone::Neutral);
+                                }
                             });
                         });
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if applied {
-                                kit::chip(ui, "Applied", Tone::Good);
-                            } else if !compatible {
-                                kit::chip(ui, "Not applicable", Tone::Neutral);
-                            } else {
-                                kit::chip(ui, "Available", Tone::Neutral);
-                            }
-                        });
+                        if !compatible && let Some(reason) = hw::fit_reason(tw, traits) {
+                            ui.label(RichText::new(reason).size(T_SMALL).color(t.subtle));
+                        }
                     });
-                    if !compatible && let Some(reason) = hw::fit_reason(tw, traits) {
-                        ui.label(RichText::new(reason).size(T_SMALL).color(t.subtle));
-                    }
-                });
                 ui.separator();
             }
         });
         ui.add_space(S2);
         ui.horizontal_wrapped(|ui| {
             let ready = self.busy.is_none() && self.elevated;
-            if kit::primary(ui, "Review compatible settings", ready && !to_apply.is_empty()).clicked() {
+            if kit::primary(
+                ui,
+                "Review compatible settings",
+                ready && !to_apply.is_empty(),
+            )
+            .clicked()
+            {
                 self.preview_apply_ids(ctx, to_apply);
             }
             if kit::secondary(ui, "Review undo", ready && !to_undo.is_empty()).clicked() {
                 self.preview_undo_ids(to_undo);
             }
             if !self.elevated {
-                ui.label(RichText::new("Administrator access is required to change Windows settings.").size(T_SMALL).color(t.muted));
+                ui.label(
+                    RichText::new("Administrator access is required to change Windows settings.")
+                        .size(T_SMALL)
+                        .color(t.muted),
+                );
             }
         });
 
         ui.add_space(S4);
         ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new("Per-game graphics preferences").font(FontId::new(T_HEADING, semibold())).color(t.text));
-            if kit::ghost(ui, "Refresh", !self.game_status_loading && self.game_profiles_error.is_none()).clicked() {
+            ui.label(
+                RichText::new("Per-game graphics preferences")
+                    .font(FontId::new(T_HEADING, semibold()))
+                    .color(t.text),
+            );
+            if kit::ghost(
+                ui,
+                "Refresh",
+                !self.game_status_loading && self.game_profiles_error.is_none(),
+            )
+            .clicked()
+            {
                 self.game_states.clear();
                 self.game_states_loaded = false;
                 self.refresh_game_states(ctx);
@@ -3133,29 +4297,57 @@ impl OptiUi {
         });
         if let Some(scan) = self.game_library_scan.clone() {
             if scan.games.is_empty() {
-                ui.label(RichText::new("No installed games found in the detected Steam and Epic libraries.").size(T_SMALL).color(t.muted));
+                ui.label(
+                    RichText::new(
+                        "No installed games found in the detected Steam and Epic libraries.",
+                    )
+                    .size(T_SMALL)
+                    .color(t.muted),
+                );
             } else {
-                ui.label(RichText::new(format!("{} installed games found", scan.games.len())).size(T_SMALL).color(t.muted));
+                ui.label(
+                    RichText::new(format!("{} installed games found", scan.games.len()))
+                        .size(T_SMALL)
+                        .color(t.muted),
+                );
                 let mut selected_library: Option<PathBuf> = None;
-                egui::ScrollArea::vertical().max_height(260.0).auto_shrink([false, true]).show(ui, |ui| {
-                    for game in &scan.games {
-                        ui.horizontal(|ui| {
-                            ui.vertical(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new(&game.name).size(T_BODY).color(t.text));
-                                    kit::chip(ui, game.source.label(), Tone::Neutral);
+                egui::ScrollArea::vertical()
+                    .max_height(260.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        for game in &scan.games {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new(&game.name).size(T_BODY).color(t.text),
+                                        );
+                                        kit::chip(ui, game.source.label(), Tone::Neutral);
+                                    });
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(game.install_dir.display().to_string())
+                                                .size(T_CAPTION)
+                                                .color(t.subtle),
+                                        )
+                                        .truncate(),
+                                    );
                                 });
-                                ui.add(egui::Label::new(RichText::new(game.install_dir.display().to_string()).size(T_CAPTION).color(t.subtle)).truncate());
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    if kit::ghost(
+                                        ui,
+                                        "Choose executable…",
+                                        self.game_profiles_error.is_none(),
+                                    )
+                                    .clicked()
+                                    {
+                                        selected_library = Some(game.install_dir.clone());
+                                    }
+                                });
                             });
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if kit::ghost(ui, "Choose executable…", self.game_profiles_error.is_none()).clicked() {
-                                    selected_library = Some(game.install_dir.clone());
-                                }
-                            });
-                        });
-                        ui.separator();
-                    }
-                });
+                            ui.separator();
+                        }
+                    });
                 if let Some(directory) = selected_library {
                     self.add_game_executable_from(ctx, Some(&directory));
                 }
@@ -3175,39 +4367,74 @@ impl OptiUi {
             ui.add_space(S2);
             kit::card(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.label(RichText::new("No game executables added.").font(FontId::new(T_BODY, semibold())).color(t.text));
+                ui.label(
+                    RichText::new("No game executables added.")
+                        .font(FontId::new(T_BODY, semibold()))
+                        .color(t.text),
+                );
                 ui.label(RichText::new("Add a game's .exe file to create a per-user Windows graphics preference. No setting changes until you review and confirm it.").size(T_SMALL).color(t.muted));
             });
         } else if self.game_status_loading || !self.game_states_loaded {
             ui.add_space(S2);
-            ui.label(RichText::new("Reading current Windows graphics preferences…").size(T_SMALL).color(t.muted));
+            ui.label(
+                RichText::new("Reading current Windows graphics preferences…")
+                    .size(T_SMALL)
+                    .color(t.muted),
+            );
         } else {
             let profile_rows = self.game_profiles.clone();
             for profile in profile_rows {
                 let state_result = self.game_states.get(&profile.executable);
-                let state = state_result.and_then(|result| result.as_ref().ok()).copied();
-                let state_error = state_result.and_then(|result| result.as_ref().err()).cloned();
-                let preference_history = game_preference_history(&self.operations, &profile.executable);
+                let state = state_result
+                    .and_then(|result| result.as_ref().ok())
+                    .copied();
+                let state_error = state_result
+                    .and_then(|result| result.as_ref().err())
+                    .cloned();
+                let preference_history =
+                    game_preference_history(&self.operations, &profile.executable);
                 let mut requested_action: Option<bool> = None;
                 kit::card(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal_wrapped(|ui| {
                         ui.vertical(|ui| {
-                            let name = std::path::Path::new(&profile.executable).file_stem().map_or_else(|| "Game".into(), |name| name.to_string_lossy().to_string());
-                            ui.label(RichText::new(name).font(FontId::new(T_BODY, semibold())).color(t.text));
-                            ui.add(egui::Label::new(RichText::new(&profile.executable).size(T_SMALL).color(t.subtle)).wrap());
+                            let name = std::path::Path::new(&profile.executable)
+                                .file_stem()
+                                .map_or_else(
+                                    || "Game".into(),
+                                    |name| name.to_string_lossy().to_string(),
+                                );
+                            ui.label(
+                                RichText::new(name)
+                                    .font(FontId::new(T_BODY, semibold()))
+                                    .color(t.text),
+                            );
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&profile.executable)
+                                        .size(T_SMALL)
+                                        .color(t.subtle),
+                                )
+                                .wrap(),
+                            );
                         });
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if state_error.is_some() {
                                 kit::chip(ui, "Unavailable", Tone::Bad);
                             } else if let Some(state) = state {
                                 let (label, tone) = match state {
-                                    ProfileState::WindowsDefault => ("Windows default", Tone::Neutral),
-                                    ProfileState::Selected if profile.has_saved_original() => ("Applied by Optimaxer", Tone::Good),
+                                    ProfileState::WindowsDefault => {
+                                        ("Windows default", Tone::Neutral)
+                                    }
+                                    ProfileState::Selected if profile.has_saved_original() => {
+                                        ("Applied by Optimaxer", Tone::Good)
+                                    }
                                     ProfileState::Selected => ("Already selected", Tone::Good),
                                     ProfileState::Available => ("Not applied", Tone::Neutral),
                                     ProfileState::RestorePending => ("Restore pending", Tone::Warn),
-                                    ProfileState::ChangedElsewhere => ("Changed elsewhere", Tone::Warn),
+                                    ProfileState::ChangedElsewhere => {
+                                        ("Changed elsewhere", Tone::Warn)
+                                    }
                                 };
                                 kit::chip(ui, label, tone);
                             } else {
@@ -3221,13 +4448,30 @@ impl OptiUi {
                         egui::ComboBox::from_id_salt(("game-gpu", &profile.executable))
                             .selected_text(preference.label())
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut preference, GraphicsPreference::Windows, GraphicsPreference::Windows.label());
-                                ui.selectable_value(&mut preference, GraphicsPreference::PowerSaving, GraphicsPreference::PowerSaving.label());
-                                ui.selectable_value(&mut preference, GraphicsPreference::HighPerformance, GraphicsPreference::HighPerformance.label());
+                                ui.selectable_value(
+                                    &mut preference,
+                                    GraphicsPreference::Windows,
+                                    GraphicsPreference::Windows.label(),
+                                );
+                                ui.selectable_value(
+                                    &mut preference,
+                                    GraphicsPreference::PowerSaving,
+                                    GraphicsPreference::PowerSaving.label(),
+                                );
+                                ui.selectable_value(
+                                    &mut preference,
+                                    GraphicsPreference::HighPerformance,
+                                    GraphicsPreference::HighPerformance.label(),
+                                );
                             });
                         if preference != profile.preference {
                             let mut updated = self.game_profiles.clone();
-                            match gaming::set_preference(&gaming::store_path(), &mut updated, &profile.executable, preference) {
+                            match gaming::set_preference(
+                                &gaming::store_path(),
+                                &mut updated,
+                                &profile.executable,
+                                preference,
+                            ) {
                                 Ok(()) => {
                                     self.game_profiles = updated;
                                     self.game_states_loaded = false;
@@ -3235,11 +4479,16 @@ impl OptiUi {
                                 Err(error) => self.events.push(OptiEvent::Toast(error)),
                             }
                         }
-                        if state == Some(ProfileState::Available) && kit::primary(ui, "Review", self.busy.is_none()).clicked() {
+                        if state == Some(ProfileState::Available)
+                            && kit::primary(ui, "Review", self.busy.is_none()).clicked()
+                        {
                             requested_action = Some(true);
                         }
                         if profile.has_saved_original()
-                            && matches!(state, Some(ProfileState::Selected | ProfileState::RestorePending))
+                            && matches!(
+                                state,
+                                Some(ProfileState::Selected | ProfileState::RestorePending)
+                            )
                             && kit::secondary(ui, "Restore original", self.busy.is_none()).clicked()
                         {
                             requested_action = Some(false);
@@ -3252,7 +4501,11 @@ impl OptiUi {
                         }
                         if profile.can_remove() && kit::ghost(ui, "Remove", true).clicked() {
                             let mut updated = self.game_profiles.clone();
-                            match gaming::remove(&gaming::store_path(), &mut updated, &profile.executable) {
+                            match gaming::remove(
+                                &gaming::store_path(),
+                                &mut updated,
+                                &profile.executable,
+                            ) {
                                 Ok(()) => {
                                     self.game_profiles = updated;
                                     self.game_states.remove(&profile.executable);
@@ -3263,7 +4516,10 @@ impl OptiUi {
                         }
                     });
                     if let Some(error) = state_error {
-                        ui.add(egui::Label::new(RichText::new(error).size(T_SMALL).color(t.bad)).wrap());
+                        ui.add(
+                            egui::Label::new(RichText::new(error).size(T_SMALL).color(t.bad))
+                                .wrap(),
+                        );
                     }
                     if state == Some(ProfileState::ChangedElsewhere) {
                         ui.add(egui::Label::new(RichText::new("Saved originals are protected. Restore either Optimaxer's selected value or the original Windows value, then refresh to retry.").size(T_SMALL).color(t.warn)).wrap());
@@ -3280,51 +4536,51 @@ impl OptiUi {
                     "Per-game history · {}",
                     preference_history.len()
                 ))
-                    .id_salt(("game-history", &profile.executable))
-                    .show(ui, |ui| {
-                        if preference_history.is_empty() {
-                            ui.label(
-                                RichText::new("No graphics preference changes recorded for this executable.")
-                                    .size(T_SMALL)
-                                    .color(t.muted),
-                            );
-                        } else {
-                            for entry in preference_history.iter().take(10) {
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.label(
-                                        RichText::new(&entry.time)
-                                            .size(T_CAPTION)
-                                            .monospace()
-                                            .color(t.subtle),
-                                    );
-                                    ui.label(
-                                        RichText::new(&entry.title).size(T_SMALL).color(t.text),
-                                    );
-                                    let tone = match entry.status {
-                                        OperationStatus::Warnings => Tone::Warn,
-                                        OperationStatus::Error => Tone::Bad,
-                                        OperationStatus::Finished | OperationStatus::Unknown => {
-                                            Tone::Neutral
-                                        }
-                                    };
-                                    kit::chip(ui, entry.status.label(), tone);
-                                });
-                                for detail in entry
-                                    .details
-                                    .iter()
-                                    .filter(|detail| !detail.starts_with("Executable: "))
-                                {
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(detail).size(T_CAPTION).color(t.muted),
-                                        )
-                                        .wrap(),
-                                    );
-                                }
-                                ui.separator();
+                .id_salt(("game-history", &profile.executable))
+                .show(ui, |ui| {
+                    if preference_history.is_empty() {
+                        ui.label(
+                            RichText::new(
+                                "No graphics preference changes recorded for this executable.",
+                            )
+                            .size(T_SMALL)
+                            .color(t.muted),
+                        );
+                    } else {
+                        for entry in preference_history.iter().take(10) {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(
+                                    RichText::new(&entry.time)
+                                        .size(T_CAPTION)
+                                        .monospace()
+                                        .color(t.subtle),
+                                );
+                                ui.label(RichText::new(&entry.title).size(T_SMALL).color(t.text));
+                                let tone = match entry.status {
+                                    OperationStatus::Warnings => Tone::Warn,
+                                    OperationStatus::Error => Tone::Bad,
+                                    OperationStatus::Finished | OperationStatus::Unknown => {
+                                        Tone::Neutral
+                                    }
+                                };
+                                kit::chip(ui, entry.status.label(), tone);
+                            });
+                            for detail in entry
+                                .details
+                                .iter()
+                                .filter(|detail| !detail.starts_with("Executable: "))
+                            {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(detail).size(T_CAPTION).color(t.muted),
+                                    )
+                                    .wrap(),
+                                );
                             }
+                            ui.separator();
                         }
-                    });
+                    }
+                });
                 ui.add_space(S1);
             }
         }
@@ -3332,18 +4588,44 @@ impl OptiUi {
 
     fn tweaks_page(&mut self, ui: &mut Ui, ctx: &egui::Context, settings: &mut Settings) {
         let t = tokens(ctx);
-        kit::page_header(ui, "Tweaks", "Performance, gaming, network, privacy and interface settings. The original value is saved before each change, so every tweak can be undone.");
-        let (on, total) = self.traits.as_ref().map(|tr| score(&self.cat, tr, &self.status)).unwrap_or((0, 0));
+        kit::page_header(
+            ui,
+            "Tweaks",
+            "Performance, gaming, network, privacy and interface settings. The original value is saved before each change, so every tweak can be undone.",
+        );
+        let (on, total) = self
+            .traits
+            .as_ref()
+            .map(|tr| score(&self.cat, tr, &self.status))
+            .unwrap_or((0, 0));
         kit::card(ui, |ui| {
             ui.set_width(ui.available_width());
             let draw_stats = |ui: &mut Ui| {
                 if total > 0 {
                     let pct = (100.0 * on as f32 / total as f32).round();
-                    let col = if pct >= 80.0 { t.good } else if pct >= 45.0 { t.text } else { t.bad };
-                    ui.label(RichText::new(format!("{pct:.0}%")).font(FontId::new(theme::T_DISPLAY + 8.0, semibold())).color(col));
+                    let col = if pct >= 80.0 {
+                        t.good
+                    } else if pct >= 45.0 {
+                        t.text
+                    } else {
+                        t.bad
+                    };
+                    ui.label(
+                        RichText::new(format!("{pct:.0}%"))
+                            .font(FontId::new(theme::T_DISPLAY + 8.0, semibold()))
+                            .color(col),
+                    );
                     ui.vertical(|ui| {
-                        ui.label(RichText::new("of the recommended tweaks are active").font(FontId::new(T_BODY, semibold())).color(t.text));
-                        ui.label(RichText::new(format!("{on} of {total} fit this PC")).size(T_SMALL).color(t.muted));
+                        ui.label(
+                            RichText::new("of the recommended tweaks are active")
+                                .font(FontId::new(T_BODY, semibold()))
+                                .color(t.text),
+                        );
+                        ui.label(
+                            RichText::new(format!("{on} of {total} fit this PC"))
+                                .size(T_SMALL)
+                                .color(t.muted),
+                        );
                     });
                 } else {
                     kit::skeleton(ui, 2);
@@ -3372,7 +4654,15 @@ impl OptiUi {
         ui.add_space(S3);
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("Presets").size(T_SMALL).color(t.muted));
-            for (label, tag) in [("Auto-detect", "auto"), ("Recommended", "safe"), ("Gaming", "gaming"), ("Privacy", "privacy"), ("Remove AI and debloat", "deai"), ("Maximum", "max"), ("Clear", "none")] {
+            for (label, tag) in [
+                ("Auto-detect", "auto"),
+                ("Recommended", "safe"),
+                ("Gaming", "gaming"),
+                ("Privacy", "privacy"),
+                ("Remove AI and debloat", "deai"),
+                ("Maximum", "max"),
+                ("Clear", "none"),
+            ] {
                 if kit::secondary(ui, label, true).clicked() {
                     self.select_preset(tag);
                 }
@@ -3390,40 +4680,66 @@ impl OptiUi {
         ui.add_space(S2);
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("Risk").size(T_SMALL).color(t.muted));
-            kit::segmented(ui, &mut self.tw_risk, &["All", "Safe", "Moderate", "Advanced"]);
+            kit::segmented(
+                ui,
+                &mut self.tw_risk,
+                &["All", "Safe", "Moderate", "Advanced"],
+            );
             ui.add_space(S3);
             ui.label(RichText::new("Show").size(T_SMALL).color(t.muted));
-            egui::ComboBox::from_id_salt("tw-group").selected_text(TWEAK_GROUPS[self.tw_group.min(TWEAK_GROUPS.len() - 1)]).show_ui(ui, |ui| {
-                for (i, g) in TWEAK_GROUPS.iter().enumerate() {
-                    ui.selectable_value(&mut self.tw_group, i, *g);
-                }
-            });
+            egui::ComboBox::from_id_salt("tw-group")
+                .selected_text(TWEAK_GROUPS[self.tw_group.min(TWEAK_GROUPS.len() - 1)])
+                .show_ui(ui, |ui| {
+                    for (i, g) in TWEAK_GROUPS.iter().enumerate() {
+                        ui.selectable_value(&mut self.tw_group, i, *g);
+                    }
+                });
             ui.label(RichText::new("State").size(T_SMALL).color(t.muted));
-            egui::ComboBox::from_id_salt("tw-state").selected_text(["All", "Applied", "Not applied"][self.tw_state.min(2)]).show_ui(ui, |ui| {
-                for (i, label) in ["All", "Applied", "Not applied"].iter().enumerate() {
-                    ui.selectable_value(&mut self.tw_state, i, *label);
-                }
-            });
+            egui::ComboBox::from_id_salt("tw-state")
+                .selected_text(["All", "Applied", "Not applied"][self.tw_state.min(2)])
+                .show_ui(ui, |ui| {
+                    for (i, label) in ["All", "Applied", "Not applied"].iter().enumerate() {
+                        ui.selectable_value(&mut self.tw_state, i, *label);
+                    }
+                });
             ui.label(RichText::new("View").size(T_SMALL).color(t.muted));
-            egui::ComboBox::from_id_salt("tw-view").selected_text(["All tweaks", "Recommended", "Favorites"][self.tw_view.min(2)]).show_ui(ui, |ui| {
-                for (i, label) in ["All tweaks", "Recommended", "Favorites"].iter().enumerate() {
-                    ui.selectable_value(&mut self.tw_view, i, *label);
-                }
-            });
+            egui::ComboBox::from_id_salt("tw-view")
+                .selected_text(["All tweaks", "Recommended", "Favorites"][self.tw_view.min(2)])
+                .show_ui(ui, |ui| {
+                    for (i, label) in ["All tweaks", "Recommended", "Favorites"]
+                        .iter()
+                        .enumerate()
+                    {
+                        ui.selectable_value(&mut self.tw_view, i, *label);
+                    }
+                });
             ui.label(RichText::new("Compatibility").size(T_SMALL).color(t.muted));
-            egui::ComboBox::from_id_salt("tw-compatibility").selected_text(["All PCs", "Fits this PC", "Does not fit"][self.tw_compatibility.min(2)]).show_ui(ui, |ui| {
-                for (i, label) in ["All PCs", "Fits this PC", "Does not fit"].iter().enumerate() {
-                    ui.selectable_value(&mut self.tw_compatibility, i, *label);
-                }
-            });
+            egui::ComboBox::from_id_salt("tw-compatibility")
+                .selected_text(
+                    ["All PCs", "Fits this PC", "Does not fit"][self.tw_compatibility.min(2)],
+                )
+                .show_ui(ui, |ui| {
+                    for (i, label) in ["All PCs", "Fits this PC", "Does not fit"]
+                        .iter()
+                        .enumerate()
+                    {
+                        ui.selectable_value(&mut self.tw_compatibility, i, *label);
+                    }
+                });
             ui.label(RichText::new("Sort").size(T_SMALL).color(t.muted));
-            egui::ComboBox::from_id_salt("tw-sort").selected_text(["Category", "Name", "Risk", "Status"][self.tw_sort.min(3)]).show_ui(ui, |ui| {
-                for (i, label) in ["Category", "Name", "Risk", "Status"].iter().enumerate() {
-                    ui.selectable_value(&mut self.tw_sort, i, *label);
-                }
-            });
-            let filters_active = self.tw_risk != 0 || self.tw_group != 0 || self.tw_state != 0
-                || self.tw_view != 0 || self.tw_compatibility != 0 || self.tw_sort != 0;
+            egui::ComboBox::from_id_salt("tw-sort")
+                .selected_text(["Category", "Name", "Risk", "Status"][self.tw_sort.min(3)])
+                .show_ui(ui, |ui| {
+                    for (i, label) in ["Category", "Name", "Risk", "Status"].iter().enumerate() {
+                        ui.selectable_value(&mut self.tw_sort, i, *label);
+                    }
+                });
+            let filters_active = self.tw_risk != 0
+                || self.tw_group != 0
+                || self.tw_state != 0
+                || self.tw_view != 0
+                || self.tw_compatibility != 0
+                || self.tw_sort != 0;
             if filters_active && kit::ghost(ui, "Reset filters", true).clicked() {
                 self.tw_risk = 0;
                 self.tw_group = 0;
@@ -3452,120 +4768,229 @@ impl OptiUi {
         let favorites: HashSet<String> = settings.opti_tweak_favorites.iter().cloned().collect();
         let mut shown = 0;
         for c in cats {
-                let mut rows: Vec<&Tweak> = cat.tweaks.iter().filter(|tw| {
+            let mut rows: Vec<&Tweak> = cat
+                .tweaks
+                .iter()
+                .filter(|tw| {
                     // a retired tweak is listed only while it has a saved record, so it can still be undone
                     let applied = self.status.get(&tw.id).copied().unwrap_or(false);
                     let fits = traits.as_ref().is_none_or(|tr| hw::fits(tw, tr));
                     (tw.retired.is_empty() || applied)
                         && tw.cat == c.as_str()
-                        && (q.is_empty() || tw.name.to_lowercase().contains(&q) || tw.desc.to_lowercase().contains(&q))
+                        && (q.is_empty()
+                            || tw.name.to_lowercase().contains(&q)
+                            || tw.desc.to_lowercase().contains(&q))
                         && (risk_filter.is_empty() || tw.risk == risk_filter)
                         && in_group(tw, group_filter, applied)
-                        && tweak_matches_view(tw, applied, fits, favorites.contains(&tw.id), self.tw_state, self.tw_view, self.tw_compatibility)
-                }).collect();
-                match self.tw_sort {
-                    1 => rows.sort_by_cached_key(|tweak| tweak.name.to_lowercase()),
-                    2 => rows.sort_by_cached_key(|tweak| (risk_order(&tweak.risk), tweak.name.to_lowercase())),
-                    3 => rows.sort_by_cached_key(|tweak| {
-                        (std::cmp::Reverse(self.status.get(&tweak.id).copied().unwrap_or(false)), tweak.name.to_lowercase())
-                    }),
-                    _ => {}
-                }
-                if rows.is_empty() {
-                    continue;
-                }
-                shown += rows.len();
-                egui::CollapsingHeader::new(RichText::new(format!("{c}   {}", rows.len())).font(FontId::new(T_BODY, semibold())).color(t.brand_text)).id_salt(c).default_open(true).show(ui, |ui| {
-                    for tw in rows {
-                        let applied = self.status.get(&tw.id).copied().unwrap_or(false);
-                        let fits = traits.as_ref().is_none_or(|tr| hw::fits(tw, tr));
-                        let on = self.selected.contains(&tw.id);
-                        let open = self.tw_open.contains(&tw.id);
-                        let mut details_rect = egui::Rect::NOTHING;
-                        let mut favorite_rect = egui::Rect::NOTHING;
-                        let favorite = settings.opti_tweak_favorites.iter().any(|id| id == &tw.id);
-                        let r = kit::row(ui, ("tw", &tw.id), on, |ui| {
-                            ui.horizontal(|ui| {
-                                kit::check(ui, on);
-                                ui.vertical(|ui| {
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.label(RichText::new(&tw.name).font(FontId::new(T_BODY, semibold())).color(t.text));
-                                        let favorite_label = ui.add(egui::Label::new(RichText::new(if favorite { "Favorited" } else { "Favorite" }).size(T_CAPTION).color(if favorite { t.brand_text } else { t.subtle })).sense(Sense::click()))
-                                            .on_hover_text(if favorite { "Remove from favorites" } else { "Add to favorites" });
-                                        favorite_rect = favorite_label.rect;
-                                        if !tw.risk.is_empty() && tw.risk != "Safe" {
-                                            kit::chip(ui, &tw.risk, risk_tone(&tw.risk));
-                                        }
-                                        if applied {
-                                            kit::chip(ui, "Applied", Tone::Good);
-                                        }
-                                        if !fits {
-                                            kit::chip(ui, "Does not suit this PC", Tone::Neutral);
-                                        }
-                                    });
-                                    ui.add(egui::Label::new(RichText::new(&tw.desc).size(T_SMALL).color(t.muted)).wrap());
-                                    let notes = tweak_notes(tw);
-                                    if !notes.is_empty() {
-                                        ui.label(RichText::new(notes).size(T_CAPTION).color(t.subtle));
+                        && tweak_matches_view(
+                            tw,
+                            applied,
+                            fits,
+                            favorites.contains(&tw.id),
+                            self.tw_state,
+                            self.tw_view,
+                            self.tw_compatibility,
+                        )
+                })
+                .collect();
+            match self.tw_sort {
+                1 => rows.sort_by_cached_key(|tweak| tweak.name.to_lowercase()),
+                2 => rows.sort_by_cached_key(|tweak| {
+                    (risk_order(&tweak.risk), tweak.name.to_lowercase())
+                }),
+                3 => rows.sort_by_cached_key(|tweak| {
+                    (
+                        std::cmp::Reverse(self.status.get(&tweak.id).copied().unwrap_or(false)),
+                        tweak.name.to_lowercase(),
+                    )
+                }),
+                _ => {}
+            }
+            if rows.is_empty() {
+                continue;
+            }
+            shown += rows.len();
+            egui::CollapsingHeader::new(
+                RichText::new(format!("{c}   {}", rows.len()))
+                    .font(FontId::new(T_BODY, semibold()))
+                    .color(t.brand_text),
+            )
+            .id_salt(c)
+            .default_open(true)
+            .show(ui, |ui| {
+                for tw in rows {
+                    let applied = self.status.get(&tw.id).copied().unwrap_or(false);
+                    let fits = traits.as_ref().is_none_or(|tr| hw::fits(tw, tr));
+                    let on = self.selected.contains(&tw.id);
+                    let open = self.tw_open.contains(&tw.id);
+                    let mut details_rect = egui::Rect::NOTHING;
+                    let mut favorite_rect = egui::Rect::NOTHING;
+                    let favorite = settings.opti_tweak_favorites.iter().any(|id| id == &tw.id);
+                    let r = kit::row(ui, ("tw", &tw.id), on, |ui| {
+                        ui.horizontal(|ui| {
+                            kit::check(ui, on);
+                            ui.vertical(|ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label(
+                                        RichText::new(&tw.name)
+                                            .font(FontId::new(T_BODY, semibold()))
+                                            .color(t.text),
+                                    );
+                                    let favorite_label = ui
+                                        .add(
+                                            egui::Label::new(
+                                                RichText::new(if favorite {
+                                                    "Favorited"
+                                                } else {
+                                                    "Favorite"
+                                                })
+                                                .size(T_CAPTION)
+                                                .color(if favorite {
+                                                    t.brand_text
+                                                } else {
+                                                    t.subtle
+                                                }),
+                                            )
+                                            .sense(Sense::click()),
+                                        )
+                                        .on_hover_text(if favorite {
+                                            "Remove from favorites"
+                                        } else {
+                                            "Add to favorites"
+                                        });
+                                    favorite_rect = favorite_label.rect;
+                                    if !tw.risk.is_empty() && tw.risk != "Safe" {
+                                        kit::chip(ui, &tw.risk, risk_tone(&tw.risk));
                                     }
-                                    if let Some(why) = self.tw_skip.get(&tw.id) {
-                                        ui.add(egui::Label::new(RichText::new(format!("Smart optimize did not tick this: {why}")).size(T_CAPTION).color(t.warn)).wrap());
+                                    if applied {
+                                        kit::chip(ui, "Applied", Tone::Good);
                                     }
-                                    let toggle = ui.add(egui::Label::new(RichText::new(if open { "Hide technical details" } else { "Technical details" }).size(T_CAPTION).color(t.brand_text)).sense(Sense::click()));
-                                    details_rect = toggle.rect;
-                                    if open {
-                                        for line in tweak_technical(tw) {
-                                            ui.add(egui::Label::new(RichText::new(line).monospace().size(T_CAPTION).color(t.muted)).wrap());
-                                        }
+                                    if !fits {
+                                        kit::chip(ui, "Does not suit this PC", Tone::Neutral);
                                     }
                                 });
-                            });
-                        });
-                        let click = ui.interact(r.response.rect, ui.scope_id().with(("tw-click", &tw.id)), Sense::click());
-                        if click.hovered() {
-                            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
-                        }
-                        if click.has_focus() {
-                            ui.painter().rect_stroke(r.response.rect, CornerRadius::same(t.ctl_radius()), Stroke::new(2.0, t.ring()), StrokeKind::Inside);
-                        }
-                        if click.clicked() && ctx.pointer_interact_pos().is_some_and(|p| favorite_rect.contains(p)) {
-                            let previous_favorites = settings.opti_tweak_favorites.clone();
-                            if favorite {
-                                settings.opti_tweak_favorites.retain(|id| id != &tw.id);
-                            } else {
-                                settings.opti_tweak_favorites.push(tw.id.clone());
-                                settings.opti_tweak_favorites.sort();
-                                settings.opti_tweak_favorites.dedup();
-                            }
-                            if let Err(error) = settings.save_checked() {
-                                settings.opti_tweak_favorites = previous_favorites;
-                                let message = format!("Favorite could not be saved: {error}");
-                                self.say(&message);
-                                self.events.push(OptiEvent::Toast(message));
-                            }
-                        } else if click.clicked() && ctx.pointer_interact_pos().is_some_and(|p| details_rect.contains(p)) {
-                            if !self.tw_open.remove(&tw.id) {
-                                self.tw_open.insert(tw.id.clone());
-                            }
-                        } else if click.clicked() {
-                            if on {
-                                self.selected.remove(&tw.id);
-                            } else {
-                                if !tw.conflict.is_empty() {
-                                    // one choice per group: ticking this unticks the other tweaks that write the same setting
-                                    let peers: Vec<String> = cat.tweaks.iter().filter(|p| p.conflict == tw.conflict && p.id != tw.id).map(|p| p.id.clone()).collect();
-                                    for p in peers {
-                                        self.selected.remove(&p);
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&tw.desc).size(T_SMALL).color(t.muted),
+                                    )
+                                    .wrap(),
+                                );
+                                let notes = tweak_notes(tw);
+                                if !notes.is_empty() {
+                                    ui.label(RichText::new(notes).size(T_CAPTION).color(t.subtle));
+                                }
+                                if let Some(why) = self.tw_skip.get(&tw.id) {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(format!(
+                                                "Smart optimize did not tick this: {why}"
+                                            ))
+                                            .size(T_CAPTION)
+                                            .color(t.warn),
+                                        )
+                                        .wrap(),
+                                    );
+                                }
+                                let toggle = ui.add(
+                                    egui::Label::new(
+                                        RichText::new(if open {
+                                            "Hide technical details"
+                                        } else {
+                                            "Technical details"
+                                        })
+                                        .size(T_CAPTION)
+                                        .color(t.brand_text),
+                                    )
+                                    .sense(Sense::click()),
+                                );
+                                details_rect = toggle.rect;
+                                if open {
+                                    for line in tweak_technical(tw) {
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(line)
+                                                    .monospace()
+                                                    .size(T_CAPTION)
+                                                    .color(t.muted),
+                                            )
+                                            .wrap(),
+                                        );
                                     }
                                 }
-                                self.selected.insert(tw.id.clone());
+                            });
+                        });
+                    });
+                    let click = ui.interact(
+                        r.response.rect,
+                        ui.scope_id().with(("tw-click", &tw.id)),
+                        Sense::click(),
+                    );
+                    if click.hovered() {
+                        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if click.has_focus() {
+                        ui.painter().rect_stroke(
+                            r.response.rect,
+                            CornerRadius::same(t.ctl_radius()),
+                            Stroke::new(2.0, t.ring()),
+                            StrokeKind::Inside,
+                        );
+                    }
+                    if click.clicked()
+                        && ctx
+                            .pointer_interact_pos()
+                            .is_some_and(|p| favorite_rect.contains(p))
+                    {
+                        let previous_favorites = settings.opti_tweak_favorites.clone();
+                        if favorite {
+                            settings.opti_tweak_favorites.retain(|id| id != &tw.id);
+                        } else {
+                            settings.opti_tweak_favorites.push(tw.id.clone());
+                            settings.opti_tweak_favorites.sort();
+                            settings.opti_tweak_favorites.dedup();
+                        }
+                        if let Err(error) = settings.save_checked() {
+                            settings.opti_tweak_favorites = previous_favorites;
+                            let message = format!("Favorite could not be saved: {error}");
+                            self.say(&message);
+                            self.events.push(OptiEvent::Toast(message));
+                        }
+                    } else if click.clicked()
+                        && ctx
+                            .pointer_interact_pos()
+                            .is_some_and(|p| details_rect.contains(p))
+                    {
+                        if !self.tw_open.remove(&tw.id) {
+                            self.tw_open.insert(tw.id.clone());
+                        }
+                    } else if click.clicked() {
+                        if on {
+                            self.selected.remove(&tw.id);
+                        } else {
+                            if !tw.conflict.is_empty() {
+                                // one choice per group: ticking this unticks the other tweaks that write the same setting
+                                let peers: Vec<String> = cat
+                                    .tweaks
+                                    .iter()
+                                    .filter(|p| p.conflict == tw.conflict && p.id != tw.id)
+                                    .map(|p| p.id.clone())
+                                    .collect();
+                                for p in peers {
+                                    self.selected.remove(&p);
+                                }
                             }
+                            self.selected.insert(tw.id.clone());
                         }
                     }
-                });
+                }
+            });
         }
         if shown == 0 {
-            kit::empty_state(ui, "No tweaks match", "Try a shorter search or reset the filters.");
+            kit::empty_state(
+                ui,
+                "No tweaks match",
+                "Try a shorter search or reset the filters.",
+            );
         }
         if !cat.not_ported.is_empty() && q.is_empty() {
             ui.add_space(S4);
@@ -3578,7 +5003,11 @@ impl OptiUi {
         if !self.services_loaded && self.busy.is_none() {
             self.refresh_services(ctx);
         }
-        kit::page_header(ui, "Services", "Optimaxer's recommended Manual and Disabled lists. Core Windows services are hidden. The current start types are saved to a backup before every change.");
+        kit::page_header(
+            ui,
+            "Services",
+            "Optimaxer's recommended Manual and Disabled lists. Core Windows services are hidden. The current start types are saved to a backup before every change.",
+        );
         let idle = self.busy.is_none();
         let compact = ui.available_width() < 520.0;
         let mut clear_selection = false;
@@ -3588,18 +5017,37 @@ impl OptiUi {
             let mut q = std::mem::take(&mut self.svc_search);
             let search_width = if compact { 110.0 } else { 260.0 };
             let search_hint = if compact { "Search" } else { "Search services" };
-            ui.add_sized([search_width, 34.0], egui::TextEdit::singleline(&mut q).hint_text(search_hint).margin(Margin::symmetric(S3 as i8, 8)));
+            ui.add_sized(
+                [search_width, 34.0],
+                egui::TextEdit::singleline(&mut q)
+                    .hint_text(search_hint)
+                    .margin(Margin::symmetric(S3 as i8, 8)),
+            );
             self.svc_search = q;
             if kit::ghost(ui, "Select recommended", true).clicked() {
-                self.svc_sel = self.services.iter().filter(|s| s.rec.as_ref().is_some_and(|r| r.0 == 3)).map(|s| s.name.clone()).collect();
+                self.svc_sel = self
+                    .services
+                    .iter()
+                    .filter(|s| s.rec.as_ref().is_some_and(|r| r.0 == 3))
+                    .map(|s| s.name.clone())
+                    .collect();
             }
             if compact {
                 ui.menu_button("More", |ui| {
-                    if ui.add_enabled(!self.svc_sel.is_empty(), egui::Button::new("Clear selection")).clicked() {
+                    if ui
+                        .add_enabled(
+                            !self.svc_sel.is_empty(),
+                            egui::Button::new("Clear selection"),
+                        )
+                        .clicked()
+                    {
                         clear_selection = true;
                         ui.close();
                     }
-                    if ui.add_enabled(idle, egui::Button::new("Restore last backup")).clicked() {
+                    if ui
+                        .add_enabled(idle, egui::Button::new("Restore last backup"))
+                        .clicked()
+                    {
                         restore_services = true;
                         ui.close();
                     }
@@ -3613,7 +5061,11 @@ impl OptiUi {
                     self.svc_sel.clear();
                 }
                 if !self.svc_sel.is_empty() {
-                    ui.label(RichText::new(format!("{} selected", self.svc_sel.len())).size(T_SMALL).color(t.muted));
+                    ui.label(
+                        RichText::new(format!("{} selected", self.svc_sel.len()))
+                            .size(T_SMALL)
+                            .color(t.muted),
+                    );
                 }
             }
         });
@@ -3621,7 +5073,15 @@ impl OptiUi {
             self.svc_sel.clear();
         }
         if restore_services && idle && self.need_admin() {
-            self.pending = Some(Pending { title: "Restore services".into(), intro: "Put every service back to the start type saved in the most recent backup?".into(), lines: vec![], action: Action::RestoreServices, restore_option: false, ok_label: "Restore services".into() });
+            self.pending = Some(Pending {
+                title: "Restore services".into(),
+                intro: "Put every service back to the start type saved in the most recent backup?"
+                    .into(),
+                lines: vec![],
+                action: Action::RestoreServices,
+                restore_option: false,
+                ok_label: "Restore services".into(),
+            });
         }
         if refresh_services && idle {
             self.refresh_services(ctx);
@@ -3656,56 +5116,104 @@ impl OptiUi {
             if self.busy.is_some() {
                 kit::skeleton(ui, 6);
             } else {
-                kit::empty_state(ui, "No services loaded", "Press Refresh to read the service list.");
+                kit::empty_state(
+                    ui,
+                    "No services loaded",
+                    "Press Refresh to read the service list.",
+                );
             }
             return;
         }
         let q = self.svc_search.trim().to_lowercase();
         let mut last_group = "";
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            for s in &self.services {
-                if !q.is_empty() && !s.name.to_lowercase().contains(&q) && !s.display.to_lowercase().contains(&q) && !s.desc.to_lowercase().contains(&q) {
-                    continue;
-                }
-                let group = match s.rec.as_ref().map(|r| r.0) {
-                    Some(3) => "Recommended: set to Manual",
-                    Some(4) => "Recommended: disable",
-                    _ => "Other services",
-                };
-                if group != last_group {
-                    kit::group_title(ui, group);
-                    last_group = group;
-                }
-                let on = self.svc_sel.contains(&s.name);
-                let r = kit::row(ui, ("svc", &s.name), on, |ui| {
-                    ui.horizontal(|ui| {
-                        kit::check(ui, on);
-                        ui.vertical(|ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(RichText::new(if s.display.contains(s.name.as_str()) { s.display.clone() } else { format!("{}  ({})", s.display, s.name) }).font(FontId::new(T_BODY, semibold())).color(t.text));
-                                kit::chip(ui, &format!("{}, {}", s.mode(), if s.running { "running" } else { "stopped" }), if s.running { Tone::Brand } else { Tone::Neutral });
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for s in &self.services {
+                    if !q.is_empty()
+                        && !s.name.to_lowercase().contains(&q)
+                        && !s.display.to_lowercase().contains(&q)
+                        && !s.desc.to_lowercase().contains(&q)
+                    {
+                        continue;
+                    }
+                    let group = match s.rec.as_ref().map(|r| r.0) {
+                        Some(3) => "Recommended: set to Manual",
+                        Some(4) => "Recommended: disable",
+                        _ => "Other services",
+                    };
+                    if group != last_group {
+                        kit::group_title(ui, group);
+                        last_group = group;
+                    }
+                    let on = self.svc_sel.contains(&s.name);
+                    let r = kit::row(ui, ("svc", &s.name), on, |ui| {
+                        ui.horizontal(|ui| {
+                            kit::check(ui, on);
+                            ui.vertical(|ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label(
+                                        RichText::new(if s.display.contains(s.name.as_str()) {
+                                            s.display.clone()
+                                        } else {
+                                            format!("{}  ({})", s.display, s.name)
+                                        })
+                                        .font(FontId::new(T_BODY, semibold()))
+                                        .color(t.text),
+                                    );
+                                    kit::chip(
+                                        ui,
+                                        &format!(
+                                            "{}, {}",
+                                            s.mode(),
+                                            if s.running { "running" } else { "stopped" }
+                                        ),
+                                        if s.running {
+                                            Tone::Brand
+                                        } else {
+                                            Tone::Neutral
+                                        },
+                                    );
+                                });
+                                let desc = s
+                                    .rec
+                                    .as_ref()
+                                    .map(|r| r.1.as_str())
+                                    .filter(|d| !d.is_empty())
+                                    .unwrap_or(&s.desc);
+                                if !desc.is_empty() {
+                                    let shown: String = if desc.chars().count() > 170 {
+                                        desc.chars().take(167).collect::<String>() + "..."
+                                    } else {
+                                        desc.to_string()
+                                    };
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(shown).size(T_SMALL).color(t.muted),
+                                        )
+                                        .wrap(),
+                                    );
+                                }
                             });
-                            let desc = s.rec.as_ref().map(|r| r.1.as_str()).filter(|d| !d.is_empty()).unwrap_or(&s.desc);
-                            if !desc.is_empty() {
-                                let shown: String = if desc.chars().count() > 170 { desc.chars().take(167).collect::<String>() + "..." } else { desc.to_string() };
-                                ui.add(egui::Label::new(RichText::new(shown).size(T_SMALL).color(t.muted)).wrap());
-                            }
                         });
                     });
-                });
-                let click = ui.interact(r.response.rect, ui.scope_id().with(("svc-click", &s.name)), Sense::click());
-                if click.hovered() {
-                    ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-                if click.clicked() {
-                    if on {
-                        self.svc_sel.remove(&s.name);
-                    } else {
-                        self.svc_sel.insert(s.name.clone());
+                    let click = ui.interact(
+                        r.response.rect,
+                        ui.scope_id().with(("svc-click", &s.name)),
+                        Sense::click(),
+                    );
+                    if click.hovered() {
+                        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if click.clicked() {
+                        if on {
+                            self.svc_sel.remove(&s.name);
+                        } else {
+                            self.svc_sel.insert(s.name.clone());
+                        }
                     }
                 }
-            }
-        });
+            });
     }
 
     fn startup_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
@@ -3713,10 +5221,26 @@ impl OptiUi {
         if !self.startup_loaded && self.busy.is_none() {
             self.refresh_startup(ctx);
         }
-        kit::page_header(ui, "Startup", "Apps and third-party tasks that start with Windows. Turning one off changes its startup state; nothing is uninstalled.");
+        kit::page_header(
+            ui,
+            "Startup",
+            "Apps and third-party tasks that start with Windows. Turning one off changes its startup state; nothing is uninstalled.",
+        );
         let idle = self.busy.is_none();
-        let key = |i: &startup::Item| format!("{}|{}|{}", i.scope, i.task_path.as_deref().unwrap_or(""), i.name);
-        let picked: Vec<startup::Item> = self.startup.iter().filter(|i| self.st_sel.contains(&key(i))).cloned().collect();
+        let key = |i: &startup::Item| {
+            format!(
+                "{}|{}|{}",
+                i.scope,
+                i.task_path.as_deref().unwrap_or(""),
+                i.name
+            )
+        };
+        let picked: Vec<startup::Item> = self
+            .startup
+            .iter()
+            .filter(|i| self.st_sel.contains(&key(i)))
+            .cloned()
+            .collect();
         ui.horizontal_wrapped(|ui| {
             for (label, enable) in [("Turn off selected", false), ("Turn on selected", true)] {
                 if kit::secondary(ui, label, idle && !picked.is_empty()).clicked() && self.need_admin() {
@@ -3747,69 +5271,147 @@ impl OptiUi {
             if self.busy.is_some() {
                 kit::skeleton(ui, 5);
             } else {
-                kit::empty_state(ui, "No startup items found", "Nothing in Run keys, Startup folders, or third-party logon and boot tasks. Press Refresh to look again.");
+                kit::empty_state(
+                    ui,
+                    "No startup items found",
+                    "Nothing in Run keys, Startup folders, or third-party logon and boot tasks. Press Refresh to look again.",
+                );
             }
             return;
         }
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            for i in &self.startup {
-                let k = key(i);
-                let on = self.st_sel.contains(&k);
-                let r = kit::row(ui, ("st", &k), on, |ui| {
-                    ui.horizontal(|ui| {
-                        kit::check(ui, on);
-                        ui.vertical(|ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(RichText::new(&i.name).font(FontId::new(T_BODY, semibold())).color(t.text));
-                                kit::chip(ui, if i.enabled { "On" } else { "Off" }, if i.enabled { Tone::Good } else { Tone::Neutral });
-                                kit::chip(ui, i.scope, Tone::Neutral);
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for i in &self.startup {
+                    let k = key(i);
+                    let on = self.st_sel.contains(&k);
+                    let r = kit::row(ui, ("st", &k), on, |ui| {
+                        ui.horizontal(|ui| {
+                            kit::check(ui, on);
+                            ui.vertical(|ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label(
+                                        RichText::new(&i.name)
+                                            .font(FontId::new(T_BODY, semibold()))
+                                            .color(t.text),
+                                    );
+                                    kit::chip(
+                                        ui,
+                                        if i.enabled { "On" } else { "Off" },
+                                        if i.enabled { Tone::Good } else { Tone::Neutral },
+                                    );
+                                    kit::chip(ui, i.scope, Tone::Neutral);
+                                });
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&i.cmd)
+                                            .monospace()
+                                            .size(T_CAPTION)
+                                            .color(t.subtle),
+                                    )
+                                    .truncate(),
+                                );
                             });
-                            ui.add(egui::Label::new(RichText::new(&i.cmd).monospace().size(T_CAPTION).color(t.subtle)).truncate());
                         });
                     });
-                });
-                let click = ui.interact(r.response.rect, ui.scope_id().with(("st-click", &k)), Sense::click());
-                if click.hovered() {
-                    ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-                if click.clicked() {
-                    if on {
-                        self.st_sel.remove(&k);
-                    } else {
-                        self.st_sel.insert(k);
+                    let click = ui.interact(
+                        r.response.rect,
+                        ui.scope_id().with(("st-click", &k)),
+                        Sense::click(),
+                    );
+                    if click.hovered() {
+                        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if click.clicked() {
+                        if on {
+                            self.st_sel.remove(&k);
+                        } else {
+                            self.st_sel.insert(k);
+                        }
                     }
                 }
-            }
-        });
+            });
     }
 
     fn cleaner_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let t = tokens(ctx);
-        kit::page_header(ui, "Cleaner", "Scan first, then clean what you tick. Directory links are never followed, and deleted files do not go to the Recycle Bin.");
+        kit::page_header(
+            ui,
+            "Cleaner",
+            "Scan first, then clean what you tick. Directory links are never followed, and deleted files do not go to the Recycle Bin.",
+        );
         let idle = self.busy.is_none();
         let total: u64 = self.clean_sizes.values().flatten().sum();
-        let picked: Vec<&'static str> = cleaner::TARGETS.iter().map(|t| t.id).filter(|id| self.clean_sel.contains(id)).collect();
-        let preview_id = if picked.len() == 1 { picked.first().copied() } else { None };
+        let picked: Vec<&'static str> = cleaner::TARGETS
+            .iter()
+            .map(|t| t.id)
+            .filter(|id| self.clean_sel.contains(id))
+            .collect();
+        let preview_id = if picked.len() == 1 {
+            picked.first().copied()
+        } else {
+            None
+        };
         ui.horizontal_wrapped(|ui| {
             if kit::secondary(ui, "Scan", idle).clicked() {
                 self.scan_cleaner(ctx);
             }
-            let label = if picked.is_empty() { "Clean selected".to_string() } else { format!("Clean {} item{}", picked.len(), if picked.len() == 1 { "" } else { "s" }) };
+            let label = if picked.is_empty() {
+                "Clean selected".to_string()
+            } else {
+                format!(
+                    "Clean {} item{}",
+                    picked.len(),
+                    if picked.len() == 1 { "" } else { "s" }
+                )
+            };
             if kit::primary(ui, &label, idle && !picked.is_empty()).clicked() && self.need_admin() {
                 let lines = picked
                     .iter()
                     .filter_map(|id| cleaner::TARGETS.iter().find(|t| t.id == *id))
-                    .map(|t| Line { text: format!("{}   {}", t.name, self.clean_sizes.get(t.id).copied().flatten().map(|s| format_size(Some(s))).unwrap_or_default()), warn: t.risk != "Safe", head: false })
+                    .map(|t| Line {
+                        text: format!(
+                            "{}   {}",
+                            t.name,
+                            self.clean_sizes
+                                .get(t.id)
+                                .copied()
+                                .flatten()
+                                .map(|s| format_size(Some(s)))
+                                .unwrap_or_default()
+                        ),
+                        warn: t.risk != "Safe",
+                        head: false,
+                    })
                     .collect();
-                self.pending = Some(Pending { title: "Clean".into(), intro: "Delete the selected items? This cannot be undone.".into(), lines, action: Action::Clean(picked.clone()), restore_option: false, ok_label: format!("Delete {} item{}", picked.len(), if picked.len() == 1 { "" } else { "s" }) });
+                self.pending = Some(Pending {
+                    title: "Clean".into(),
+                    intro: "Delete the selected items? This cannot be undone.".into(),
+                    lines,
+                    action: Action::Clean(picked.clone()),
+                    restore_option: false,
+                    ok_label: format!(
+                        "Delete {} item{}",
+                        picked.len(),
+                        if picked.len() == 1 { "" } else { "s" }
+                    ),
+                });
             }
             if kit::secondary(ui, "Preview paths", idle && preview_id.is_some()).clicked() {
                 self.preview_cleaner(ctx, preview_id.unwrap());
             }
             if total > 0 {
-                ui.label(RichText::new(format!("{} can be reclaimed", format_size(Some(total)))).font(FontId::new(T_BODY, semibold())).color(t.good));
+                ui.label(
+                    RichText::new(format!("{} can be reclaimed", format_size(Some(total))))
+                        .font(FontId::new(T_BODY, semibold()))
+                        .color(t.good),
+                );
             } else if self.clean_sizes.is_empty() {
-                ui.label(RichText::new("Scan to see how much each item can free.").size(T_SMALL).color(t.muted));
+                ui.label(
+                    RichText::new("Scan to see how much each item can free.")
+                        .size(T_SMALL)
+                        .color(t.muted),
+                );
             }
         });
         if let Some((id, preview)) = &self.clean_preview
@@ -3818,49 +5420,109 @@ impl OptiUi {
             ui.add_space(S2);
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("Path preview · {}", target.name)).font(FontId::new(T_BODY, semibold())));
-                    if preview.truncated { kit::chip(ui, "List truncated", Tone::Warn); }
+                    ui.label(
+                        RichText::new(format!("Path preview · {}", target.name))
+                            .font(FontId::new(T_BODY, semibold())),
+                    );
+                    if preview.truncated {
+                        kit::chip(ui, "List truncated", Tone::Warn);
+                    }
                 });
-                ui.add(egui::Label::new(RichText::new(preview.summary).size(T_SMALL).color(t.muted)).wrap());
+                ui.add(
+                    egui::Label::new(RichText::new(preview.summary).size(T_SMALL).color(t.muted))
+                        .wrap(),
+                );
                 if preview.unreadable_directories > 0 {
-                    ui.label(RichText::new(format!("{} directories could not be read; preview may be incomplete.", preview.unreadable_directories)).size(T_SMALL).color(t.warn));
+                    ui.label(
+                        RichText::new(format!(
+                            "{} directories could not be read; preview may be incomplete.",
+                            preview.unreadable_directories
+                        ))
+                        .size(T_SMALL)
+                        .color(t.warn),
+                    );
                 }
                 if preview.files.is_empty() {
-                    ui.label(RichText::new("No accessible file paths found for this target.").size(T_SMALL).color(t.subtle));
+                    ui.label(
+                        RichText::new("No accessible file paths found for this target.")
+                            .size(T_SMALL)
+                            .color(t.subtle),
+                    );
                 } else {
-                    ui.label(RichText::new(format!("{} files listed · size can change before confirmation", preview.files.len())).size(T_CAPTION).color(t.subtle));
-                    egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
-                        for file in &preview.files {
-                            ui.horizontal(|ui| {
-                                ui.add(egui::Label::new(RichText::new(&file.path).monospace().size(T_CAPTION).color(t.text)).truncate()).on_hover_text(&file.path);
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    ui.label(RichText::new(format_size(Some(file.bytes))).size(T_CAPTION).color(t.muted));
+                    ui.label(
+                        RichText::new(format!(
+                            "{} files listed · size can change before confirmation",
+                            preview.files.len()
+                        ))
+                        .size(T_CAPTION)
+                        .color(t.subtle),
+                    );
+                    egui::ScrollArea::vertical()
+                        .max_height(180.0)
+                        .show(ui, |ui| {
+                            for file in &preview.files {
+                                ui.horizontal(|ui| {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(&file.path)
+                                                .monospace()
+                                                .size(T_CAPTION)
+                                                .color(t.text),
+                                        )
+                                        .truncate(),
+                                    )
+                                    .on_hover_text(&file.path);
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        ui.label(
+                                            RichText::new(format_size(Some(file.bytes)))
+                                                .size(T_CAPTION)
+                                                .color(t.muted),
+                                        );
+                                    });
                                 });
-                            });
-                        }
-                    });
+                            }
+                        });
                 }
             });
         }
         if let Some((id, error)) = &self.clean_preview_error
             && cleaner::TARGETS.iter().any(|target| target.id == *id)
         {
-            ui.label(RichText::new(format!("Path preview failed: {error}")).size(T_SMALL).color(t.bad));
+            ui.label(
+                RichText::new(format!("Path preview failed: {error}"))
+                    .size(T_SMALL)
+                    .color(t.bad),
+            );
         }
         ui.add_space(S2);
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            for category in cleaner::Category::ALL {
-                let targets: Vec<_> = cleaner::TARGETS.iter().filter(|target| cleaner::category(target) == category).collect();
-                if targets.is_empty() { continue; }
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(category.label()).font(FontId::new(T_SMALL, semibold())).color(t.subtle));
-                    ui.label(RichText::new(targets.len().to_string()).size(T_CAPTION).color(t.muted));
-                });
-                for target in targets {
-                    self.cleaner_row(ui, ctx, target);
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for category in cleaner::Category::ALL {
+                    let targets: Vec<_> = cleaner::TARGETS
+                        .iter()
+                        .filter(|target| cleaner::category(target) == category)
+                        .collect();
+                    if targets.is_empty() {
+                        continue;
+                    }
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(category.label())
+                                .font(FontId::new(T_SMALL, semibold()))
+                                .color(t.subtle),
+                        );
+                        ui.label(
+                            RichText::new(targets.len().to_string())
+                                .size(T_CAPTION)
+                                .color(t.muted),
+                        );
+                    });
+                    for target in targets {
+                        self.cleaner_row(ui, ctx, target);
+                    }
                 }
-            }
-        });
+            });
     }
 
     fn cleaner_row(&mut self, ui: &mut Ui, ctx: &egui::Context, tg: &Target) {
@@ -3871,12 +5533,19 @@ impl OptiUi {
                 kit::check(ui, on);
                 ui.vertical(|ui| {
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new(tg.name).font(FontId::new(T_BODY, semibold())).color(t.text));
+                        ui.label(
+                            RichText::new(tg.name)
+                                .font(FontId::new(T_BODY, semibold()))
+                                .color(t.text),
+                        );
                         if tg.risk != "Safe" {
                             kit::chip(ui, tg.risk, risk_tone(tg.risk));
                         }
                     });
-                    ui.add(egui::Label::new(RichText::new(tg.desc).size(T_SMALL).color(t.muted)).wrap());
+                    ui.add(
+                        egui::Label::new(RichText::new(tg.desc).size(T_SMALL).color(t.muted))
+                            .wrap(),
+                    );
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let text = match self.clean_sizes.get(tg.id) {
@@ -3885,11 +5554,19 @@ impl OptiUi {
                         Some(None) => "Sized when cleaned".to_string(),
                         None => String::new(),
                     };
-                    ui.label(RichText::new(text).font(FontId::new(T_BODY, semibold())).color(t.muted));
+                    ui.label(
+                        RichText::new(text)
+                            .font(FontId::new(T_BODY, semibold()))
+                            .color(t.muted),
+                    );
                 });
             });
         });
-        let click = ui.interact(r.response.rect, ui.scope_id().with(("cl-click", tg.id)), Sense::click());
+        let click = ui.interact(
+            r.response.rect,
+            ui.scope_id().with(("cl-click", tg.id)),
+            Sense::click(),
+        );
         if click.hovered() {
             ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
         }
@@ -3904,7 +5581,11 @@ impl OptiUi {
 
     fn network_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let t = tokens(ctx);
-        kit::page_header(ui, "Network", "Switch DNS, compare resolver responses, flush the cache, or reset the network stack.");
+        kit::page_header(
+            ui,
+            "Network",
+            "Switch DNS, compare resolver responses, flush the cache, or reset the network stack.",
+        );
         let idle = self.busy.is_none();
         ui.horizontal_wrapped(|ui| {
             if kit::secondary(ui, "Show current DNS", idle).clicked() {
@@ -3943,14 +5624,35 @@ impl OptiUi {
             if kit::ghost(ui, "Reset network stack", idle).clicked() && self.need_admin() {
                 self.pending = Some(Pending { title: "Reset network stack".into(), intro: "Reset Winsock and the IP stack? You may briefly lose connection and need to restart Windows.".into(), lines: vec![], action: Action::ResetNetwork, restore_option: false, ok_label: "Reset network stack".into() });
             }
+            if network::dns_backup_available() {
+                ui.label(RichText::new("Original DNS settings saved").size(T_CAPTION).color(t.warn));
+                if kit::secondary(ui, "Restore original DNS", idle).clicked() && self.need_admin() {
+                    self.pending = Some(Pending {
+                        title: "Restore original DNS settings".into(),
+                        intro: "Return adapters and DNS-over-HTTPS entries to the values saved before Optimaxer changed them. Settings changed outside Optimaxer are left untouched; incomplete restores keep the backup for retry.".into(),
+                        lines: vec![],
+                        action: Action::RestoreDns,
+                        restore_option: false,
+                        ok_label: "Restore DNS".into(),
+                    });
+                }
+            }
         });
         ui.add_space(S1);
         ui.label(RichText::new("Sends five UDP A-record lookups for example.com directly to each provider's first IPv4 server; DNS settings are not changed. Jitter is mean absolute change between consecutive successful response times. Failed probes are not IP packet-loss measurements.").size(T_CAPTION).color(t.subtle));
         if !self.bench.is_empty() {
-            ui.label(RichText::new("Resolver response time does not predict latency to a game server.").size(T_CAPTION).color(t.subtle));
+            ui.label(
+                RichText::new("Resolver response time does not predict latency to a game server.")
+                    .size(T_CAPTION)
+                    .color(t.subtle),
+            );
         }
         if !self.adapters.is_empty() {
-            ui.label(RichText::new(format!("Active adapters: {}", self.adapters.join(", "))).size(T_CAPTION).color(t.subtle));
+            ui.label(
+                RichText::new(format!("Active adapters: {}", self.adapters.join(", ")))
+                    .size(T_CAPTION)
+                    .color(t.subtle),
+            );
         }
         kit::group_title(ui, "DNS provider");
         let providers = self.data.dns.clone();
@@ -3964,7 +5666,7 @@ impl OptiUi {
                 if kit::tile(ui, vec2(252.0, 84.0), &p.name, &p.desc, ms.as_deref(), idle, false).clicked() && self.need_admin() {
                     self.pending = Some(Pending {
                         title: format!("Use {} for DNS", p.name),
-                        intro: format!("Set DNS to {} on all active network adapters?", p.name),
+                        intro: format!("Set DNS to {} on all active network adapters? Optimaxer saves the current IPv4, IPv6 and affected DNS-over-HTTPS settings first. Changes stop if that backup cannot be read or written.", p.name),
                         lines: p.v4.iter().chain(p.v6.iter()).map(|s| Line { text: s.clone(), warn: false, head: false }).collect(),
                         action: Action::SetDns(p.clone()),
                         restore_option: false,
@@ -3977,7 +5679,11 @@ impl OptiUi {
 
     fn tools_page(&mut self, ui: &mut Ui, ctx: &egui::Context, suggestions: &[AppItem]) {
         let t = tokens(ctx);
-        kit::page_header(ui, "Tools", "Maintenance helpers. Anything that changes the system asks first.");
+        kit::page_header(
+            ui,
+            "Tools",
+            "Maintenance helpers. Anything that changes the system asks first.",
+        );
         let idle = self.busy.is_none();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let size = vec2(268.0, 100.0);
@@ -4070,17 +5776,26 @@ impl OptiUi {
 
 /// Everything the confirmation window shows, as plain text for the clipboard.
 fn confirm_text(p: &Pending) -> String {
-    let mut out = format!("{}
+    let mut out = format!(
+        "{}
 {}
-", p.title, p.intro);
+",
+        p.title, p.intro
+    );
     for l in &p.lines {
         if l.head {
-            out.push_str(&format!("
+            out.push_str(&format!(
+                "
 {}
-", l.text));
+",
+                l.text
+            ));
         } else {
-            out.push_str(&format!("  {}
-", l.text));
+            out.push_str(&format!(
+                "  {}
+",
+                l.text
+            ));
         }
     }
     out
@@ -4089,19 +5804,35 @@ fn confirm_text(p: &Pending) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::opti::backend::fake::FakeSystem;
     use crate::opti::backend::RegData;
+    use crate::opti::backend::fake::FakeSystem;
 
     fn tr(laptop: bool) -> Traits {
         let gpus = vec!["NVIDIA GeForce RTX 3090".to_string()];
-        Traits { laptop, ssd: true, ram_gb: 32.0, threads: 16, tags: hw::tags_for(laptop, true, true, 32.0, 16, &gpus, 26100), gpus, ..Default::default() }
+        Traits {
+            laptop,
+            ssd: true,
+            ram_gb: 32.0,
+            threads: 16,
+            tags: hw::tags_for(laptop, true, true, 32.0, 16, &gpus, 26100),
+            gpus,
+            ..Default::default()
+        }
     }
 
     #[test]
     fn every_navigation_page_belongs_to_one_visible_sidebar_group() {
         assert_eq!(Page::ALL.len(), 13);
         for (group, expected_count) in PageGroup::ALL.into_iter().zip([4, 6, 3]) {
-            assert_eq!(Page::ALL.into_iter().filter(|page| page.group() == group).count(), expected_count, "{}", group.label());
+            assert_eq!(
+                Page::ALL
+                    .into_iter()
+                    .filter(|page| page.group() == group)
+                    .count(),
+                expected_count,
+                "{}",
+                group.label()
+            );
         }
     }
 
@@ -4115,14 +5846,22 @@ mod tests {
         assert_eq!(score(&cat, &t, &all), (total, total));
         assert_eq!(score(&cat, &t, &HashMap::new()).0, 0);
         let (_, laptop_total) = score(&cat, &tr(true), &HashMap::new());
-        assert!(laptop_total <= total, "desktop-only tweaks must not count on a laptop");
+        assert!(
+            laptop_total <= total,
+            "desktop-only tweaks must not count on a laptop"
+        );
     }
 
     #[test]
     fn storage_review_uses_available_capacity_and_ninety_percent_threshold() {
         use crate::opti::sysmon::Snapshot;
 
-        let mut snapshot = Snapshot { disk_used: 89, disk_total: 100, disk_available: true, ..Default::default() };
+        let mut snapshot = Snapshot {
+            disk_used: 89,
+            disk_total: 100,
+            disk_available: true,
+            ..Default::default()
+        };
         assert!(!storage_needs_review(&snapshot));
         snapshot.disk_used = 90;
         assert!(storage_needs_review(&snapshot));
@@ -4172,32 +5911,67 @@ mod tests {
         assert!(done.iter().any(|l| l.text.contains("already in effect")));
         sys.put(&t.reg[0].p, &t.reg[0].n, RegData::Str("20000".into()));
         let todo = plan_lines(&eng, &[t]);
-        assert!(todo.iter().any(|l| l.text.contains("20000") && l.text.contains("5000")));
+        assert!(
+            todo.iter()
+                .any(|l| l.text.contains("20000") && l.text.contains("5000"))
+        );
     }
 
     #[test]
     fn batch_refreshes_other_tweaks_that_share_a_setting() {
         use crate::opti::catalog::{RegItem, RegVal};
         let path = r"HKCU:\Software\OptimaxerBatchTest";
-        let first = Tweak { id: "first".into(), name: "First".into(), reg: vec![RegItem {
-            p: path.into(), n: "Choice".into(), v: RegVal::Num(1), t: "DWord".into(),
-        }], ..Default::default() };
+        let first = Tweak {
+            id: "first".into(),
+            name: "First".into(),
+            reg: vec![RegItem {
+                p: path.into(),
+                n: "Choice".into(),
+                v: RegVal::Num(1),
+                t: "DWord".into(),
+            }],
+            ..Default::default()
+        };
         let mut second = first.clone();
         second.id = "second".into();
         second.reg[0].v = RegVal::Num(2);
-        let cat = Catalog { tweaks: vec![first, second], ..Default::default() };
+        let cat = Catalog {
+            tweaks: vec![first, second],
+            ..Default::default()
+        };
         let sys = FakeSystem::default();
         sys.put(path, "Choice", RegData::Dword(2));
         let dir = std::env::temp_dir().join(format!("opti-batch-status-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut state = State::load_from(dir.join("state.json"), None);
         let eng = Engine::new(&sys, PathBuf::new());
-        let batch = run_batch(&eng, &cat, &["first".into()], true, false, &mut state, &mut |_| {});
+        let batch = run_batch(
+            &eng,
+            &cat,
+            &["first".into()],
+            true,
+            false,
+            &mut state,
+            &mut |_| {},
+        );
         assert_eq!(batch.now.get("first"), Some(&true));
         assert_eq!(batch.now.get("second"), Some(&false));
         assert!(batch.changes[0].verified && batch.changes[0].undo_available);
-        assert!(batch.changes[0].details.iter().any(|line| line.contains("2 -> 1")));
-        let undone = run_batch(&eng, &cat, &["first".into()], false, false, &mut state, &mut |_| {});
+        assert!(
+            batch.changes[0]
+                .details
+                .iter()
+                .any(|line| line.contains("2 -> 1"))
+        );
+        let undone = run_batch(
+            &eng,
+            &cat,
+            &["first".into()],
+            false,
+            false,
+            &mut state,
+            &mut |_| {},
+        );
         assert!(undone.changes[0].verified && !undone.changes[0].undo_available);
         assert!(undone.changes[0].details[0].contains("Saved originals: 1 registry values"));
         assert_eq!(sys.reg_get(path, "Choice"), Some(RegData::Dword(2)));
@@ -4211,12 +5985,20 @@ mod tests {
         let tweak = Tweak {
             id: "restart-test".into(),
             name: "Restart test".into(),
-            reg: vec![RegItem { p: path.into(), n: "Enabled".into(), v: RegVal::Num(1), t: "DWord".into() }],
+            reg: vec![RegItem {
+                p: path.into(),
+                n: "Enabled".into(),
+                v: RegVal::Num(1),
+                t: "DWord".into(),
+            }],
             restart: true,
             explorer: true,
             ..Default::default()
         };
-        let cat = Catalog { tweaks: vec![tweak], ..Default::default() };
+        let cat = Catalog {
+            tweaks: vec![tweak],
+            ..Default::default()
+        };
         let sys = FakeSystem::default();
         sys.put(path, "Enabled", RegData::Dword(0));
         let dir = std::env::temp_dir().join(format!("opti-restart-state-{}", std::process::id()));
@@ -4224,14 +6006,41 @@ mod tests {
         let mut state = State::load_from(dir.join("state.json"), None);
         let engine = Engine::new(&sys, PathBuf::new());
 
-        let applied = run_batch(&engine, &cat, &["restart-test".into()], true, false, &mut state, &mut |_| {});
+        let applied = run_batch(
+            &engine,
+            &cat,
+            &["restart-test".into()],
+            true,
+            false,
+            &mut state,
+            &mut |_| {},
+        );
         assert!(applied.changes[0].verified && applied.restart && applied.explorer);
 
-        let unchanged = run_batch(&engine, &cat, &["restart-test".into()], true, false, &mut state, &mut |_| {});
+        let unchanged = run_batch(
+            &engine,
+            &cat,
+            &["restart-test".into()],
+            true,
+            false,
+            &mut state,
+            &mut |_| {},
+        );
         assert!(unchanged.changes[0].verified);
-        assert!(!unchanged.restart && !unchanged.explorer, "reapplying an active tweak must not request restarts");
+        assert!(
+            !unchanged.restart && !unchanged.explorer,
+            "reapplying an active tweak must not request restarts"
+        );
 
-        let undone = run_batch(&engine, &cat, &["restart-test".into()], false, false, &mut state, &mut |_| {});
+        let undone = run_batch(
+            &engine,
+            &cat,
+            &["restart-test".into()],
+            false,
+            false,
+            &mut state,
+            &mut |_| {},
+        );
         assert!(undone.changes[0].verified && undone.restart && undone.explorer);
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -4245,26 +6054,52 @@ mod tests {
             id: "restart-failure-test".into(),
             name: "Restart failure test".into(),
             reg: vec![
-                RegItem { p: denied_path.into(), n: "Enabled".into(), v: RegVal::Num(1), t: "DWord".into() },
-                RegItem { p: writable_path.into(), n: "Enabled".into(), v: RegVal::Num(1), t: "DWord".into() },
+                RegItem {
+                    p: denied_path.into(),
+                    n: "Enabled".into(),
+                    v: RegVal::Num(1),
+                    t: "DWord".into(),
+                },
+                RegItem {
+                    p: writable_path.into(),
+                    n: "Enabled".into(),
+                    v: RegVal::Num(1),
+                    t: "DWord".into(),
+                },
             ],
             restart: true,
             explorer: true,
             ..Default::default()
         };
-        let cat = Catalog { tweaks: vec![tweak], ..Default::default() };
+        let cat = Catalog {
+            tweaks: vec![tweak],
+            ..Default::default()
+        };
         let sys = FakeSystem::default();
         sys.put(denied_path, "Enabled", RegData::Dword(0));
         sys.put(writable_path, "Enabled", RegData::Dword(0));
-        sys.deny_writes.borrow_mut().insert(denied_path.to_lowercase());
+        sys.deny_writes
+            .borrow_mut()
+            .insert(denied_path.to_lowercase());
         let dir = std::env::temp_dir().join(format!("opti-restart-failure-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut state = State::load_from(dir.join("state.json"), None);
         let engine = Engine::new(&sys, PathBuf::new());
 
-        let failed = run_batch(&engine, &cat, &["restart-failure-test".into()], true, false, &mut state, &mut |_| {});
+        let failed = run_batch(
+            &engine,
+            &cat,
+            &["restart-failure-test".into()],
+            true,
+            false,
+            &mut state,
+            &mut |_| {},
+        );
         assert!(!failed.changes[0].verified && failed.restart && !failed.explorer);
-        assert_eq!(sys.reg_get(writable_path, "Enabled"), Some(RegData::Dword(1)));
+        assert_eq!(
+            sys.reg_get(writable_path, "Enabled"),
+            Some(RegData::Dword(1))
+        );
         assert!(!sys.ran("taskkill.exe"));
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -4283,10 +6118,16 @@ mod tests {
         let ids = vec!["ui-ext".to_string(), "game-mode".to_string()];
         let b = run_batch(&eng, &cat, &ids, true, true, &mut st, &mut |_| {});
         assert!(b.restore_failed && b.now.is_empty());
-        assert!(st.records.is_empty(), "a tweak was applied after the restore point failed");
+        assert!(
+            st.records.is_empty(),
+            "a tweak was applied after the restore point failed"
+        );
         assert!(sys.values.borrow().is_empty(), "the registry was written");
         let b = run_batch(&eng, &cat, &ids, true, false, &mut st, &mut |_| {});
-        assert!(!b.restore_failed && ids.iter().all(|id| b.now.contains_key(id)), "without a restore point the batch runs");
+        assert!(
+            !b.restore_failed && ids.iter().all(|id| b.now.contains_key(id)),
+            "without a restore point the batch runs"
+        );
     }
 
     #[test]
@@ -4295,7 +6136,9 @@ mod tests {
         let t = cat.find("perf-shutdown").unwrap();
         let lines = tweak_technical(t);
         assert!(lines[0].contains("perf-shutdown") && lines[0].contains(&t.risk));
-        assert!(lines.iter().any(|l| l.starts_with("registry") && l.contains("WaitToKillAppTimeout") && l.contains("REG_SZ")));
+        assert!(lines.iter().any(|l| l.starts_with("registry")
+            && l.contains("WaitToKillAppTimeout")
+            && l.contains("REG_SZ")));
         // every tweak produces at least its header and one more line
         assert!(cat.tweaks.iter().all(|t| tweak_technical(t).len() >= 2));
     }
@@ -4310,17 +6153,48 @@ mod tests {
         }
         let t = &cat.tweaks[0];
         assert!(in_group(t, 6, true) && !in_group(t, 6, false) && in_group(t, 7, false));
-        assert!(cat.tweaks.iter().filter(|t| in_group(t, 1, false)).all(|t| t.has_tag("safe")));
+        assert!(
+            cat.tweaks
+                .iter()
+                .filter(|t| in_group(t, 1, false))
+                .all(|t| t.has_tag("safe"))
+        );
     }
 
     #[test]
     fn tweak_filters_combine_state_recommendation_favorites_and_compatibility() {
-        let recommended = Tweak { id: "recommended".into(), risk: "Safe".into(), tags: vec!["safe".into()], ..Default::default() };
-        let opt_in = Tweak { id: "opt-in".into(), risk: "Safe".into(), tags: vec!["optin".into()], ..Default::default() };
+        let recommended = Tweak {
+            id: "recommended".into(),
+            risk: "Safe".into(),
+            tags: vec!["safe".into()],
+            ..Default::default()
+        };
+        let opt_in = Tweak {
+            id: "opt-in".into(),
+            risk: "Safe".into(),
+            tags: vec!["optin".into()],
+            ..Default::default()
+        };
 
         assert!(tweak_matches_view(&recommended, true, true, false, 1, 1, 1));
-        assert!(!tweak_matches_view(&recommended, false, true, false, 1, 1, 1));
-        assert!(!tweak_matches_view(&recommended, false, false, false, 0, 1, 0));
+        assert!(!tweak_matches_view(
+            &recommended,
+            false,
+            true,
+            false,
+            1,
+            1,
+            1
+        ));
+        assert!(!tweak_matches_view(
+            &recommended,
+            false,
+            false,
+            false,
+            0,
+            1,
+            0
+        ));
         assert!(!tweak_matches_view(&opt_in, false, true, false, 0, 1, 0));
         assert!(tweak_matches_view(&opt_in, false, true, true, 2, 2, 1));
         assert!(!tweak_matches_view(&opt_in, false, false, true, 2, 2, 1));
@@ -4365,6 +6239,9 @@ mod tests {
 
     #[test]
     fn profile_summary_reports_unknown_facts_explicitly() {
-        assert_eq!(profile_summary(&Traits::default()), "Form factor unknown · Storage unknown · Windows version unknown");
+        assert_eq!(
+            profile_summary(&Traits::default()),
+            "Form factor unknown · Storage unknown · Windows version unknown"
+        );
     }
 }

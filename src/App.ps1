@@ -1026,13 +1026,14 @@ foreach ($p in $global:OptiDns) {
         param($s, $e)
         $d = $s.Tag
         if (-not (Test-Elevated)) { return }
-        if (-not (Confirm-Action "Set DNS to $($d.Name) on all active network adapters?")) { return }
+        if (-not (Confirm-Action "Set DNS to $($d.Name) on all active physical adapters? Optimaxer first saves the current IPv4, IPv6, and supported DNS-over-HTTPS settings.")) { return }
         [void](Start-OptiJob "DNS: $($d.Name)" -ArgList @($d.Name, ([string[]]$d.V4), ([string[]]$d.V6), $d.Doh) -Script {
             param($name, $v4, $v6, $doh) Set-DnsProvider -Name $name -V4 $v4 -V6 $v6 -Doh $doh
-        })
+        } -OnDone { $UI.BtnDnsRestore.IsEnabled = Test-Path -LiteralPath (Get-OptiDnsBackupPath) })
     })
     [void]$UI.DnsPanel.Children.Add($b)
 }
+$UI.BtnDnsRestore.IsEnabled = Test-Path -LiteralPath (Get-OptiDnsBackupPath)
 
 # ================================================================ features page
 $global:FtRows = Initialize-List $UI.FtList 'ft'
@@ -1464,6 +1465,18 @@ $UI.BtnFtRefresh.Add_Click({ Update-Features })
 
 $UI.BtnFlushDns.Add_Click({ [void](Start-OptiJob 'Flush DNS' -Script { Clear-DnsClientCache -ErrorAction Stop; Write-Log 'DNS cache flushed.' 'OK' }) })
 $UI.BtnDnsShow.Add_Click({ Show-CurrentDns })
+$UI.BtnDnsRestore.Add_Click({
+    if (-not (Test-Elevated)) { return }
+    if (-not (Test-Path -LiteralPath (Get-OptiDnsBackupPath))) {
+        $UI.BtnDnsRestore.IsEnabled = $false
+        Write-Log 'No saved DNS backup found.' 'WARN'
+        return
+    }
+    if (-not (Confirm-Action "Restore DNS settings saved before Optimaxer's change? Adapters changed elsewhere are left untouched.")) { return }
+    [void](Start-OptiJob 'Restoring original DNS' -Script { Restore-DnsProvider } -OnDone {
+        $UI.BtnDnsRestore.IsEnabled = Test-Path -LiteralPath (Get-OptiDnsBackupPath)
+    })
+})
 $UI.BtnResetNet.Add_Click({
     if (-not (Test-Elevated)) { return }
     if (-not (Confirm-Action "Reset Winsock and the IP stack?`nYou may briefly lose connection and need to restart.")) { return }

@@ -67,7 +67,14 @@ pub enum Sort {
 }
 
 impl Sort {
-    pub const ALL: [Sort; 6] = [Sort::Home, Sort::Newest, Sort::NameAsc, Sort::NameDesc, Sort::SizeAsc, Sort::SizeDesc];
+    pub const ALL: [Sort; 6] = [
+        Sort::Home,
+        Sort::Newest,
+        Sort::NameAsc,
+        Sort::NameDesc,
+        Sort::SizeAsc,
+        Sort::SizeDesc,
+    ];
     pub fn label(self) -> &'static str {
         match self {
             Sort::Home => "Home Page",
@@ -95,14 +102,24 @@ fn opt(o: &Value, key: &str) -> Option<String> {
 fn list(o: &Value, key: &str) -> Vec<String> {
     o.get(key)
         .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(Value::as_str).map(|v| v.trim().to_string()).filter(|v| !v.is_empty()).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
 fn safe_url(u: &str) -> String {
     let t = u.trim();
     let l = t.to_lowercase();
-    if l.starts_with("http://") || l.starts_with("https://") { t.to_string() } else { String::new() }
+    if l.starts_with("http://") || l.starts_with("https://") {
+        t.to_string()
+    } else {
+        String::new()
+    }
 }
 
 fn normalize_platform(p: &str, tags: &[String]) -> String {
@@ -111,7 +128,14 @@ fn normalize_platform(p: &str, tags: &[String]) -> String {
         "tv" => TV.into(),
         _ => {
             const PC_TAGS: [&str; 5] = ["windows", "pc", "desktop", "win32", "win64"];
-            if tags.iter().any(|t| PC_TAGS.contains(&t.to_lowercase().as_str())) { PC.into() } else { ANDROID.into() }
+            if tags
+                .iter()
+                .any(|t| PC_TAGS.contains(&t.to_lowercase().as_str()))
+            {
+                PC.into()
+            } else {
+                ANDROID.into()
+            }
         }
     }
 }
@@ -129,10 +153,17 @@ fn capitalize(c: &str) -> String {
 pub fn sanitize_app(raw: &Value) -> Option<AppItem> {
     raw.as_object()?;
     let tags = list(raw, "tags");
-    let name = Some(s(raw, "name")).filter(|n| !n.is_empty()).unwrap_or_else(|| "Unknown App".into());
+    let name = Some(s(raw, "name"))
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "Unknown App".into());
     let package_name = opt(raw, "packageName");
-    let id = Some(s(raw, "id")).filter(|v| !v.is_empty()).or_else(|| package_name.clone()).unwrap_or_else(|| name.clone());
-    let version = Some(s(raw, "version")).filter(|v| !v.is_empty()).unwrap_or_else(|| "Latest".into());
+    let id = Some(s(raw, "id"))
+        .filter(|v| !v.is_empty())
+        .or_else(|| package_name.clone())
+        .unwrap_or_else(|| name.clone());
+    let version = Some(s(raw, "version"))
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "Latest".into());
     let platform = normalize_platform(&s(raw, "platform"), &tags);
     Some(AppItem {
         id,
@@ -143,7 +174,9 @@ pub fn sanitize_app(raw: &Value) -> Option<AppItem> {
         download_url: safe_url(&s(raw, "downloadUrl")),
         variants: Vec::new(),
         versions: Vec::new(),
-        repo_url: opt(raw, "repoUrl").map(|u| safe_url(&u)).filter(|u| !u.is_empty()),
+        repo_url: opt(raw, "repoUrl")
+            .map(|u| safe_url(&u))
+            .filter(|u| !u.is_empty()),
         github_repo: opt(raw, "githubRepo"),
         gitlab_repo: opt(raw, "gitlabRepo"),
         gitlab_domain: opt(raw, "gitlabDomain"),
@@ -154,27 +187,47 @@ pub fn sanitize_app(raw: &Value) -> Option<AppItem> {
         tags,
         platform,
         size: s(raw, "size"),
-        author: Some(s(raw, "author")).filter(|v| !v.is_empty()).unwrap_or_else(|| "Unknown".into()),
-        screenshots: list(raw, "screenshots").iter().map(|u| safe_url(u)).filter(|u| !u.is_empty()).collect(),
-        official_site: opt(raw, "officialSite").map(|u| safe_url(&u)).filter(|u| !u.is_empty()),
+        author: Some(s(raw, "author"))
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| "Unknown".into()),
+        screenshots: list(raw, "screenshots")
+            .iter()
+            .map(|u| safe_url(u))
+            .filter(|u| !u.is_empty())
+            .collect(),
+        official_site: opt(raw, "officialSite")
+            .map(|u| safe_url(&u))
+            .filter(|u| !u.is_empty()),
         patches: list(raw, "patches"),
     })
 }
 
 pub fn format_size(bytes: Option<u64>) -> String {
-    let Some(b) = bytes.filter(|b| *b > 0) else { return "Varies".into() };
+    let Some(b) = bytes.filter(|b| *b > 0) else {
+        return "Varies".into();
+    };
     let units = ["B", "KB", "MB", "GB", "TB"];
     let i = ((b as f64).ln() / 1024f64.ln()).floor().clamp(0.0, 4.0) as usize;
     let v = (b as f64 / 1024f64.powi(i as i32) * 10.0).round() / 10.0;
-    if v.fract() == 0.0 { format!("{} {}", v as u64, units[i]) } else { format!("{v} {}", units[i]) }
+    if v.fract() == 0.0 {
+        format!("{} {}", v as u64, units[i])
+    } else {
+        format!("{v} {}", units[i])
+    }
 }
 
 pub fn parse_size(sz: &str) -> f64 {
     let text = sz.trim().to_lowercase();
-    let unit_at = text.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(text.len());
+    let unit_at = text
+        .find(|c: char| c.is_ascii_alphabetic())
+        .unwrap_or(text.len());
     let (number, unit) = text.split_at(unit_at);
-    let Ok(n) = number.trim().replace(',', "").parse::<f64>() else { return 0.0 };
-    if !n.is_finite() || n < 0.0 { return 0.0; }
+    let Ok(n) = number.trim().replace(',', "").parse::<f64>() else {
+        return 0.0;
+    };
+    if !n.is_finite() || n < 0.0 {
+        return 0.0;
+    }
     // Compare every catalog size in MB, including small files and multi-terabyte packages.
     match unit.trim() {
         "b" | "bytes" => n / (1024.0 * 1024.0),
@@ -192,7 +245,11 @@ pub fn determine_arch(name: &str) -> &'static str {
         "ARM64"
     } else if n.contains("armeabi") || n.contains("v7a") {
         "ARMv7"
-    } else if n.contains("x86_64") || n.contains("x64") || n.contains("amd64") || n.contains("win64") {
+    } else if n.contains("x86_64")
+        || n.contains("x64")
+        || n.contains("amd64")
+        || n.contains("win64")
+    {
         "x64"
     } else if n.contains("x86") || n.contains("i686") || n.contains("win32") {
         "x86"
@@ -218,7 +275,23 @@ fn detect_stream(file: &str, tag: &str, prerelease: bool) -> &'static str {
 /// First dotted number sequence after stripping release noise, same idea as the Android catalog processor.
 pub fn extract_version(input: &str) -> Option<String> {
     const NOISE: [&str; 17] = [
-        "armeabi-v7a", "arm64-v8a", "x86_64", "x86", "v7a", "v8a", "-all", "_all", "-universal", "_universal", "universal", ".apk", "release", "mod", "beta", "alpha", "nightly",
+        "armeabi-v7a",
+        "arm64-v8a",
+        "x86_64",
+        "x86",
+        "v7a",
+        "v8a",
+        "-all",
+        "_all",
+        "-universal",
+        "_universal",
+        "universal",
+        ".apk",
+        "release",
+        "mod",
+        "beta",
+        "alpha",
+        "nightly",
     ];
     let mut c = input.trim().to_lowercase();
     for n in NOISE {
@@ -230,7 +303,10 @@ pub fn extract_version(input: &str) -> Option<String> {
         if b[i].is_ascii_digit() {
             let start = i;
             let mut dots = 0;
-            while i < b.len() && (b[i].is_ascii_digit() || (b[i] == '.' && i + 1 < b.len() && b[i + 1].is_ascii_digit())) {
+            while i < b.len()
+                && (b[i].is_ascii_digit()
+                    || (b[i] == '.' && i + 1 < b.len() && b[i + 1].is_ascii_digit()))
+            {
                 if b[i] == '.' {
                     dots += 1;
                 }
@@ -257,7 +333,9 @@ pub struct Release {
 
 pub fn parse_mirror(root: &Value) -> HashMap<String, Vec<Release>> {
     let mut out = HashMap::new();
-    let Some(obj) = root.as_object() else { return out };
+    let Some(obj) = root.as_object() else {
+        return out;
+    };
     for (k, v) in obj {
         let arr: Vec<&Value> = match v {
             Value::Array(a) => a.iter().collect(),
@@ -270,12 +348,28 @@ pub fn parse_mirror(root: &Value) -> HashMap<String, Vec<Release>> {
             .map(|r| Release {
                 tag: s(r, "tag_name"),
                 name: s(r, "name"),
-                prerelease: r.get("prerelease").and_then(Value::as_bool).unwrap_or(false),
-                date: Some(s(r, "published_at")).filter(|d| !d.is_empty()).unwrap_or_else(|| s(r, "created_at")),
+                prerelease: r
+                    .get("prerelease")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                date: Some(s(r, "published_at"))
+                    .filter(|d| !d.is_empty())
+                    .unwrap_or_else(|| s(r, "created_at")),
                 assets: r
                     .get("assets")
                     .and_then(Value::as_array)
-                    .map(|a| a.iter().filter(|e| e.is_object()).map(|e| (s(e, "name"), s(e, "browser_download_url"), e.get("size").and_then(Value::as_u64))).collect())
+                    .map(|a| {
+                        a.iter()
+                            .filter(|e| e.is_object())
+                            .map(|e| {
+                                (
+                                    s(e, "name"),
+                                    s(e, "browser_download_url"),
+                                    e.get("size").and_then(Value::as_u64),
+                                )
+                            })
+                            .collect()
+                    })
                     .unwrap_or_default(),
             })
             .collect();
@@ -288,8 +382,29 @@ fn asset_matches(platform: &str, name: &str, url: &str) -> bool {
     let n = name.to_lowercase();
     let u = url.to_lowercase();
     if platform == PC {
-        const EXT: [&str; 8] = [".exe", ".msi", ".msix", ".appx", ".zip", ".7z", ".msixbundle", ".appxbundle"];
-        let wrong = ["linux", "macos", "darwin", "osx", ".dmg", ".deb", ".rpm", ".appimage", ".apk", ".tar", "android"];
+        const EXT: [&str; 8] = [
+            ".exe",
+            ".msi",
+            ".msix",
+            ".appx",
+            ".zip",
+            ".7z",
+            ".msixbundle",
+            ".appxbundle",
+        ];
+        let wrong = [
+            "linux",
+            "macos",
+            "darwin",
+            "osx",
+            ".dmg",
+            ".deb",
+            ".rpm",
+            ".appimage",
+            ".apk",
+            ".tar",
+            "android",
+        ];
         EXT.iter().any(|e| n.ends_with(e) || u.ends_with(e)) && !wrong.iter().any(|w| n.contains(w))
     } else {
         n.ends_with(".apk") || u.contains(".apk") || n == "apk" || n.contains("apk")
@@ -298,9 +413,20 @@ fn asset_matches(platform: &str, name: &str, url: &str) -> bool {
 
 fn arch_rank(platform: &str, arch: &str) -> u8 {
     if platform == PC {
-        match arch { "x64" => 0, "Universal" => 1, "x86" => 2, "ARM64" => 3, _ => 4 }
+        match arch {
+            "x64" => 0,
+            "Universal" => 1,
+            "x86" => 2,
+            "ARM64" => 3,
+            _ => 4,
+        }
     } else {
-        match arch { "Universal" => 1, "ARM64" => 2, "ARMv7" => 3, _ => 4 }
+        match arch {
+            "Universal" => 1,
+            "ARM64" => 2,
+            "ARMv7" => 3,
+            _ => 4,
+        }
     }
 }
 
@@ -314,7 +440,10 @@ fn repo_key(app: &AppItem) -> Vec<String> {
         keys.push(format!("github::github.com::{}", r.to_lowercase()));
     }
     if let Some(r) = &app.gitlab_repo {
-        let d = app.gitlab_domain.clone().unwrap_or_else(|| "gitlab.com".into());
+        let d = app
+            .gitlab_domain
+            .clone()
+            .unwrap_or_else(|| "gitlab.com".into());
         keys.push(format!("gitlab::{d}::{}", r.to_lowercase()));
     }
     if let Some(r) = &app.codeberg_repo {
@@ -334,26 +463,45 @@ fn repo_key(app: &AppItem) -> Vec<String> {
                 break;
             }
         }
-        let c = c.trim_end_matches('/').trim_end_matches(".git").trim_end_matches('/').to_string();
+        let c = c
+            .trim_end_matches('/')
+            .trim_end_matches(".git")
+            .trim_end_matches('/')
+            .to_string();
         keys.push(c);
     }
-    for r in [&app.github_repo, &app.gitlab_repo, &app.codeberg_repo].into_iter().flatten() {
+    for r in [&app.github_repo, &app.gitlab_repo, &app.codeberg_repo]
+        .into_iter()
+        .flatten()
+    {
         keys.push(r.to_lowercase());
     }
     keys
 }
 
 pub fn process_item(mut app: AppItem, mirror: &HashMap<String, Vec<Release>>) -> AppItem {
-    let Some(releases) = repo_key(&app).iter().find_map(|k| mirror.get(k)) else { return app };
+    let Some(releases) = repo_key(&app).iter().find_map(|k| mirror.get(k)) else {
+        return app;
+    };
     let kw = app.release_keyword.as_ref().map(|k| k.to_lowercase());
     let platform = app.platform.clone();
     let mut versions: Vec<(VersionOption, String)> = Vec::new();
     for r in releases {
-        let cands: Vec<_> = r.assets.iter().filter(|(n, u, _)| !safe_url(u).is_empty() && asset_matches(&platform, n, u)).collect();
+        let cands: Vec<_> = r
+            .assets
+            .iter()
+            .filter(|(n, u, _)| !safe_url(u).is_empty() && asset_matches(&platform, n, u))
+            .collect();
         let assets: Vec<_> = match &kw {
             None => cands,
             Some(k) => {
-                let hit: Vec<_> = cands.iter().filter(|(n, u, _)| n.to_lowercase().contains(k) || u.to_lowercase().contains(k)).cloned().collect();
+                let hit: Vec<_> = cands
+                    .iter()
+                    .filter(|(n, u, _)| {
+                        n.to_lowercase().contains(k) || u.to_lowercase().contains(k)
+                    })
+                    .cloned()
+                    .collect();
                 if !hit.is_empty() {
                     hit
                 } else if r.name.to_lowercase().contains(k) || r.tag.to_lowercase().contains(k) {
@@ -363,24 +511,57 @@ pub fn process_item(mut app: AppItem, mirror: &HashMap<String, Vec<Release>>) ->
                 }
             }
         };
-        let Some(first) = assets.first() else { continue };
+        let Some(first) = assets.first() else {
+            continue;
+        };
         let stream = detect_stream(&first.0, &r.tag, r.prerelease);
-        let tag_v = Some(r.tag.as_str()).filter(|t| !matches!(t.to_lowercase().as_str(), "latest" | "all")).and_then(extract_version);
+        let tag_v = Some(r.tag.as_str())
+            .filter(|t| !matches!(t.to_lowercase().as_str(), "latest" | "all"))
+            .and_then(extract_version);
         let date = r.date.split('T').next().unwrap_or("").to_string();
-        let version = extract_version(&first.0).or(tag_v).or_else(|| extract_version(&r.name)).unwrap_or_else(|| date.clone());
-        let mut variants: Vec<AppVariant> =
-            assets.iter().map(|(n, u, sz)| AppVariant { arch: determine_arch(n).into(), url: u.clone(), name: n.clone(), size: *sz }).collect();
+        let version = extract_version(&first.0)
+            .or(tag_v)
+            .or_else(|| extract_version(&r.name))
+            .unwrap_or_else(|| date.clone());
+        let mut variants: Vec<AppVariant> = assets
+            .iter()
+            .map(|(n, u, sz)| AppVariant {
+                arch: determine_arch(n).into(),
+                url: u.clone(),
+                name: n.clone(),
+                size: *sz,
+            })
+            .collect();
         variants.sort_by_key(|v| arch_rank(&platform, &v.arch));
-        versions.push((VersionOption { stream: stream.into(), version, date, variants }, date_key(&r.date)));
+        versions.push((
+            VersionOption {
+                stream: stream.into(),
+                version,
+                date,
+                variants,
+            },
+            date_key(&r.date),
+        ));
     }
     if versions.is_empty() {
         return app;
     }
     let latest: Vec<VersionOption> = STREAMS
         .iter()
-        .filter_map(|st| versions.iter().filter(|(v, _)| v.stream == *st).max_by(|a, b| a.1.cmp(&b.1)).map(|(v, _)| v.clone()))
+        .filter_map(|st| {
+            versions
+                .iter()
+                .filter(|(v, _)| v.stream == *st)
+                .max_by(|a, b| a.1.cmp(&b.1))
+                .map(|(v, _)| v.clone())
+        })
         .collect();
-    let def = latest.iter().find(|v| v.stream == "Stable").or(latest.first()).cloned().unwrap();
+    let def = latest
+        .iter()
+        .find(|v| v.stream == "Stable")
+        .or(latest.first())
+        .cloned()
+        .unwrap();
     let v0 = def.variants.first().cloned();
     app.version = def.version.clone();
     app.download_url = v0.as_ref().map(|v| v.url.clone()).unwrap_or_default();
@@ -394,11 +575,24 @@ pub fn process_item(mut app: AppItem, mirror: &HashMap<String, Vec<Release>>) ->
 
 pub fn process(raw: &Value, mirror: &Value) -> Vec<AppItem> {
     let m = parse_mirror(mirror);
-    raw.as_array().map(|a| a.iter().filter_map(sanitize_app).map(|app| process_item(app, &m)).collect()).unwrap_or_default()
+    raw.as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(sanitize_app)
+                .map(|app| process_item(app, &m))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 // endregion
 
-pub fn search(q: &str, category: &str, platform: Option<&str>, sort: Sort, apps: &[AppItem]) -> Vec<AppItem> {
+pub fn search(
+    q: &str,
+    category: &str,
+    platform: Option<&str>,
+    sort: Sort,
+    apps: &[AppItem],
+) -> Vec<AppItem> {
     let t = q.trim().to_lowercase();
     let mut out: Vec<AppItem> = if t.is_empty() {
         apps.to_vec()
@@ -409,9 +603,21 @@ pub fn search(q: &str, category: &str, platform: Option<&str>, sort: Sort, apps:
                 let n = a.name.to_lowercase();
                 let sc = if n.contains(&t) { 10 } else { 0 }
                     + if n.starts_with(&t) { 5 } else { 0 }
-                    + if a.author.to_lowercase().contains(&t) { 5 } else { 0 }
-                    + if a.description.to_lowercase().contains(&t) { 1 } else { 0 }
-                    + if a.id.to_lowercase().contains(&t) { 2 } else { 0 };
+                    + if a.author.to_lowercase().contains(&t) {
+                        5
+                    } else {
+                        0
+                    }
+                    + if a.description.to_lowercase().contains(&t) {
+                        1
+                    } else {
+                        0
+                    }
+                    + if a.id.to_lowercase().contains(&t) {
+                        2
+                    } else {
+                        0
+                    };
                 (sc > 0).then_some((sc, a))
             })
             .collect();
@@ -443,9 +649,19 @@ mod tests {
     #[test]
     fn size_sort_compares_bytes_through_terabytes() {
         let sizes = ["900 B", "1 KB", "1 MB", "2 GB", "1 TB"];
-        let apps: Vec<_> = sizes.iter().rev().map(|s| AppItem { size: (*s).into(), ..Default::default() }).collect();
+        let apps: Vec<_> = sizes
+            .iter()
+            .rev()
+            .map(|s| AppItem {
+                size: (*s).into(),
+                ..Default::default()
+            })
+            .collect();
         let sorted = search("", "All", None, Sort::SizeAsc, &apps);
-        assert_eq!(sorted.iter().map(|a| a.size.as_str()).collect::<Vec<_>>(), sizes);
+        assert_eq!(
+            sorted.iter().map(|a| a.size.as_str()).collect::<Vec<_>>(),
+            sizes
+        );
         assert_eq!(parse_size("1,024 MiB"), 1024.0);
         assert_eq!(parse_size("Varies"), 0.0);
         assert_eq!(parse_size("-5 GB"), 0.0);

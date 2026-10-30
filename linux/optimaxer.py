@@ -20,7 +20,7 @@ import tempfile
 import time
 import urllib.request
 
-__version__ = "2.15.25"
+__version__ = "2.15.26"
 REPO = "bliper2/optimaxer"
 STATE_FILE = "/var/lib/optimaxer/state.json"
 BACKUP_DIR = "/var/lib/optimaxer/backups"
@@ -1659,10 +1659,12 @@ def menu_network() -> None:
     keys = list(DNS)
     render = lambda k: f"{DNS[k][0]}  {', '.join(DNS[k][1]) or 'router default'}"
     cmd, sel = pick("DNS provider (applies to active NetworkManager connections)", keys, render, "set | restore")
-    if cmd == "restore":
+    if cmd == "restore" and confirm("Restore the saved DNS settings on Optimaxer-managed connections?"):
         restore_dns()
     elif cmd == "set" and len(sel) == 1:
-        set_dns(keys[next(iter(sel))])
+        key = keys[next(iter(sel))]
+        if confirm(f"Set DNS to {DNS[key][0]}? Optimaxer saves the current connection settings first."):
+            set_dns(key)
     elif cmd == "set":
         print("  select exactly one provider")
 
@@ -2275,7 +2277,7 @@ class Gui:
         ttk = self.ttk
         ttk.Label(f, text="DNS provider. Applies to the active NetworkManager connections; Restore returns to the saved settings.", style="Dim.TLabel").pack(anchor="w")
         self.checklist(f, "dns", [("name", "Provider", 220), ("addr", "Servers", 480)], with_filter=False, checks=False).pack(fill="both", expand=True)
-        self._buttons(f, [("Use selected provider", self.run_dns, True), ("Restore previous DNS", lambda: self.work("Restoring DNS", restore_dns), False)])
+        self._buttons(f, [("Use selected provider", self.run_dns, True), ("Restore previous DNS", self.run_dns_restore, False)])
 
     def _page_tools(self, f):
         ttk = self.ttk
@@ -2471,7 +2473,14 @@ class Gui:
         if not sel:
             return self.say("Pick a provider first.")
         key = info["iids"][sel[0]]
+        if not self.ask_yes(f"Set DNS to {DNS[key][0]}? Optimaxer saves the current connection settings before changing them."):
+            return
         self.work("Setting DNS", lambda: set_dns(key))
+
+    def run_dns_restore(self):
+        if not self.ask_yes("Restore the saved DNS settings on Optimaxer-managed connections?"):
+            return
+        self.work("Restoring DNS", restore_dns)
 
     def undo_everything(self):
         if self.ask_yes("Undo every tweak, service change and DNS change Optimaxer made?"):
@@ -2690,8 +2699,16 @@ def main(argv: list | None = None) -> int:
         for r in installed_debloat():
             print(f"{r['pkg']:<22} {fmt_size(r['size']):>10}  {r['label']}")
     elif args.cmd == "dns":
-        ok = restore_dns() if args.provider == "restore" else set_dns(args.provider)
-        rc = 0 if ok else 1
+        question = (
+            "Restore the saved DNS settings?"
+            if args.provider == "restore"
+            else f"Set DNS to {DNS[args.provider][0]}? The current connection settings are backed up first."
+        )
+        if confirm(question):
+            ok = restore_dns() if args.provider == "restore" else set_dns(args.provider)
+            rc = 0 if ok else 1
+        else:
+            rc = 1
     elif args.cmd == "update":
         rc = 0 if self_update() else 1
     return rc

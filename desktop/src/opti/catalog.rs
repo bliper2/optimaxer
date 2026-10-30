@@ -3,7 +3,7 @@
 //! are plain data. Tweaks that ran scripts are mapped to a `Special` port, or listed as not ported.
 
 use super::backend::RegData;
-use super::special::{special_for, Special};
+use super::special::{Special, special_for};
 use serde::Deserialize;
 
 const EMBEDDED: &str = include_str!("../../assets/optimaxer/tweaks.json");
@@ -100,7 +100,8 @@ impl Tweak {
         if self.has_tag("optin") || !self.retired.is_empty() || self.risk == "Advanced" {
             return false;
         }
-        self.has_tag("perf") || (self.risk == "Safe" && (self.has_tag("safe") || self.has_tag("smart")))
+        self.has_tag("perf")
+            || (self.risk == "Safe" && (self.has_tag("safe") || self.has_tag("smart")))
     }
 }
 
@@ -140,7 +141,8 @@ impl Catalog {
     }
 
     pub fn parse(json: &str) -> Result<Catalog, String> {
-        let all: Vec<Tweak> = serde_json::from_str(json.trim_start_matches('\u{feff}')).map_err(|e| e.to_string())?;
+        let all: Vec<Tweak> =
+            serde_json::from_str(json.trim_start_matches('\u{feff}')).map_err(|e| e.to_string())?;
         let mut cat = Catalog::default();
         for mut t in all {
             if t.svc_tol <= 0.0 {
@@ -156,9 +158,13 @@ impl Catalog {
             if scripted && t.special.is_none() {
                 // keep only tweaks whose missing script step is a harmless extra; a script that guards or undoes
                 // something (OneDrive, Edge removal) must not run half of itself
-                let keep_partial = PARTIAL_OK.contains(&t.id.as_str()) && !(t.reg.is_empty() && t.svc.is_empty() && t.task.is_empty());
+                let keep_partial = PARTIAL_OK.contains(&t.id.as_str())
+                    && !(t.reg.is_empty() && t.svc.is_empty() && t.task.is_empty());
                 if !keep_partial {
-                    cat.not_ported.push(Skipped { id: t.id.clone(), name: t.name.clone() });
+                    cat.not_ported.push(Skipped {
+                        id: t.id.clone(),
+                        name: t.name.clone(),
+                    });
                     continue;
                 }
                 t.partial = true;
@@ -185,7 +191,11 @@ mod tests {
         assert_eq!(c.not_ported.len(), 11);
         let ids: HashSet<_> = c.tweaks.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids.len(), c.tweaks.len());
-        assert!(c.tweaks.len() > 190, "most of the catalog should be ported, got {}", c.tweaks.len());
+        assert!(
+            c.tweaks.len() > 190,
+            "most of the catalog should be ported, got {}",
+            c.tweaks.len()
+        );
     }
 
     #[test]
@@ -193,7 +203,14 @@ mod tests {
         let c = Catalog::load();
         for t in &c.tweaks {
             for r in &t.reg {
-                assert!(["HKLM:", "HKCU:", "HKU:", "HKCR:"].iter().any(|h| r.p.starts_with(h)), "{}: {}", t.id, r.p);
+                assert!(
+                    ["HKLM:", "HKCU:", "HKU:", "HKCR:"]
+                        .iter()
+                        .any(|h| r.p.starts_with(h)),
+                    "{}: {}",
+                    t.id,
+                    r.p
+                );
                 assert!(!r.n.is_empty(), "{} has an empty value name", t.id);
             }
         }
@@ -203,11 +220,24 @@ mod tests {
     fn value_types_map_correctly() {
         let c = Catalog::load();
         let t = c.find("perf-shutdown").unwrap();
-        assert!(t.reg.iter().any(|r| r.wanted() == RegData::Str("5000".into())));
+        assert!(
+            t.reg
+                .iter()
+                .any(|r| r.wanted() == RegData::Str("5000".into()))
+        );
         let t = c.find("game-mmcss").unwrap();
-        assert!(t.reg.iter().any(|r| r.n == "NetworkThrottlingIndex" && r.wanted() == RegData::Dword(0xFFFF_FFFF)));
+        assert!(
+            t.reg
+                .iter()
+                .any(|r| r.n == "NetworkThrottlingIndex"
+                    && r.wanted() == RegData::Dword(0xFFFF_FFFF))
+        );
         let t = c.find("perf-visualfx").unwrap();
-        assert!(t.reg.iter().any(|r| matches!(r.wanted(), RegData::Bin(b) if b.len() == 8)));
+        assert!(
+            t.reg
+                .iter()
+                .any(|r| matches!(r.wanted(), RegData::Bin(b) if b.len() == 8))
+        );
     }
 
     #[test]
@@ -217,13 +247,23 @@ mod tests {
         assert!(c.find("net-smb1").unwrap().special.is_none());
         assert!(!c.find("net-smb1").unwrap().reg.is_empty());
         assert!(c.not_ported.iter().any(|s| s.id == "debloat-onedrive"));
-        assert!(c.find("ai-settingspage").is_some_and(|t| t.special.is_some()));
-        assert!(c.find("ui-thispc-folders").is_some_and(|t| t.special.is_some()));
+        assert!(
+            c.find("ai-settingspage")
+                .is_some_and(|t| t.special.is_some())
+        );
+        assert!(
+            c.find("ui-thispc-folders")
+                .is_some_and(|t| t.special.is_some())
+        );
         assert!(c.find("wu-pause").is_some_and(|t| t.special.is_some()));
         assert!(c.find("ai-recall").map(|t| t.partial).unwrap_or(false));
         // the snapshot-based ports must exist, and perf-fth is plain registry now (no FTH list reset)
         for id in ["net-nagle", "perf-timer", "perf-sleepstudy"] {
-            assert!(c.find(id).is_some_and(|t| t.special.is_some() && t.script.snapshot), "{id}");
+            assert!(
+                c.find(id)
+                    .is_some_and(|t| t.special.is_some() && t.script.snapshot),
+                "{id}"
+            );
         }
         let fth = c.find("perf-fth").unwrap();
         assert!(fth.special.is_none() && !fth.script.apply && !fth.reg.is_empty());
@@ -236,21 +276,60 @@ mod tests {
             assert_eq!(t.risk, "Safe", "{} is tagged safe", t.id);
         }
         for t in c.tweaks.iter().filter(|t| t.has_tag("perf")) {
-            assert!(t.risk != "Advanced" && !t.has_tag("optin") && t.retired.is_empty(), "{} in the performance set", t.id);
+            assert!(
+                t.risk != "Advanced" && !t.has_tag("optin") && t.retired.is_empty(),
+                "{} in the performance set",
+                t.id
+            );
         }
         assert!(c.tweaks.iter().filter(|t| !t.retired.is_empty()).count() >= 7);
-        for id in ["perf-prefetch", "perf-timer", "perf-cpupower", "perf-priosep", "game-mpo", "game-fso", "net-nagle", "perf-bgapps", "perf-memcompress", "perf-fth"] {
+        for id in [
+            "perf-prefetch",
+            "perf-timer",
+            "perf-cpupower",
+            "perf-priosep",
+            "game-mpo",
+            "game-fso",
+            "net-nagle",
+            "perf-bgapps",
+            "perf-memcompress",
+            "perf-fth",
+        ] {
             let Some(t) = c.find(id) else {
                 assert!(c.not_ported.iter().any(|s| s.id == id), "{id} missing");
                 continue;
             };
-            assert!(t.has_tag("optin") && !t.has_tag("safe") && !t.has_tag("gaming") && !t.has_tag("max"), "{id} tags {:?}", t.tags);
+            assert!(
+                t.has_tag("optin")
+                    && !t.has_tag("safe")
+                    && !t.has_tag("gaming")
+                    && !t.has_tag("max"),
+                "{id} tags {:?}",
+                t.tags
+            );
             assert!(!t.auto_pick(), "{id}");
         }
-        let mut gaming: Vec<_> = c.tweaks.iter().filter(|t| t.has_tag("gaming")).map(|t| t.id.as_str()).collect();
+        let mut gaming: Vec<_> = c
+            .tweaks
+            .iter()
+            .filter(|t| t.has_tag("gaming"))
+            .map(|t| t.id.as_str())
+            .collect();
         gaming.sort();
-        assert_eq!(gaming, ["game-dvr", "game-mode", "game-mouse", "game-sticky"]);
-        assert!(c.find("game-dvr-policy").is_some_and(|t| t.has_tag("optin")));
-        assert!(c.tweaks.iter().filter(|t| t.conflict == "search style").count() >= 2);
+        assert_eq!(
+            gaming,
+            ["game-dvr", "game-mode", "game-mouse", "game-sticky"]
+        );
+        assert!(
+            c.find("game-dvr-policy")
+                .is_some_and(|t| t.has_tag("optin"))
+        );
+        assert!(
+            c.tweaks
+                .iter()
+                .filter(|t| t.conflict == "search style")
+                .count()
+                >= 2
+        );
     }
 }

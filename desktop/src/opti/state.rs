@@ -85,7 +85,8 @@ fn legacy_path() -> Option<PathBuf> {
 fn read_records(path: &Path) -> Result<BTreeMap<String, Record>, String> {
     let bytes = fs::read(path).map_err(|e| e.to_string())?;
     // PowerShell writes a UTF-8 BOM
-    let text = String::from_utf8_lossy(bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes)).into_owned();
+    let text = String::from_utf8_lossy(bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes))
+        .into_owned();
     serde_json::from_str(&text).map_err(|e| e.to_string())
 }
 
@@ -102,16 +103,23 @@ impl State {
                 Ok(r) => records = r,
                 Err(why) => {
                     // keep the unreadable file: the next save would otherwise overwrite every saved original value
-                    let keep = path.with_file_name(format!("state-unreadable-{}.json", super::now_stamp()));
+                    let keep = path
+                        .with_file_name(format!("state-unreadable-{}.json", super::now_stamp()));
                     let _ = fs::copy(&path, keep);
-                    load_error = Some(format!("Undo state is unreadable ({why}); recover the saved file before changing tweaks"));
+                    load_error = Some(format!(
+                        "Undo state is unreadable ({why}); recover the saved file before changing tweaks"
+                    ));
                 }
             }
         } else if let Some(l) = legacy.filter(|l| l.exists()) {
             match read_records(&l) {
                 Ok(r) => {
                     records = r;
-                    let s = State { records: records.clone(), path: path.clone(), load_error: None };
+                    let s = State {
+                        records: records.clone(),
+                        path: path.clone(),
+                        load_error: None,
+                    };
                     if let Err(e) = s.save() {
                         load_error = Some(format!("Could not import the undo state: {e}"));
                     }
@@ -119,7 +127,11 @@ impl State {
                 Err(e) => load_error = Some(format!("Legacy undo state is unreadable: {e}")),
             }
         }
-        State { records, path, load_error }
+        State {
+            records,
+            path,
+            load_error,
+        }
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -129,7 +141,9 @@ impl State {
         let tmp = self.path.with_extension("tmp");
         let json = serde_json::to_vec_pretty(&self.records).map_err(|e| e.to_string())?;
         let mut file = fs::File::create(&tmp).map_err(|e| e.to_string())?;
-        file.write_all(&json).and_then(|_| file.sync_all()).map_err(|e| e.to_string())?;
+        file.write_all(&json)
+            .and_then(|_| file.sync_all())
+            .map_err(|e| e.to_string())?;
         drop(file);
         fs::rename(&tmp, &self.path).map_err(|e| e.to_string())
     }
@@ -166,7 +180,10 @@ mod tests {
         let rec = &s.records["perf-animations"];
         assert_eq!(rec.reg[0].n, "MenuShowDelay");
         assert_eq!(rec.reg[0].value, Value::String("400".into()));
-        assert!(d.join("state.json").exists(), "imported once into the shared data directory");
+        assert!(
+            d.join("state.json").exists(),
+            "imported once into the shared data directory"
+        );
         // legacy file is never touched
         assert_eq!(fs::read(&ps).unwrap().len(), json.len() + 3);
     }
@@ -175,12 +192,19 @@ mod tests {
     fn import_happens_only_once() {
         let d = temp("once");
         let ps = d.join("legacy.json");
-        fs::write(&ps, r#"{"a":{"Reg":[],"Svc":[],"Task":[],"Data":null,"Time":"t"}}"#).unwrap();
+        fs::write(
+            &ps,
+            r#"{"a":{"Reg":[],"Svc":[],"Task":[],"Data":null,"Time":"t"}}"#,
+        )
+        .unwrap();
         let mut s = State::load_from(d.join("state.json"), Some(ps.clone()));
         s.records.remove("a");
         s.save().unwrap();
         let again = State::load_from(d.join("state.json"), Some(ps));
-        assert!(!again.contains("a"), "an undone tweak must not come back from the legacy file");
+        assert!(
+            !again.contains("a"),
+            "an undone tweak must not come back from the legacy file"
+        );
     }
 
     #[test]
@@ -189,10 +213,17 @@ mod tests {
         fs::write(d.join("state.json"), "{ not json").unwrap();
         let s = State::load_from(d.join("state.json"), None);
         assert!(s.records.is_empty());
-        let kept = fs::read_dir(&d).unwrap().filter_map(Result::ok).any(|e| e.file_name().to_string_lossy().starts_with("state-unreadable-"));
+        let kept = fs::read_dir(&d).unwrap().filter_map(Result::ok).any(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("state-unreadable-")
+        });
         assert!(kept);
         assert!(s.save().is_err());
-        assert_eq!(fs::read_to_string(d.join("state.json")).unwrap(), "{ not json");
+        assert_eq!(
+            fs::read_to_string(d.join("state.json")).unwrap(),
+            "{ not json"
+        );
     }
 
     #[test]
@@ -212,7 +243,13 @@ mod tests {
     fn save_round_trips() {
         let d = temp("rt");
         let mut s = State::load_from(d.join("state.json"), None);
-        s.records.insert("x".into(), Record { data: serde_json::json!({"Prev": 2}), ..Default::default() });
+        s.records.insert(
+            "x".into(),
+            Record {
+                data: serde_json::json!({"Prev": 2}),
+                ..Default::default()
+            },
+        );
         s.save().unwrap();
         let again = State::load_from(d.join("state.json"), None);
         assert_eq!(again.records["x"].data["Prev"], 2);
