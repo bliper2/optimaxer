@@ -46,7 +46,7 @@ Or download the zip from [Releases](https://github.com/bliper2/optimaxer/release
 - **Config**: export/import what you ticked on Install and Tweaks, create a desktop shortcut, and run unattended (see below).
 - **Services**: ~240 services with recommended Manual/Disable lists, protected core services hidden, JSON backup before every change.
 - **Startup**: registry, startup-folder **and scheduled-task** entries that run at logon/boot; enable or disable without uninstalling.
-- **Cleaner**: scan, then clean temp files, update/shader/browser/dev-tool caches (npm, pip, NuGet, VS Code...), dumps, logs, event logs, font cache, Recycle Bin, component store and Windows.old.
+- **Cleaner**: scan, review targets grouped by cleanup type, preview up to 200 matched paths for one selected target, then confirm before cleaning Windows temp files, update/shader/browser/dev-tool caches, logs and other supported locations. System-managed targets disclose when Windows cannot show per-item paths.
 - **Debloat**: curated Appx removal (Microsoft, OEM and game bloat) with safety levels.
 - **Network**: DNS provider switch (+DoH), latency benchmark, stack reset; opt-in hosts-file telemetry block.
 - **Features**: Hyper-V, WSL, Sandbox, .NET 3.5 and more.

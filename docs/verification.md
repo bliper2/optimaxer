@@ -23,6 +23,8 @@ Rendering confirms that pages open and produce images. It does not verify every 
 
 The v2.15.14 Cleaner preview is covered by Windows-host tests for real file paths and sizes, no mutation, the 200-file cap, truncation and junction avoidance. Preview runs on a background worker. Interactive confirmation and actual deletion remain separate steps; the preview can become stale if files change before cleanup.
 
+The v2.15.15 Cleaner catalog test checks the counts in all nine cleanup groups, so every current target remains accounted for when the list changes. The existing Cleaner screenshot now shows the grouped layout; it does not exercise category selection or deletion.
+
 The v2.15.5 Windows release build was also opened interactively at 1180 × 760: Commands opened the palette, searching `Tweaks` returned one result, and Enter navigated to the Tweaks page. This is a focused smoke check, not full keyboard-only or accessibility testing.
 
 The v2.15.6 Windows release build was opened at 1180 × 760. Settings content scrolled to the lower sections, the Arctic palette changed the live interface, and the selected palette remained after restarting the app. The original settings file was restored after the check. This does not cover every palette or display scale.

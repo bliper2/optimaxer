@@ -3771,8 +3771,16 @@ impl OptiUi {
         }
         ui.add_space(S2);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            for tg in cleaner::TARGETS {
-                self.cleaner_row(ui, ctx, tg);
+            for category in cleaner::Category::ALL {
+                let targets: Vec<_> = cleaner::TARGETS.iter().filter(|target| cleaner::category(target) == category).collect();
+                if targets.is_empty() { continue; }
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(category.label()).font(FontId::new(T_SMALL, semibold())).color(t.subtle));
+                    ui.label(RichText::new(targets.len().to_string()).size(T_CAPTION).color(t.muted));
+                });
+                for target in targets {
+                    self.cleaner_row(ui, ctx, target);
+                }
             }
         });
     }
