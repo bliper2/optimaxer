@@ -6,6 +6,7 @@ use crate::kit;
 use crate::model::{format_size, AppItem};
 use crate::net::{self, Settings};
 use crate::opti::backend::{RegData, System, WinSystem};
+use crate::opti::backup_integrity::{self, Check as BackupCheck, Status as BackupStatus};
 use crate::opti::catalog::{Catalog, Tweak};
 use crate::opti::cleaner::{self, Target};
 use crate::opti::diagnostics::{self, Check as DiagnosticCheck, Result as DiagnosticResult};
@@ -168,6 +169,7 @@ enum Msg {
     Snapshots(Result<Vec<SystemSnapshot>, String>),
     Processes(Result<(Vec<ProcessInfo>, CpuTimes), String>),
     RestartRequired,
+    BackupIntegrity(Vec<BackupCheck>),
 }
 
 #[derive(Clone)]
@@ -251,6 +253,7 @@ pub struct OptiUi {
     diagnostic_results: HashMap<DiagnosticCheck, DiagnosticResult>,
     snapshots: Vec<SystemSnapshot>,
     snapshots_error: Option<String>,
+    backup_integrity: Option<Vec<BackupCheck>>,
     profile_name: String,
     compare_profile_left: String,
     compare_profile_right: String,
@@ -705,6 +708,7 @@ impl OptiUi {
             diagnostic_results: HashMap::new(),
             snapshots,
             snapshots_error,
+            backup_integrity: None,
             profile_name: "My profile".into(),
             compare_profile_left: String::new(),
             compare_profile_right: String::new(),
@@ -912,6 +916,7 @@ impl OptiUi {
                     self.snapshots_error = None;
                 }
                 Msg::Snapshots(Err(error)) => self.snapshots_error = Some(error),
+                Msg::BackupIntegrity(checks) => self.backup_integrity = Some(checks),
                 Msg::Processes(Ok((rows, cpu_times))) => {
                     self.processes = rows;
                     self.process_cpu = cpu_times;
@@ -2295,6 +2300,16 @@ impl OptiUi {
         });
     }
 
+    fn check_saved_backups(&mut self, ctx: &egui::Context) {
+        let optimaxer_dir = net::data_dir().join("optimaxer");
+        let state_file = optimaxer_dir.join("state.json");
+        let backup_dir = optimaxer_dir.join("backups");
+        self.backup_integrity = None;
+        self.spawn(ctx, "Checking saved backups", move |worker| {
+            worker.send(Msg::BackupIntegrity(backup_integrity::inspect(&state_file, &backup_dir)));
+        });
+    }
+
     fn capture_system_snapshot(&mut self, ctx: &egui::Context) {
         self.spawn_recorded(ctx, "Capture system snapshot", |worker| {
             let snapshot = snapshots::capture(&WinSystem);
@@ -3382,6 +3397,36 @@ impl OptiUi {
         let idle = self.busy.is_none();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let size = vec2(268.0, 100.0);
+            kit::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("Saved backup integrity").font(FontId::new(T_BODY, semibold())).color(t.text));
+                        ui.add(egui::Label::new(RichText::new("Checks saved tweak originals and service backup files without changing them.").size(T_SMALL).color(t.muted)).wrap());
+                    });
+                    if kit::secondary(ui, if self.busy.as_deref() == Some("Checking saved backups") { "Checking…" } else { "Check backups" }, idle).clicked() {
+                        self.check_saved_backups(ctx);
+                    }
+                });
+                if let Some(checks) = &self.backup_integrity {
+                    ui.add_space(S1);
+                    for check in checks {
+                        let (label, tone) = match check.status {
+                            BackupStatus::Good => ("Readable", Tone::Good),
+                            BackupStatus::Missing => ("Not found", Tone::Neutral),
+                            BackupStatus::Warning => ("Check needed", Tone::Warn),
+                        };
+                        ui.horizontal_wrapped(|ui| {
+                            kit::chip(ui, label, tone);
+                            ui.label(RichText::new(check.title).font(FontId::new(T_SMALL, semibold())).color(t.text));
+                            ui.add(egui::Label::new(RichText::new(&check.detail).size(T_CAPTION).color(if check.status == BackupStatus::Warning { t.warn } else { t.muted })).wrap());
+                        });
+                    }
+                } else {
+                    ui.label(RichText::new("Readability checks cannot guarantee Windows will accept every restore operation.").size(T_CAPTION).color(t.subtle));
+                }
+            });
+            ui.add_space(S3);
             ui.horizontal_wrapped(|ui| {
                 for info in tools::TOOLS.iter() {
                     if kit::tile(ui, size, info.title, info.desc, None, idle, false).clicked() {
