@@ -11,7 +11,250 @@ const FORMAT_VERSION: u32 = 1;
 const MAX_PROFILES: usize = 50;
 const MAX_STORE_BYTES: u64 = 128 * 1024;
 const MAX_EXPORT_BYTES: u64 = 4 * 1024;
+const MAX_LIBRARY_FILE_BYTES: u64 = 1024 * 1024;
+const MAX_LIBRARY_ROOTS: usize = 32;
+const MAX_MANIFEST_FILES: usize = 2048;
+const MAX_DISCOVERED_GAMES: usize = 500;
 pub const GPU_PREFERENCES_KEY: &str = r"HKCU:\Software\Microsoft\DirectX\UserGpuPreferences";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LibrarySource {
+    Steam,
+    Epic,
+}
+
+impl LibrarySource {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Steam => "Steam",
+            Self::Epic => "Epic Games",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiscoveredGame {
+    pub name: String,
+    pub source: LibrarySource,
+    pub install_dir: std::path::PathBuf,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LibraryScan {
+    pub games: Vec<DiscoveredGame>,
+    pub warnings: Vec<String>,
+}
+
+/// Read installed games from Steam app manifests and Epic launcher manifests.
+/// The scan is bounded and never walks game directories or changes launcher data.
+pub fn scan_libraries(steam_roots: &[std::path::PathBuf], epic_manifests: &Path) -> LibraryScan {
+    let mut scan = LibraryScan::default();
+    let mut roots = std::collections::HashSet::new();
+    let mut libraries_scanned = 0;
+    for root in steam_roots.iter().take(MAX_LIBRARY_ROOTS) {
+        let Ok(root) = root.canonicalize() else {
+            continue;
+        };
+        if !roots.insert(root.clone()) {
+            continue;
+        }
+        let library_file = root.join("steamapps").join("libraryfolders.vdf");
+        let Ok(contents) = read_bounded_text(&library_file) else {
+            continue;
+        };
+        let libraries = vdf_library_paths(&contents, &root);
+        for library in libraries.into_iter().take(MAX_LIBRARY_ROOTS) {
+            if libraries_scanned >= MAX_LIBRARY_ROOTS {
+                break;
+            }
+            libraries_scanned += 1;
+            scan_steam_library(&library, &mut scan);
+            if scan.games.len() >= MAX_DISCOVERED_GAMES {
+                break;
+            }
+        }
+        if scan.games.len() >= MAX_DISCOVERED_GAMES {
+            break;
+        }
+    }
+    scan_epic_manifests(epic_manifests, &mut scan);
+    scan.games.sort_by_key(|game| game.name.to_lowercase());
+    scan.games
+        .dedup_by(|left, right| left.install_dir == right.install_dir);
+    scan
+}
+
+fn read_bounded_text(path: &Path) -> Result<String, String> {
+    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
+    if !metadata.is_file() || metadata.len() > MAX_LIBRARY_FILE_BYTES {
+        return Err("manifest is not a regular file within the 1 MiB size limit".into());
+    }
+    use std::io::Read;
+    let mut contents = String::new();
+    fs::File::open(path)
+        .and_then(|file| {
+            file.take(MAX_LIBRARY_FILE_BYTES + 1)
+                .read_to_string(&mut contents)
+        })
+        .map_err(|error| error.to_string())?;
+    if contents.len() as u64 > MAX_LIBRARY_FILE_BYTES {
+        return Err("manifest exceeds the 1 MiB size limit".into());
+    }
+    Ok(contents)
+}
+
+fn scan_steam_library(library: &Path, scan: &mut LibraryScan) {
+    let apps = library.join("steamapps");
+    let Ok(entries) = fs::read_dir(&apps) else {
+        return;
+    };
+    for entry in entries.flatten().take(MAX_MANIFEST_FILES) {
+        if scan.games.len() >= MAX_DISCOVERED_GAMES {
+            break;
+        }
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !file_name.starts_with("appmanifest_") || !file_name.ends_with(".acf") {
+            continue;
+        }
+        let Ok(contents) = read_bounded_text(&path) else {
+            continue;
+        };
+        let fields = vdf_top_level_fields(&contents);
+        let (Some(name), Some(install_dir)) = (fields.get("name"), fields.get("installdir")) else {
+            continue;
+        };
+        if name.trim().is_empty()
+            || install_dir.is_empty()
+            || install_dir == "."
+            || install_dir == ".."
+            || Path::new(install_dir).components().count() != 1
+        {
+            continue;
+        }
+        let install_dir = apps.join("common").join(install_dir);
+        if let Ok(install_dir) = install_dir.canonicalize() {
+            let install_dir = strip_windows_verbatim_prefix(install_dir);
+            scan.games.push(DiscoveredGame {
+                name: name.clone(),
+                source: LibrarySource::Steam,
+                install_dir,
+            });
+        }
+    }
+}
+
+fn strip_windows_verbatim_prefix(path: std::path::PathBuf) -> std::path::PathBuf {
+    path.strip_prefix(r"\\?\")
+        .map_or(path.clone(), Path::to_path_buf)
+}
+
+fn scan_epic_manifests(manifests: &Path, scan: &mut LibraryScan) {
+    let Ok(entries) = fs::read_dir(manifests) else {
+        return;
+    };
+    for entry in entries.flatten().take(MAX_MANIFEST_FILES) {
+        if scan.games.len() >= MAX_DISCOVERED_GAMES {
+            break;
+        }
+        let path = entry.path();
+        if path
+            .extension()
+            .is_none_or(|extension| !extension.eq_ignore_ascii_case("item"))
+        {
+            continue;
+        }
+        let Ok(contents) = read_bounded_text(&path) else {
+            scan.warnings.push(format!(
+                "Skipped an unreadable Epic manifest: {}",
+                path.display()
+            ));
+            continue;
+        };
+        let Ok(item) = serde_json::from_str::<Value>(&contents) else {
+            scan.warnings.push(format!(
+                "Skipped an invalid Epic manifest: {}",
+                path.display()
+            ));
+            continue;
+        };
+        let Some(name) = item
+            .get("DisplayName")
+            .and_then(Value::as_str)
+            .filter(|name| !name.trim().is_empty())
+        else {
+            continue;
+        };
+        let Some(location) = item
+            .get("InstallLocation")
+            .and_then(Value::as_str)
+            .filter(|location| !location.is_empty())
+        else {
+            continue;
+        };
+        let install_dir = Path::new(location);
+        if install_dir.is_dir() {
+            scan.games.push(DiscoveredGame {
+                name: name.to_owned(),
+                source: LibrarySource::Epic,
+                install_dir: install_dir.to_path_buf(),
+            });
+        }
+    }
+}
+
+fn vdf_tokens(contents: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut chars = contents.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '"' {
+            let mut token = String::new();
+            while let Some(ch) = chars.next() {
+                match ch {
+                    '"' => break,
+                    '\\' => match chars.next() {
+                        Some(next) => token.push(next),
+                        None => break,
+                    },
+                    _ => token.push(ch),
+                }
+            }
+            tokens.push(token);
+        }
+    }
+    tokens
+}
+
+fn vdf_top_level_fields(contents: &str) -> std::collections::HashMap<String, String> {
+    let tokens = vdf_tokens(contents);
+    tokens
+        .windows(2)
+        .filter_map(|pair| {
+            let key = pair[0].to_lowercase();
+            matches!(key.as_str(), "name" | "installdir" | "path").then(|| (key, pair[1].clone()))
+        })
+        .collect()
+}
+
+fn vdf_library_paths(contents: &str, root: &Path) -> Vec<std::path::PathBuf> {
+    let mut libraries = vec![root.to_path_buf()];
+    let tokens = vdf_tokens(contents);
+    for pair in tokens.windows(2) {
+        let legacy_library_index =
+            !pair[0].is_empty() && pair[0].chars().all(|ch| ch.is_ascii_digit());
+        if pair[0].eq_ignore_ascii_case("path") || legacy_library_index {
+            let path = Path::new(&pair[1]);
+            if path.is_absolute() {
+                libraries.push(path.to_path_buf());
+            }
+        }
+    }
+    libraries.sort();
+    libraries.dedup();
+    libraries
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -708,5 +951,92 @@ mod tests {
             GraphicsPreference::HighPerformance
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn scans_installed_steam_and_epic_manifests_without_entering_game_folders() {
+        let (dir, _) = temp();
+        let steam = dir.join("Steam");
+        let steam_apps = steam.join("steamapps");
+        let game_dir = steam_apps.join("common").join("Example Game");
+        fs::create_dir_all(&game_dir).unwrap();
+        fs::write(
+            steam_apps.join("libraryfolders.vdf"),
+            "\"libraryfolders\" { \"0\" { \"path\" \"ignored root\" } }",
+        )
+        .unwrap();
+        fs::write(
+            steam_apps.join("appmanifest_10.acf"),
+            "\"AppState\" { \"name\" \"Example Game\" \"installdir\" \"Example Game\" }",
+        )
+        .unwrap();
+
+        let epic_manifests = dir.join("EpicManifests");
+        let epic_dir = dir.join("EpicGame");
+        fs::create_dir_all(&epic_manifests).unwrap();
+        fs::create_dir_all(&epic_dir).unwrap();
+        fs::write(
+            epic_manifests.join("example.item"),
+            serde_json::json!({
+                "DisplayName": "Epic Example",
+                "InstallLocation": epic_dir
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let scan = scan_libraries(std::slice::from_ref(&steam), &epic_manifests);
+        assert_eq!(scan.games.len(), 2);
+        assert!(
+            scan.games
+                .iter()
+                .any(|game| game.source == LibrarySource::Steam
+                    && game.install_dir.ends_with(Path::new("Example Game")))
+        );
+        assert!(
+            scan.games
+                .iter()
+                .any(|game| game.source == LibrarySource::Epic && game.install_dir == epic_dir)
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn steam_manifest_install_directory_must_be_one_safe_component() {
+        let (dir, _) = temp();
+        let steam = dir.join("Steam");
+        let apps = steam.join("steamapps");
+        fs::create_dir_all(apps.join("common")).unwrap();
+        fs::write(apps.join("libraryfolders.vdf"), "\"libraryfolders\" {}").unwrap();
+        fs::write(
+            apps.join("appmanifest_11.acf"),
+            "\"name\" \"Invalid\" \"installdir\" \"..\\outside\"",
+        )
+        .unwrap();
+        let scan = scan_libraries(&[steam], &dir.join("missing-epic"));
+        assert!(scan.games.is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn vdf_parser_reads_escaped_library_paths() {
+        let paths = vdf_library_paths(
+            "\"libraryfolders\" { \"0\" { \"path\" \"C:\\\\Games\\\\SteamLibrary\" } }",
+            Path::new(r"C:\Steam"),
+        );
+        assert!(
+            paths
+                .iter()
+                .any(|path| path == Path::new(r"C:\Games\SteamLibrary"))
+        );
+        let legacy = vdf_library_paths(
+            "\"libraryfolders\" { \"1\" \"D:\\\\SteamLibrary\" }",
+            Path::new(r"C:\Steam"),
+        );
+        assert!(
+            legacy
+                .iter()
+                .any(|path| path == Path::new(r"D:\SteamLibrary"))
+        );
     }
 }

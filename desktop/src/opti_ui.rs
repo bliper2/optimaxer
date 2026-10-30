@@ -166,6 +166,7 @@ enum Msg {
     OperationHistory(Result<Vec<OperationEntry>, String>),
     GameProfiles(Result<Vec<GameProfile>, String>),
     GameStates(HashMap<String, Result<ProfileState, String>>),
+    GameLibraries(gaming::LibraryScan),
     Diagnostic(DiagnosticCheck, DiagnosticResult),
     Snapshots(Result<Vec<SystemSnapshot>, String>),
     Processes(Result<(Vec<ProcessInfo>, CpuTimes), String>),
@@ -271,6 +272,8 @@ pub struct OptiUi {
     game_states: HashMap<String, Result<ProfileState, String>>,
     game_states_loaded: bool,
     game_status_loading: bool,
+    game_library_scan: Option<gaming::LibraryScan>,
+    game_library_scanning: bool,
     diagnostic_results: HashMap<DiagnosticCheck, DiagnosticResult>,
     snapshots: Vec<SystemSnapshot>,
     snapshots_error: Option<String>,
@@ -747,6 +750,8 @@ impl OptiUi {
             game_states: HashMap::new(),
             game_states_loaded: false,
             game_status_loading: false,
+            game_library_scan: None,
+            game_library_scanning: false,
             diagnostic_results: HashMap::new(),
             snapshots,
             snapshots_error,
@@ -969,6 +974,10 @@ impl OptiUi {
                     self.game_states = states;
                     self.game_states_loaded = true;
                     self.game_status_loading = false;
+                }
+                Msg::GameLibraries(scan) => {
+                    self.game_library_scan = Some(scan);
+                    self.game_library_scanning = false;
                 }
                 Msg::Diagnostic(check, result) => {
                     self.diagnostic_results.insert(check, result);
@@ -2610,11 +2619,19 @@ impl OptiUi {
     }
 
     fn add_game_executable(&mut self, ctx: &egui::Context) {
+        self.add_game_executable_from(ctx, None);
+    }
+
+    fn add_game_executable_from(&mut self, ctx: &egui::Context, directory: Option<&std::path::Path>) {
         if self.game_profiles_error.is_some() {
             self.events.push(OptiEvent::Toast("Saved game profiles are unreadable. Recover the file before adding profiles.".into()));
             return;
         }
-        let Some(path) = rfd::FileDialog::new().add_filter("Windows game executable", &["exe"]).pick_file() else { return };
+        let mut dialog = rfd::FileDialog::new().add_filter("Windows game executable", &["exe"]);
+        if let Some(directory) = directory.filter(|directory| directory.is_dir()) {
+            dialog = dialog.set_directory(directory);
+        }
+        let Some(path) = dialog.pick_file() else { return };
         let canonical = match path.canonicalize() {
             Ok(path) if path.is_file() && path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("exe")) => {
                 let text = path.to_string_lossy();
@@ -2648,6 +2665,41 @@ impl OptiUi {
             }
             Err(error) => self.events.push(OptiEvent::Toast(error)),
         }
+    }
+
+    fn scan_game_libraries(&mut self, ctx: &egui::Context) {
+        if self.game_library_scanning { return; }
+        self.game_library_scanning = true;
+        self.game_library_scan = None;
+        let mut steam_roots = Vec::new();
+        for variable in ["ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"] {
+            if let Some(base) = std::env::var_os(variable) {
+                let base = PathBuf::from(base);
+                steam_roots.push(base.join("Steam"));
+                steam_roots.push(base.join("steam"));
+            }
+        }
+        if let Some(home) = dirs::home_dir() {
+            steam_roots.push(home.join(".steam").join("steam"));
+            steam_roots.push(home.join(".local").join("share").join("Steam"));
+        }
+        let epic_manifests = std::env::var_os("ProgramData")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
+            .join(r"Epic\EpicGamesLauncher\Data\Manifests");
+        let worker = self.worker(ctx);
+        std::thread::spawn(move || {
+            for (key, value) in [
+                (r"HKCU:\Software\Valve\Steam", "SteamPath"),
+                (r"HKLM:\SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"),
+                (r"HKLM:\SOFTWARE\Valve\Steam", "InstallPath"),
+            ] {
+                if let Some(RegData::Str(path) | RegData::Expand(path)) = WinSystem.reg_get(key, value) {
+                    steam_roots.push(PathBuf::from(path));
+                }
+            }
+            worker.send(Msg::GameLibraries(gaming::scan_libraries(&steam_roots, &epic_manifests)));
+        });
     }
 
     fn export_game_preference(&mut self, profile: &GameProfile) {
@@ -2828,6 +2880,45 @@ impl OptiUi {
             }
         });
         ui.label(RichText::new("Choose a Windows GPU preference for a game executable. Optimaxer stores the exact prior registry value and refuses to overwrite a later change made elsewhere.").size(T_SMALL).color(t.muted));
+        ui.horizontal(|ui| {
+            if kit::secondary(ui, if self.game_library_scanning { "Scanning libraries…" } else { "Find installed games" }, !self.game_library_scanning).clicked() {
+                self.scan_game_libraries(ctx);
+            }
+            ui.label(RichText::new("Reads Steam and Epic manifests; it does not inspect game files or change launcher data.").size(T_SMALL).color(t.subtle));
+        });
+        if let Some(scan) = self.game_library_scan.clone() {
+            if scan.games.is_empty() {
+                ui.label(RichText::new("No installed games found in the detected Steam and Epic libraries.").size(T_SMALL).color(t.muted));
+            } else {
+                ui.label(RichText::new(format!("{} installed games found", scan.games.len())).size(T_SMALL).color(t.muted));
+                let mut selected_library: Option<PathBuf> = None;
+                egui::ScrollArea::vertical().max_height(260.0).auto_shrink([false, true]).show(ui, |ui| {
+                    for game in &scan.games {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(&game.name).size(T_BODY).color(t.text));
+                                    kit::chip(ui, game.source.label(), Tone::Neutral);
+                                });
+                                ui.add(egui::Label::new(RichText::new(game.install_dir.display().to_string()).size(T_CAPTION).color(t.subtle)).truncate());
+                            });
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if kit::ghost(ui, "Choose executable…", self.game_profiles_error.is_none()).clicked() {
+                                    selected_library = Some(game.install_dir.clone());
+                                }
+                            });
+                        });
+                        ui.separator();
+                    }
+                });
+                if let Some(directory) = selected_library {
+                    self.add_game_executable_from(ctx, Some(&directory));
+                }
+            }
+            for warning in &scan.warnings {
+                ui.label(RichText::new(warning).size(T_CAPTION).color(t.warn));
+            }
+        }
         if let Some(error) = &self.game_profiles_error {
             ui.add_space(S2);
             kit::card(ui, |ui| {
