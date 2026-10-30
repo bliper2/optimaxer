@@ -155,6 +155,7 @@ pub struct OrionApp {
     sel_stream: usize,
     sel_variant: usize,
     downloads: Vec<Arc<Download>>,
+    recent_downloads: Vec<net::RecentDownload>,
     show_downloads: bool,
     show_notifications: bool,
     dismissed_session_notifications: Vec<String>,
@@ -287,6 +288,17 @@ impl OrionApp {
             sel_stream: 0,
             sel_variant: 0,
             downloads: Vec::new(),
+            recent_downloads: if std::env::var_os("ORION_SHOTS").is_none() {
+                match net::load_recent_downloads() {
+                    Ok(records) => records,
+                    Err(error) => {
+                        startup_toast = Some((format!("Recent downloads could not be loaded: {error}"), Instant::now()));
+                        Vec::new()
+                    }
+                }
+            } else {
+                Vec::new()
+            },
             show_downloads: false,
             show_notifications: false,
             dismissed_session_notifications: Vec::new(),
@@ -545,6 +557,37 @@ impl OrionApp {
         self.show_downloads = true;
     }
 
+    fn record_completed_downloads(&mut self) {
+        let mut history_update = None;
+        let mut history_error = None;
+        for download in &self.downloads {
+            if download.history_recorded.load(Ordering::Relaxed) {
+                continue;
+            }
+            let DlStatus::Done(path) = download.status() else { continue };
+            download.history_recorded.store(true, Ordering::Relaxed);
+            let completed_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_secs())
+                .unwrap_or(0);
+            match net::record_recent_download(net::RecentDownload {
+                file: download.file.clone(),
+                path,
+                completed_at,
+            }) {
+                Ok(records) if !records.is_empty() => history_update = Some(records),
+                Ok(_) => {}
+                Err(error) => history_error = Some(error),
+            }
+        }
+        if let Some(records) = history_update {
+            self.recent_downloads = records;
+        }
+        if let Some(error) = history_error {
+            self.say(format!("Download finished, but history could not be saved: {error}"));
+        }
+    }
+
     fn tick_toast(&mut self, ctx: &egui::Context) {
         if let Some((_, t)) = &self.toast {
             if t.elapsed() > Duration::from_millis(3600) {
@@ -710,6 +753,7 @@ impl eframe::App for OrionApp {
         let ctx = &ctx;
         self.poll_catalog();
         self.poll_update(ctx);
+        self.record_completed_downloads();
         if self.shots.is_none() {
             self.follow_windows(ctx);
         }
@@ -1581,7 +1625,12 @@ impl OrionApp {
                     }
                 });
             });
-            if self.downloads.is_empty() {
+            let previous_downloads = self.recent_downloads.iter().filter(|recent| {
+                !self.downloads.iter().any(|download| {
+                    matches!(download.status(), DlStatus::Done(path) if path == recent.path)
+                })
+            }).collect::<Vec<_>>();
+            if self.downloads.is_empty() && previous_downloads.is_empty() {
                 kit::empty_state(ui, "Nothing downloaded yet", "Pick an app and press Download. Files save to the folder in Settings.");
             }
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -1637,6 +1686,27 @@ impl OrionApp {
                     });
                 }
             });
+            if !previous_downloads.is_empty() {
+                ui.add_space(S2);
+                ui.label(RichText::new("Recent downloads").font(FontId::new(T_SMALL, semibold())).color(t.muted));
+                egui::ScrollArea::vertical().max_height(112.0).auto_shrink([false, false]).show(ui, |ui| {
+                    for recent in previous_downloads {
+                        kit::row(ui, ("recent-dl", &recent.path), false, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add_sized([210.0, 20.0], egui::Label::new(RichText::new(&recent.file).font(FontId::new(T_BODY, semibold())).color(t.text)).truncate());
+                                kit::chip(ui, "Downloaded", Tone::Neutral);
+                                if kit::secondary(ui, "Open", true).clicked() && open::that(&recent.path).is_err() {
+                                    note = Some("Could not open the downloaded file. It may have been moved or removed.".into());
+                                }
+                                if kit::ghost(ui, "Show in folder", true).clicked()
+                                    && let Err(error) = reveal(&recent.path) {
+                                    note = Some(format!("Could not show the downloaded file: {error}"));
+                                }
+                            });
+                        });
+                    }
+                });
+            }
         });
         if let Some(i) = remove {
             self.downloads.remove(i);

@@ -220,6 +220,7 @@ mod tests {
             total: AtomicU64::new(0),
             cancel: AtomicBool::new(false),
             status: Mutex::new(DlStatus::Running),
+            history_recorded: AtomicBool::new(false),
         };
         let notice = download(&dl).unwrap();
         assert_eq!(notice.kind, Kind::Progress);
@@ -236,6 +237,7 @@ mod tests {
             total: AtomicU64::new(10),
             cancel: AtomicBool::new(false),
             status: Mutex::new(DlStatus::Done(path.clone())),
+            history_recorded: AtomicBool::new(false),
         };
         let notice = download(&dl).unwrap();
         assert_eq!(notice.kind, Kind::Success);
