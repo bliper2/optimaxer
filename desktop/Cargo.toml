@@ -1,6 +1,6 @@
 [package]
 name = "orion-store-desktop"
-version = "2.15.19"
+version = "2.15.20"
 edition = "2024"
 
 [dependencies]
