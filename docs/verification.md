@@ -21,6 +21,8 @@ The built-in screenshot modes render each page without pressing system-changing 
 
 Rendering confirms that pages open and produce images. It does not verify every click, keyboard path, display scale or assistive technology. The v2.15.13 Performance page was also rendered and visually checked at 1440 × 1100 and at 760 × 520 with compact density and 125% scale. The measurement panel follows the live charts at desktop size and remains reachable through the page scroll in the compact window. Screenshots stayed in the local temporary directory because they include live system readings.
 
+The v2.15.14 Cleaner preview is covered by Windows-host tests for real file paths and sizes, no mutation, the 200-file cap, truncation and junction avoidance. Preview runs on a background worker. Interactive confirmation and actual deletion remain separate steps; the preview can become stale if files change before cleanup.
+
 The v2.15.5 Windows release build was also opened interactively at 1180 × 760: Commands opened the palette, searching `Tweaks` returned one result, and Enter navigated to the Tweaks page. This is a focused smoke check, not full keyboard-only or accessibility testing.
 
 The v2.15.6 Windows release build was opened at 1180 × 760. Settings content scrolled to the lower sections, the Arctic palette changed the live interface, and the selected palette remained after restarting the app. The original settings file was restored after the check. This does not cover every palette or display scale.
