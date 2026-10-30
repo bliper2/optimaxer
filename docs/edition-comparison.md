@@ -1,13 +1,13 @@
 # Edition comparison
 
-Snapshot of the repository at v2.15.34. This describes implemented scope, not a parity promise. The Rust desktop app is the primary target for the UI work; the PowerShell and Linux editions remain independent products.
+Snapshot of the repository at v2.15.35. This describes implemented scope, not a parity promise. The Rust desktop app is the primary target for the UI work; the PowerShell and Linux editions remain independent products.
 
 | Area | PowerShell / WPF (Windows) | Python / Tkinter (Linux) | Rust / egui (Windows) |
 | --- | --- | --- | --- |
 | Delivery | Windows app and unattended CLI | Arch-family and Fedora-family GUI and CLI | Windows desktop app, Orion Store and Optimaxer in one window |
 | Tweaks | 209 active, 8 retired; presets and exact undo | Linux-specific catalog, presets, dry run and undo | 206 of 217 catalog entries; 11 PowerShell-only entries omitted; presets, dry run/preview and exact undo |
 | Services | About 240, protected core rows hidden, backup and restore | systemd service list, enable/disable and restore | About 220, protected core rows hidden, JSON backup and restore |
-| Startup | Run keys, Startup folders, and third-party logon/boot tasks; Microsoft tasks excluded | User and system XDG `.desktop` entries; system entries use user-level override files | User/machine Run keys, Startup folders, and third-party logon/boot tasks; Microsoft tasks excluded |
+| Startup | Run keys, Startup folders, and third-party logon/boot tasks; Microsoft tasks excluded | User and system XDG `.desktop` entries; system entries use user-level override files | User/machine Run keys, Startup folders, and third-party logon/boot tasks; Microsoft tasks excluded; shows latest Event 100 boot duration when available, no invented per-app impact score |
 | Cleaner | Scan-first Windows targets, including component store and Windows.old | Package-manager caches, user caches, logs and Trash | 32 Windows targets; cancellable read-only size scans discard partial results; persisted exact-path exclusions in path-based scans, previews and cleanup; overlapping Windows.old/event-log targets are skipped; system APIs disclose exclusion limits; links are not followed |
 | Packages | WinGet install, upgrade, remove and verify | pacman, AUR helper, dnf and Flatpak flows | Curated WinGet exact-ID install, upgrade, uninstall and upgrade-all in a visible console; on-demand icons with initials fallback; Orion catalog downloads remain separate |
 | Network | Confirmed DNS/DoH changes with saved originals and conflict-aware restore; benchmark, reset and opt-in hosts block | Confirmed NetworkManager DNS changes with saved connection settings and restore; active connections | Confirmed DNS/DoH changes with saved originals and conflict-aware restore; UDP resolver response time, jitter and reply counts, reset |
