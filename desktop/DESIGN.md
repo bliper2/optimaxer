@@ -10,6 +10,8 @@ The System palette keeps Optimaxer's indigo `#7478F8` for selection, focus and n
 
 The WinGet page shares these tokens and row components. It separates the Orion download catalog from software installation, labels exported package matches as incomplete inventory, and keeps package-manager output in a visible console. Confirmation shows the exact ID-scoped command before launch.
 
+At the 760 px minimum window width, WinGet moves its toolbar below the page introduction and wraps catalog rows so icons, package details and actions stay inside the content area.
+
 ## Colour
 
 | Token | Dark | Light | Use |

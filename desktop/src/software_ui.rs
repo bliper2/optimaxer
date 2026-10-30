@@ -298,20 +298,60 @@ impl SoftwareUi {
 
     pub fn ui(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let t = tokens(ctx);
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                kit::page_header(ui, "WinGet", "Install, upgrade and remove curated Windows apps with the system package manager.");
-                ui.label(RichText::new("App icons load from the web as needed; missing icons use initials. Installers run in a visible console. Review source agreements and installer prompts. WinGet export may miss installed apps.").size(theme::T_SMALL).color(t.muted));
+        let compact = ui.available_width() < 680.0;
+        let mut header_actions = |ui: &mut Ui| {
+            if kit::secondary(
+                ui,
+                if self.refresh_rx.is_some() {
+                    "Checking…"
+                } else {
+                    "Refresh installed"
+                },
+                self.refresh_rx.is_none() && self.operation_rx.is_none(),
+            )
+            .clicked()
+            {
+                self.refresh(ctx);
+            }
+            if kit::ghost(
+                ui,
+                "Upgrade all",
+                self.can_run_action() && !self.packages.is_empty(),
+            )
+            .clicked()
+            {
+                self.request(Action::UpgradeAll, None);
+            }
+        };
+        if compact {
+            kit::page_header(
+                ui,
+                "WinGet",
+                "Install, upgrade and remove curated Windows apps with the system package manager.",
+            );
+            ui.horizontal(|ui| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    header_actions(ui);
+                });
             });
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if kit::secondary(ui, if self.refresh_rx.is_some() { "Checking…" } else { "Refresh installed" }, self.refresh_rx.is_none() && self.operation_rx.is_none()).clicked() {
-                    self.refresh(ctx);
-                }
-                if kit::ghost(ui, "Upgrade all", self.can_run_action() && !self.packages.is_empty()).clicked() {
-                    self.request(Action::UpgradeAll, None);
-                }
+        } else {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    kit::page_header(
+                        ui,
+                        "WinGet",
+                        "Install, upgrade and remove curated Windows apps with the system package manager.",
+                    );
+                    ui.label(RichText::new("App icons load from the web as needed; missing icons use initials. Installers run in a visible console. Review source agreements and installer prompts. WinGet export may miss installed apps.").size(theme::T_SMALL).color(t.muted));
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    header_actions(ui);
+                });
             });
-        });
+        }
+        if compact {
+            ui.label(RichText::new("App icons load from the web as needed; missing icons use initials. Installers run in a visible console. Review source agreements and installer prompts. WinGet export may miss installed apps.").size(theme::T_SMALL).color(t.muted));
+        }
         ui.add_space(theme::S2);
         if let Some(error) = &self.catalog_error {
             kit::empty_state(ui, "WinGet catalog unavailable", error);
@@ -417,7 +457,7 @@ impl SoftwareUi {
                         .get(&package.id.to_ascii_lowercase())
                         .cloned();
                     kit::row(ui, ("winget-package", &package.id), false, |ui| {
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             self.package_icon(ui, package);
                             ui.add_space(theme::S2);
                             ui.vertical(|ui| {

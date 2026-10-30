@@ -105,7 +105,7 @@ powershell -NoProfile -File tools\export-optimaxer.ps1
 
 ## Screenshots
 
-`ORION_SHOTS=<folder>` makes the app walk through its pages, save each one as a PNG of its own window, capture Settings, and exit (18 steps). It uses egui's viewport screenshot, so only the app window is captured. Set `ORION_SHOTS_SIDEBAR_COLLAPSED=true` to capture the Optimaxer icon rail, `ORION_SHOTS_RESTART_REQUIRED=true` to capture the restart reminder, or `ORION_SHOTS_PROFILE_OPEN=true` to expand Profiles on the Tweaks page. WinGet icons load for the catalog screenshot by default; set `ORION_SHOTS_LOAD_ICONS=false` for an offline capture. Screenshot mode never saves these overrides to settings or runs WinGet commands.
+`ORION_SHOTS=<folder>` makes the app walk through its pages, save each one as a PNG of its own window, capture Settings, and exit (18 steps). It uses egui's viewport screenshot, so only the app window is captured. Set `ORION_SHOTS_SIZE=760x520` to check the minimum layout or `1440x900` to check a wide layout; the default is 1180x760. Set `ORION_SHOTS_SIDEBAR_COLLAPSED=true` to capture the Optimaxer icon rail, `ORION_SHOTS_RESTART_REQUIRED=true` to capture the restart reminder, or `ORION_SHOTS_PROFILE_OPEN=true` to expand Profiles on the Tweaks page. WinGet icons load for the catalog screenshot by default; set `ORION_SHOTS_LOAD_ICONS=false` for an offline capture. Screenshot mode never saves these overrides to settings or runs WinGet commands.
 
 ## License
 
