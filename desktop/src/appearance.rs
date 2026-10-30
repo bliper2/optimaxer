@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-const FORMAT_VERSION: u32 = 3;
+const FORMAT_VERSION: u32 = 4;
 const MAX_PRESET_BYTES: u64 = 16 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -24,6 +24,8 @@ pub struct Preset {
     ui_scale: crate::theme::UiScale,
     #[serde(default)]
     corner_radius: Option<u8>,
+    #[serde(default)]
+    custom_surfaces: theme::CustomSurfaces,
 }
 
 impl Preset {
@@ -38,11 +40,12 @@ impl Preset {
             density: settings.density,
             ui_scale: settings.ui_scale,
             corner_radius: settings.corner_radius,
+            custom_surfaces: settings.custom_surfaces.clone(),
         }
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if !matches!(self.format_version, 1 | 2 | FORMAT_VERSION) {
+        if !matches!(self.format_version, 1..=FORMAT_VERSION) {
             return Err(format!(
                 "Unsupported appearance format version {}.",
                 self.format_version
@@ -57,6 +60,7 @@ impl Preset {
         if self.corner_radius.is_some_and(|radius| radius > 16) {
             return Err("Corner radius must be between 0 and 16 px.".into());
         }
+        self.custom_surfaces.validate()?;
         Ok(())
     }
 
@@ -69,6 +73,7 @@ impl Preset {
         settings.density = self.density;
         settings.ui_scale = self.ui_scale;
         settings.corner_radius = self.corner_radius;
+        settings.custom_surfaces.clone_from(&self.custom_surfaces);
     }
 }
 
@@ -122,6 +127,11 @@ mod tests {
             density: crate::theme::Density::Compact,
             ui_scale: crate::theme::UiScale::Larger,
             corner_radius: Some(6),
+            custom_surfaces: {
+                let mut surfaces = theme::CustomSurfaces::default();
+                surfaces.active_mut(true)[0] = "#080A10".into();
+                surfaces
+            },
             ..Settings::default()
         };
         let preset = Preset::capture(&source);
@@ -143,6 +153,7 @@ mod tests {
         assert_eq!(destination.density, crate::theme::Density::Compact);
         assert_eq!(destination.ui_scale, crate::theme::UiScale::Larger);
         assert_eq!(destination.corner_radius, Some(6));
+        assert_eq!(destination.custom_surfaces, source.custom_surfaces);
         assert_eq!(destination.download_dir, "keep-this-path");
         assert!(!destination.auto_update);
     }
@@ -150,7 +161,7 @@ mod tests {
     #[test]
     fn invalid_version_mode_and_accent_are_rejected() {
         let mut preset = Preset::capture(&Settings::default());
-        preset.format_version = 4;
+        preset.format_version = 5;
         assert!(preset.validate().unwrap_err().contains("version"));
         preset.format_version = FORMAT_VERSION;
         preset.theme = "automatic-ish".into();
@@ -161,6 +172,9 @@ mod tests {
         preset.custom_accent = "#7478F8".into();
         preset.corner_radius = Some(17);
         assert!(preset.validate().unwrap_err().contains("Corner radius"));
+        preset.corner_radius = None;
+        preset.custom_surfaces.active_mut(false)[2] = "#111111".into();
+        assert!(preset.validate().unwrap_err().contains("contrast checks"));
     }
 
     #[test]
@@ -189,6 +203,16 @@ mod tests {
         assert_eq!(settings.density, crate::theme::Density::Compact);
         assert_eq!(settings.ui_scale, crate::theme::UiScale::Large);
         assert_eq!(settings.corner_radius, None);
+    }
+
+    #[test]
+    fn version_three_preset_gains_default_custom_surfaces() {
+        let json = r##"{"format_version":3,"theme":"dark","style":"windows","palette":"custom","custom_accent":"#7478F8","reduce_motion":false,"density":"comfortable","ui_scale":"default","corner_radius":null}"##;
+        let preset: Preset = serde_json::from_str(json).unwrap();
+        preset.validate().unwrap();
+        let mut settings = Settings::default();
+        preset.apply(&mut settings);
+        assert_eq!(settings.custom_surfaces, theme::CustomSurfaces::default());
     }
 
     #[test]

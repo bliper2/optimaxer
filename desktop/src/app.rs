@@ -745,6 +745,45 @@ impl eframe::App for OrionApp {
 }
 
 impl OrionApp {
+    fn custom_surface_editor(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let dark = self.settings.effective_dark();
+        let mut candidate = self.settings.custom_surfaces.clone();
+        let mut changed = false;
+        egui::CollapsingHeader::new(if dark { "Dark surface colors" } else { "Light surface colors" })
+            .id_salt("custom-surface-colors")
+            .show(ui, |ui| {
+                egui::Grid::new("custom-surface-grid").num_columns(2).show(ui, |ui| {
+                    for (label, value) in theme::CustomSurfaces::LABELS.into_iter().zip(candidate.active_mut(dark)) {
+                        ui.label(RichText::new(label).color(tokens(ctx).muted));
+                        let mut color = theme::parse_hex_color(value).unwrap_or(tokens(ctx).surface1);
+                        if ui.color_edit_button_srgba(&mut color).changed() {
+                            *value = theme::hex_color(color);
+                            changed = true;
+                        }
+                        ui.end_row();
+                    }
+                });
+                if kit::ghost(ui, "Reset surface colors", true).clicked() {
+                    candidate.reset_mode(dark);
+                    changed = true;
+                }
+            });
+        if !changed {
+            return;
+        }
+        if let Err(error) = candidate.validate() {
+            self.toast = Some((error, Instant::now()));
+            return;
+        }
+        let previous = std::mem::replace(&mut self.settings.custom_surfaces, candidate);
+        self.reapply_theme(ctx);
+        if let Err(error) = self.settings.save_checked() {
+            self.settings.custom_surfaces = previous;
+            self.reapply_theme(ctx);
+            self.toast = Some((format!("Custom surfaces were not saved: {error}"), Instant::now()));
+        }
+    }
+
     fn notifications(&self) -> Vec<Notification> {
         let mut notifications = Vec::new();
         if self.settings.opti_restart_required {
@@ -1685,8 +1724,9 @@ impl OrionApp {
                             }
                             ui.label(RichText::new(&self.settings.custom_accent).size(T_CAPTION).color(t.subtle));
                         });
+                        self.custom_surface_editor(ui, ctx);
                     }
-                    ui.add(egui::Label::new(RichText::new("Color palettes are separate from control shape. System follows Windows; Custom saves an accessible accent and keeps contrast-adjusted text.").size(T_CAPTION).color(t.subtle)).wrap());
+                    ui.add(egui::Label::new(RichText::new("Color palettes are separate from control shape. System follows Windows; Custom saves an accent and editable light/dark surfaces with contrast-adjusted text.").size(T_CAPTION).color(t.subtle)).wrap());
                     let mut reduce = self.settings.reduce_motion;
                     if ui.checkbox(&mut reduce, "Reduce motion").on_hover_text("Turns off transitions and the loading pulse. Follows the Windows setting by default.").changed() {
                         self.settings.reduce_motion = reduce;
@@ -1706,7 +1746,7 @@ impl OrionApp {
                     {
                         ui.add(egui::Label::new(RichText::new(message).size(T_CAPTION).color(t.muted)).wrap());
                     }
-                    ui.add(egui::Label::new(RichText::new("Appearance files include theme, control style, palette, accent, density, scale and motion preference. They do not change other app settings or Windows settings.").size(T_CAPTION).color(t.subtle)).wrap());
+                    ui.add(egui::Label::new(RichText::new("Appearance files include theme, control style, palette, accent, surfaces, density, scale, corner radius and motion preference. They do not change other app settings or Windows settings.").size(T_CAPTION).color(t.subtle)).wrap());
                 });
                 ui.add_space(S2);
                 kit::card(ui, |ui| {
