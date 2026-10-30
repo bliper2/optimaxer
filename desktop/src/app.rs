@@ -751,6 +751,14 @@ impl eframe::App for OrionApp {
 }
 
 impl OrionApp {
+    fn persist_appearance(&mut self, ctx: &egui::Context, previous: net::Settings, label: &str) {
+        if let Err(error) = self.settings.save_checked() {
+            self.settings = previous;
+            self.reapply_theme(ctx);
+            self.toast = Some((format!("{label} was not saved: {error}"), Instant::now()));
+        }
+    }
+
     fn custom_surface_editor(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let dark = self.settings.effective_dark();
         let mut candidate = self.settings.custom_surfaces.clone();
@@ -781,13 +789,10 @@ impl OrionApp {
             self.toast = Some((error, Instant::now()));
             return;
         }
-        let previous = std::mem::replace(&mut self.settings.custom_surfaces, candidate);
+        let previous = self.settings.clone();
+        self.settings.custom_surfaces = candidate;
         self.reapply_theme(ctx);
-        if let Err(error) = self.settings.save_checked() {
-            self.settings.custom_surfaces = previous;
-            self.reapply_theme(ctx);
-            self.toast = Some((format!("Custom surfaces were not saved: {error}"), Instant::now()));
-        }
+        self.persist_appearance(ctx, previous, "Custom surfaces");
     }
 
     fn notifications(&self) -> Vec<Notification> {
@@ -1612,18 +1617,20 @@ impl OrionApp {
                         if let Some(dark) = self.settings.palette.forced_dark() {
                             ui.label(if dark { "Dark (set by palette)" } else { "Light (set by palette)" });
                         } else if kit::segmented(ui, &mut ti, &["System", "Light", "Dark"]) {
+                            let previous = self.settings.clone();
                             self.settings.theme = ["system", "light", "dark"][ti].into();
                             self.reapply_theme(ctx);
-                            self.settings.save();
+                            self.persist_appearance(ctx, previous, "Theme");
                         }
                     });
                     let mut si = theme::Style::ALL.iter().position(|x| *x == self.settings.style).unwrap_or(0);
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Style").color(t.muted));
                         if kit::segmented(ui, &mut si, &["Windows", "Classic", "Material"]) {
+                            let previous = self.settings.clone();
                             self.settings.style = theme::Style::ALL[si];
                             self.reapply_theme(ctx);
-                            self.settings.save();
+                            self.persist_appearance(ctx, previous, "Control style");
                         }
                     });
                     let mut density_index = theme::Density::ALL
@@ -1633,14 +1640,10 @@ impl OrionApp {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Density").color(t.muted));
                         if kit::segmented(ui, &mut density_index, &["Comfortable", "Compact"]) {
-                            let previous = self.settings.density;
+                            let previous = self.settings.clone();
                             self.settings.density = theme::Density::ALL[density_index];
                             self.reapply_theme(ctx);
-                            if let Err(error) = self.settings.save_checked() {
-                                self.settings.density = previous;
-                                self.reapply_theme(ctx);
-                                self.toast = Some((format!("Density was not saved: {error}"), Instant::now()));
-                            }
+                            self.persist_appearance(ctx, previous, "Density");
                         }
                     });
                     let mut scale_index = theme::UiScale::ALL
@@ -1652,21 +1655,17 @@ impl OrionApp {
                         ui.label(RichText::new("Scale").color(t.muted));
                         if kit::segmented(ui, &mut scale_index, &scale_labels)
                         {
-                            let previous = self.settings.ui_scale;
+                            let previous = self.settings.clone();
                             self.settings.ui_scale = theme::UiScale::ALL[scale_index];
                             self.reapply_theme(ctx);
-                            if let Err(error) = self.settings.save_checked() {
-                                self.settings.ui_scale = previous;
-                                self.reapply_theme(ctx);
-                                self.toast = Some((format!("Interface scale was not saved: {error}"), Instant::now()));
-                            }
+                            self.persist_appearance(ctx, previous, "Interface scale");
                         }
                     })
                     .response
                     .on_hover_text("Changes text and interface size across Store and Optimaxer.");
                     let mut custom_radius = self.settings.corner_radius.is_some();
                     if ui.checkbox(&mut custom_radius, "Customize corner radius").changed() {
-                        let previous = self.settings.corner_radius;
+                        let previous = self.settings.clone();
                         self.settings.corner_radius = custom_radius.then(|| {
                             theme::Tokens::of(
                                 self.settings.effective_dark(),
@@ -1678,26 +1677,19 @@ impl OrionApp {
                             .min(16)
                         });
                         self.reapply_theme(ctx);
-                        if let Err(error) = self.settings.save_checked() {
-                            self.settings.corner_radius = previous;
-                            self.reapply_theme(ctx);
-                            self.toast = Some((format!("Corner radius was not saved: {error}"), Instant::now()));
-                        }
+                        self.persist_appearance(ctx, previous, "Corner radius");
                     }
                     if let Some(mut radius) = self.settings.corner_radius {
-                        let previous = radius;
+                        let previous_radius = radius;
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("Radius").color(t.muted));
                             ui.add(egui::Slider::new(&mut radius, 0..=16).suffix(" px"));
                         });
-                        if radius != previous {
+                        if radius != previous_radius {
+                            let previous = self.settings.clone();
                             self.settings.corner_radius = Some(radius);
                             self.reapply_theme(ctx);
-                            if let Err(error) = self.settings.save_checked() {
-                                self.settings.corner_radius = Some(previous);
-                                self.reapply_theme(ctx);
-                                self.toast = Some((format!("Corner radius was not saved: {error}"), Instant::now()));
-                            }
+                            self.persist_appearance(ctx, previous, "Corner radius");
                         }
                     }
                     let mut palette = self.settings.palette;
@@ -1722,28 +1714,26 @@ impl OrionApp {
                         }
                     });
                     if palette != self.settings.palette {
-                        let previous = self.settings.palette;
+                        let previous = self.settings.clone();
                         self.settings.palette = palette;
                         self.reapply_theme(ctx);
-                        if let Err(error) = self.settings.save_checked() {
-                            self.settings.palette = previous;
-                            self.reapply_theme(ctx);
-                            self.toast = Some((format!("Palette was not saved: {error}"), Instant::now()));
-                        }
+                        self.persist_appearance(ctx, previous, "Palette");
                     }
                     if self.settings.palette == theme::Palette::Custom {
                         let mut accent = theme::parse_hex_color(&self.settings.custom_accent).unwrap_or(theme::BRAND);
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("Custom accent").color(t.muted));
                             if ui.color_edit_button_srgba(&mut accent).changed() {
+                                let previous = self.settings.clone();
                                 self.settings.custom_accent = theme::hex_color(accent);
                                 self.reapply_theme(ctx);
-                                self.settings.save();
+                                self.persist_appearance(ctx, previous, "Custom accent");
                             }
                             if kit::ghost(ui, "Reset", true).clicked() {
+                                let previous = self.settings.clone();
                                 self.settings.custom_accent = theme::hex_color(theme::BRAND);
                                 self.reapply_theme(ctx);
-                                self.settings.save();
+                                self.persist_appearance(ctx, previous, "Custom accent");
                             }
                             ui.label(RichText::new(&self.settings.custom_accent).size(T_CAPTION).color(t.subtle));
                         });
@@ -1752,9 +1742,10 @@ impl OrionApp {
                     ui.add(egui::Label::new(RichText::new("Color palettes are separate from control shape. System follows Windows; Custom saves an accent and editable light/dark surfaces with contrast-adjusted text.").size(T_CAPTION).color(t.subtle)).wrap());
                     let mut reduce = self.settings.reduce_motion;
                     if ui.checkbox(&mut reduce, "Reduce motion").on_hover_text("Turns off transitions and the loading pulse. Follows the Windows setting by default.").changed() {
+                        let previous = self.settings.clone();
                         self.settings.reduce_motion = reduce;
                         self.reapply_theme(ctx);
-                        self.settings.save();
+                        self.persist_appearance(ctx, previous, "Motion preference");
                     }
                     ui.horizontal_wrapped(|ui| {
                         if kit::secondary(ui, "Export appearance…", !net::READ_ONLY.load(Ordering::Relaxed)).clicked() {
