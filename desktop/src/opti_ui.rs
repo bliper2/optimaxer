@@ -14,7 +14,7 @@ use crate::opti::engine::{Change, Engine};
 use crate::opti::hw::{self, Traits};
 use crate::opti::history::{
     self, Action as HistoryAction, Change as HistoryChange, Entry as HistoryEntry,
-    OperationEntry,
+    OperationEntry, OperationStatus,
 };
 use crate::opti::gaming::{self, GameProfile, GraphicsPreference, ProfileState};
 use crate::opti::network;
@@ -30,6 +30,7 @@ use egui::{Align, Color32, CornerRadius, FontId, Layout, Margin, RichText, Sense
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -177,6 +178,23 @@ struct Worker {
     tx: Sender<Msg>,
     ctx: egui::Context,
     operation_details: Option<Arc<Mutex<Vec<String>>>>,
+    operation_status: Option<Arc<AtomicU8>>,
+}
+
+fn operation_log_severity(line: &str) -> u8 {
+    let line = line.trim_start();
+    if line.starts_with("ERROR") { 2 } else if line.starts_with("WARN") { 1 } else { 0 }
+}
+
+fn catch_worker_panic(job: impl FnOnce()) -> Result<(), String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).map_err(|payload| {
+        payload
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| payload.downcast_ref::<&str>().copied())
+            .unwrap_or("unknown panic payload")
+            .to_string()
+    })
 }
 
 impl Worker {
@@ -185,6 +203,9 @@ impl Worker {
         self.ctx.request_repaint();
     }
     fn log(&self, s: &str) {
+        if let Some(status) = &self.operation_status {
+            status.fetch_max(operation_log_severity(s), Ordering::Relaxed);
+        }
         if let Some(details) = &self.operation_details {
             match details.lock() {
                 Ok(mut details) => history::capture_operation_detail(&mut details, s),
@@ -435,6 +456,7 @@ mod operation_history_tests {
         OperationEntry {
             time: "2026-10-29T12:30:00Z".into(),
             title: "Reset network stack".into(),
+            status: OperationStatus::Finished,
             details: vec!["DNS cache flushed".into()],
         }
     }
@@ -450,6 +472,20 @@ mod operation_history_tests {
     }
 
     #[test]
+    fn worker_log_severity_uses_explicit_warning_and_error_prefixes() {
+        assert_eq!(operation_log_severity("finished"), 0);
+        assert_eq!(operation_log_severity("  WARN partial result"), 1);
+        assert_eq!(operation_log_severity("ERROR command failed"), 2);
+    }
+
+    #[test]
+    fn background_worker_panic_becomes_a_visible_error() {
+        let result = catch_worker_panic(|| panic!("test worker failure"));
+        assert_eq!(result.unwrap_err(), "test worker failure");
+        assert!(catch_worker_panic(|| {}).is_ok());
+    }
+
+    #[test]
     fn activity_entries_merge_tweak_and_system_records_newest_first() {
         let older_tweak = HistoryEntry {
             time: "2026-10-29T12:00:00Z".into(),
@@ -459,6 +495,7 @@ mod operation_history_tests {
         let newer_operation = OperationEntry {
             time: "2026-10-29T12:05:00Z".into(),
             title: "Flush DNS".into(),
+            status: OperationStatus::Finished,
             details: vec![],
         };
         let history = [older_tweak];
@@ -801,7 +838,7 @@ impl OptiUi {
     }
 
     fn worker(&self, ctx: &egui::Context) -> Worker {
-        Worker { tx: self.tx.clone(), ctx: ctx.clone(), operation_details: None }
+        Worker { tx: self.tx.clone(), ctx: ctx.clone(), operation_details: None, operation_status: None }
     }
 
     /// Starts a background job. One job at a time, like the PowerShell edition.
@@ -821,14 +858,18 @@ impl OptiUi {
         self.busy = Some(title.to_string());
         self.say(&format!("== {title}"));
         let operation_details = record.then(|| Arc::new(Mutex::new(Vec::new())));
+        let operation_status = record.then(|| Arc::new(AtomicU8::new(0)));
         let w = Worker {
             tx: self.tx.clone(),
             ctx: ctx.clone(),
             operation_details: operation_details.clone(),
+            operation_status: operation_status.clone(),
         };
         let title = title.to_owned();
         std::thread::spawn(move || {
-            job(&w);
+            if let Err(message) = catch_worker_panic(|| job(&w)) {
+                w.log(&format!("ERROR Background operation stopped unexpectedly: {message}"));
+            }
             if let Some(details) = operation_details {
                 let details = match details.lock() {
                     Ok(lines) => lines.clone(),
@@ -837,9 +878,15 @@ impl OptiUi {
                         Vec::new()
                     }
                 };
+                let status = match operation_status.as_ref().map_or(0, |status| status.load(Ordering::Relaxed)) {
+                    2 => OperationStatus::Error,
+                    1 => OperationStatus::Warnings,
+                    _ => OperationStatus::Finished,
+                };
                 let entry = OperationEntry {
                     time: format!("{}Z", crate::opti::now_iso()),
                     title,
+                    status,
                     details,
                 };
                 match history::append_operation(entry) {
@@ -1165,7 +1212,7 @@ impl OptiUi {
                             Err(e) => w.log(&format!("WARN could not open the file: {e}")),
                         }
                     } else {
-                        w.log("The installer was not opened because the restore point failed. Open it from the Downloads list if you want to continue anyway.");
+                        w.log("WARN The installer was not opened because the restore point failed. Open it from the Downloads list if you want to continue anyway.");
                     }
                 });
             }
@@ -1555,9 +1602,14 @@ impl OptiUi {
             .frame(egui::Frame::new().fill(t.surface1).inner_margin(Margin::symmetric(S4 as i8, S1 as i8)));
 
         let mut expansion_change = None;
+        let mut open_activity = false;
         egui::Panel::show_switched(root, &mut self.log_expanded, collapsed, expanded, |ui, is_expanded| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Activity").font(FontId::new(T_BODY, semibold())).color(t.text));
+                ui.label(RichText::new("Operation center").font(FontId::new(T_BODY, semibold())).color(t.text));
+                if let Some(job) = &self.busy {
+                    kit::chip(ui, "Running", Tone::Brand);
+                    ui.add(egui::Label::new(RichText::new(job).size(T_CAPTION).color(t.muted)).truncate());
+                }
                 if !self.log.is_empty() {
                     kit::chip(ui, &format!("{} entries", self.log.len()), Tone::Neutral);
                 }
@@ -1569,6 +1621,9 @@ impl OptiUi {
                         if kit::ghost(ui, "Hide", true).clicked() {
                             expansion_change = Some(false);
                         }
+                        if kit::ghost(ui, "View history", true).clicked() {
+                            open_activity = true;
+                        }
                         let has = !self.log.is_empty();
                         if kit::ghost(ui, "Copy", has).clicked() {
                             ui.ctx().copy_text(self.log.join("\n"));
@@ -1579,12 +1634,13 @@ impl OptiUi {
                     });
                 } else {
                     let latest = self.log.last().map(String::as_str).unwrap_or("No recent activity");
-                    let color = if latest.contains("WARN") || latest.contains("failed") { t.warn } else { t.subtle };
+                    let summary = self.busy.as_deref().unwrap_or(latest);
+                    let color = if summary.contains("WARN") || summary.contains("failed") { t.warn } else { t.subtle };
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if kit::ghost(ui, "Show", true).clicked() {
                             expansion_change = Some(true);
                         }
-                        ui.add(egui::Label::new(RichText::new(latest).size(T_CAPTION).color(color)).truncate());
+                        ui.add(egui::Label::new(RichText::new(summary).size(T_CAPTION).color(color)).truncate());
                     });
                 }
             });
@@ -1602,6 +1658,9 @@ impl OptiUi {
         });
         if let Some(expanded) = expansion_change {
             self.log_expanded = expanded;
+        }
+        if open_activity {
+            self.set_page(root.ctx(), Page::Activity);
         }
     }
 
@@ -2135,7 +2194,22 @@ impl OptiUi {
 
     fn activity_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let t = tokens(ctx);
-        kit::page_header(ui, "Activity", "Search confirmed tweak changes and output from system actions. Read-only scans are not recorded.");
+        kit::page_header(ui, "Activity", "Search confirmed tweak changes and system-action results. Recorded warnings and errors describe operation output, not final Windows state.");
+        if let Some(job) = self.busy.clone() {
+            kit::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    ui.add(egui::Spinner::new().size(14.0).color(t.brand_text));
+                    kit::chip(ui, "Running", Tone::Brand);
+                    ui.label(RichText::new(job).font(FontId::new(T_BODY, semibold())).color(t.text));
+                    if kit::secondary(ui, "Show live output", true).clicked() {
+                        self.log_expanded = true;
+                    }
+                });
+                ui.label(RichText::new("Live output is available in the Operation center.").size(T_CAPTION).color(t.subtle));
+            });
+            ui.add_space(S2);
+        }
         ui.horizontal_wrapped(|ui| {
             ui.add_sized(
                 [280.0, 34.0],
@@ -2210,16 +2284,27 @@ impl OptiUi {
                     });
                 }
                 ActivityEntry::Operation(entry) => {
-                    egui::CollapsingHeader::new(format!("{} · {} output line(s)", entry.title, entry.details.len()))
+                    egui::CollapsingHeader::new(format!("{} · {} · {} output line(s)", entry.title, entry.status.label(), entry.details.len()))
                         .id_salt(("activity-operation", index, &entry.time))
                         .show(ui, |ui| {
                             ui.label(RichText::new(&entry.time).size(T_CAPTION).color(t.subtle));
+                            let (summary, tone) = match entry.status {
+                                OperationStatus::Finished => ("The worker finished. Final system state is not verified by this record.", Tone::Neutral),
+                                OperationStatus::Warnings => ("The worker finished with warnings. Review the captured output.", Tone::Warn),
+                                OperationStatus::Error => ("The worker reported an error. Review the captured output.", Tone::Bad),
+                                OperationStatus::Unknown => ("This record has no status supported by this version.", Tone::Neutral),
+                            };
+                            kit::chip(ui, entry.status.label(), tone);
+                            ui.label(RichText::new(summary).size(T_CAPTION).color(t.muted));
                             if entry.details.is_empty() {
-                                ui.label(RichText::new("No output was captured; completion is not verified by this record.")
+                                ui.label(RichText::new("No output was captured.")
                                     .size(T_CAPTION).color(t.warn));
                             } else {
                                 for detail in &entry.details {
-                                    let color = if detail.starts_with("WARN") || detail.contains("failed") {
+                                    let line = detail.trim_start();
+                                    let color = if line.starts_with("ERROR") {
+                                        t.bad
+                                    } else if line.starts_with("WARN") || line.contains("failed") {
                                         t.warn
                                     } else {
                                         t.muted

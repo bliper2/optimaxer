@@ -39,12 +39,37 @@ pub struct Entry {
     pub changes: Vec<Change>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationStatus {
+    /// The worker returned without reporting a warning or error. This does not verify system state.
+    Finished,
+    Warnings,
+    Error,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+impl OperationStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Finished => "Finished",
+            Self::Warnings => "Warnings",
+            Self::Error => "Error",
+            Self::Unknown => "Status unavailable",
+        }
+    }
+}
+
 /// Output captured from a confirmed, non-tweak system action.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationEntry {
     /// UTC timestamp in ISO 8601 form.
     pub time: String,
     pub title: String,
+    #[serde(default)]
+    pub status: OperationStatus,
     pub details: Vec<String>,
 }
 
@@ -120,7 +145,8 @@ fn load_operations_from(path: &Path) -> Result<Vec<OperationEntry>, String> {
             "Operation history exceeds the {MAX_OPERATION_FILE_BYTES}-byte safety limit"
         ));
     }
-    let bytes = fs::read(path).map_err(|error| format!("Could not read operation history: {error}"))?;
+    let bytes =
+        fs::read(path).map_err(|error| format!("Could not read operation history: {error}"))?;
     let entries: Vec<OperationEntry> = serde_json::from_slice(&bytes)
         .map_err(|error| format!("Operation history is unreadable: {error}"))?;
     Ok(entries
@@ -195,7 +221,11 @@ fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
 
     let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
-    let destination: Vec<u16> = destination.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
     let flags = windows_sys::Win32::Storage::FileSystem::MOVEFILE_REPLACE_EXISTING
         | windows_sys::Win32::Storage::FileSystem::MOVEFILE_WRITE_THROUGH;
     if unsafe {
@@ -267,6 +297,7 @@ mod tests {
         OperationEntry {
             time: format!("2026-10-29T00:00:{index:02}Z"),
             title: "Changing services".into(),
+            status: OperationStatus::Finished,
             details: vec![format!("Service {index}: Automatic -> Manual")],
         }
     }
@@ -339,8 +370,30 @@ mod tests {
         assert!(load_operations_from(&file).unwrap().is_empty());
         append_operation_to(&file, operation(1)).unwrap();
         append_operation_to(&file, operation(2)).unwrap();
-        assert_eq!(load_operations_from(&file).unwrap(), vec![operation(1), operation(2)]);
+        assert_eq!(
+            load_operations_from(&file).unwrap(),
+            vec![operation(1), operation(2)]
+        );
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn operation_status_round_trips_and_unknown_future_values_remain_readable() {
+        let mut warning = operation(3);
+        warning.status = OperationStatus::Warnings;
+        let json = serde_json::to_string(&warning).unwrap();
+        assert_eq!(
+            serde_json::from_str::<OperationEntry>(&json).unwrap(),
+            warning
+        );
+
+        let future = json.replace("warnings", "future_state");
+        assert_eq!(
+            serde_json::from_str::<OperationEntry>(&future)
+                .unwrap()
+                .status,
+            OperationStatus::Unknown
+        );
     }
 
     #[test]
@@ -376,13 +429,27 @@ mod tests {
     }
 
     #[test]
+    fn older_operation_records_have_unknown_status_without_claiming_verification() {
+        let entry: OperationEntry = serde_json::from_str(
+            r#"{"time":"2026-10-29T00:00:00Z","title":"Old action","details":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(entry.status, OperationStatus::Unknown);
+        assert_eq!(entry.status.label(), "Status unavailable");
+    }
+
+    #[test]
     fn corrupt_operation_history_is_never_overwritten() {
         let dir = temp("operations-corrupt");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let file = dir.join("operations.json");
         fs::write(&file, b"not json").unwrap();
-        assert!(append_operation_to(&file, operation(1)).unwrap_err().contains("unreadable"));
+        assert!(
+            append_operation_to(&file, operation(1))
+                .unwrap_err()
+                .contains("unreadable")
+        );
         assert_eq!(fs::read(&file).unwrap(), b"not json");
         fs::remove_dir_all(dir).unwrap();
     }
