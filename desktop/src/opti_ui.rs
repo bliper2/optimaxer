@@ -2270,11 +2270,11 @@ impl OptiUi {
         kit::card(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(RichText::new("Game frame-time comparison").font(FontId::new(T_HEADING, semibold())).color(t.text));
-            ui.label(RichText::new("PresentMon records 30 seconds. Keep the same game and scene running for both captures. First use downloads a SHA-256 verified tool.").size(T_SMALL).color(t.muted));
-            ui.label(RichText::new("These readings show an observed difference. They do not prove a tweak caused it. Rust currently measures frame times only; DPC, ISR, timer, network and boot measurements remain PowerShell-only.").size(T_CAPTION).color(t.subtle));
+            ui.label(RichText::new("PresentMon records 30 seconds, then samples system counters and up to 10 TCP connections to 1.1.1.1:53. Keep the same game and scene running for both captures. First use downloads a SHA-256 verified tool.").size(T_SMALL).color(t.muted));
+            ui.label(RichText::new("Results are observations, not proof a tweak caused a change. DNS endpoint TCP timings are not ICMP ping or game-server latency. Boot time comes from the latest Windows startup event; compare it only across different boot timestamps. Unsupported counters show Unavailable.").size(T_CAPTION).color(t.subtle));
             ui.add_space(S1);
             ui.horizontal_wrapped(|ui| {
-                ui.add_sized([240.0, 32.0], egui::TextEdit::singleline(&mut self.measurement_process).hint_text("Game process, for example game.exe"));
+                ui.add_sized([240.0, 32.0], egui::TextEdit::singleline(&mut self.measurement_process).hint_text("Game process, for example game.exe").interactive(self.busy.is_none()));
                 let valid = crate::opti::measurements::validate_process_name(&self.measurement_process).is_ok();
                 if kit::secondary(ui, "Record before", valid && self.busy.is_none()).clicked() {
                     let process = self.measurement_process.trim().to_string();
@@ -2289,11 +2289,10 @@ impl OptiUi {
                 ui.label(RichText::new(format!("Measurement history unavailable: {error}")).size(T_SMALL).color(t.warn));
             }
             let process = self.measurement_process.trim();
-            let before = self.measurements.iter().rev().find(|capture| capture.label == "before" && capture.process.eq_ignore_ascii_case(process));
-            let after = self.measurements.iter().rev().find(|capture| capture.label == "after" && capture.process.eq_ignore_ascii_case(process));
+            let (before, after) = crate::opti::measurements::latest_pair(&self.measurements, process);
             if process.is_empty() || (before.is_none() && after.is_none()) {
                 kit::empty_state(ui, "No matching captures", "Record a before capture, change settings and restart if needed, then record after using the same process name.");
-            } else if let (Some(before), Some(after)) = (before, after) {
+            } else if let (Some(before), Some(after)) = (before, after) && after.time >= before.time {
                 egui::Grid::new("frame-measurement-comparison").num_columns(3).spacing(vec2(S4, S1)).show(ui, |ui| {
                     ui.label(RichText::new("Metric").size(T_SMALL).color(t.muted));
                     ui.label(RichText::new("Before").size(T_SMALL).color(t.muted));
@@ -2310,12 +2309,34 @@ impl OptiUi {
                         ui.label(RichText::new(format!("{second:.1} {unit} ({:+.1})", second - first)).size(T_SMALL).color(t.text));
                         ui.end_row();
                     }
+                    let metric = |value: Option<f64>, unit: &str| value.map_or_else(|| "Unavailable".into(), |value| format!("{value:.2} {unit}"));
+                    for (name, first, second, unit) in [
+                        ("DPC average", before.dpc_average_percent, after.dpc_average_percent, "%"),
+                        ("DPC maximum", before.dpc_max_percent, after.dpc_max_percent, "%"),
+                        ("Interrupt average", before.interrupt_average_percent, after.interrupt_average_percent, "%"),
+                        ("DNS endpoint TCP average", before.dns_tcp_average_ms, after.dns_tcp_average_ms, "ms"),
+                        ("DNS endpoint TCP jitter", before.dns_tcp_jitter_ms, after.dns_tcp_jitter_ms, "ms"),
+                        ("Timer resolution", before.timer_resolution_ms, after.timer_resolution_ms, "ms"),
+                        ("Last boot duration", before.boot_duration_ms.map(|ms| ms as f64), after.boot_duration_ms.map(|ms| ms as f64), "ms"),
+                    ] {
+                        ui.label(RichText::new(name).size(T_SMALL).color(t.text));
+                        ui.label(RichText::new(metric(first, unit)).size(T_SMALL).color(t.text));
+                        ui.label(RichText::new(metric(second, unit)).size(T_SMALL).color(t.text));
+                        ui.end_row();
+                    }
                     ui.label(RichText::new("Frames / stutters").size(T_SMALL).color(t.text));
                     ui.label(RichText::new(format!("{} / {}", before.frames, before.stutters)).size(T_SMALL).color(t.text));
                     ui.label(RichText::new(format!("{} / {}", after.frames, after.stutters)).size(T_SMALL).color(t.text));
                     ui.end_row();
+                    ui.label(RichText::new("DNS TCP successes / failures").size(T_SMALL).color(t.text));
+                    ui.label(RichText::new(format!("{} / {}", before.dns_tcp_samples, before.dns_tcp_failures)).size(T_SMALL).color(t.text));
+                    ui.label(RichText::new(format!("{} / {}", after.dns_tcp_samples, after.dns_tcp_failures)).size(T_SMALL).color(t.text));
+                    ui.end_row();
                 });
-                ui.label(RichText::new(format!("Before {} · After {} · {} seconds each", before.time, after.time, before.seconds)).size(T_CAPTION).color(t.subtle));
+                ui.label(RichText::new(format!("Before {} · After {} · {}-second frame captures; DPC/interrupt counters sample for 5 seconds when available", before.time, after.time, before.seconds)).size(T_CAPTION).color(t.subtle));
+                ui.label(RichText::new(format!("Boot events · {} · {}", before.boot_event_time.as_deref().unwrap_or("Unavailable"), after.boot_event_time.as_deref().unwrap_or("Unavailable"))).size(T_CAPTION).color(t.subtle));
+            } else if before.is_some() && after.is_some() {
+                kit::empty_state(ui, "Capture order is reversed", "The latest after capture predates the before capture. Record after again to compare in order.");
             } else {
                 ui.label(RichText::new("One capture saved. Record the other using the same process name.").size(T_SMALL).color(t.muted));
             }
@@ -2324,7 +2345,7 @@ impl OptiUi {
 
     fn start_measurement(&mut self, ctx: &egui::Context, process: String, label: &'static str) {
         self.spawn(ctx, if label == "before" { "Recording before frame times" } else { "Recording after frame times" }, move |worker| {
-            worker.log("PresentMon capture runs for 30 seconds. Keep the selected game running.");
+            worker.log("PresentMon captures 30 seconds, followed by up to 10 seconds of system and network sampling. Keep the selected game running.");
             let result = crate::opti::measurements::record(&process, label);
             if let Err(error) = &result { worker.log(&format!("ERROR {error}")); }
             worker.send(Msg::Measurements(result));

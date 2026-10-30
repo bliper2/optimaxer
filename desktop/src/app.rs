@@ -251,7 +251,9 @@ impl OrionApp {
         let catalog = net::load_cache().unwrap_or_else(net::embedded);
         let rx = spawn_refresh(&cc.egui_ctx);
         let (update_tx, update_rx) = channel();
-        update::cleanup_old();
+        if std::env::var_os("ORION_SHOTS").is_none() {
+            update::cleanup_old();
+        }
         let auto_check = settings.auto_update && std::env::var_os("ORION_SHOTS").is_none();
         let mut app = Self {
             shots: crate::shots::Shots::from_env(),
