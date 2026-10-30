@@ -3099,8 +3099,8 @@ mod app_tests {
     #[test]
     fn update_busy_state_only_matches_running_operations() {
         let release = || Release {
-            version: (2, 15, 37),
-            tag: "v2.15.37".into(),
+            version: (2, 15, 38),
+            tag: "v2.15.38".into(),
             notes: String::new(),
             page: String::new(),
             url: String::new(),
