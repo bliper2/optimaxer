@@ -20,7 +20,7 @@ import tempfile
 import time
 import urllib.request
 
-__version__ = "2.15.14"
+__version__ = "2.15.15"
 REPO = "bliper2/optimaxer"
 STATE_FILE = "/var/lib/optimaxer/state.json"
 BACKUP_DIR = "/var/lib/optimaxer/backups"

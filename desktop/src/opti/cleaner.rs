@@ -35,6 +35,47 @@ pub enum Kind {
     Component,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Category {
+    Temporary,
+    WindowsUpdate,
+    Browser,
+    Shader,
+    Development,
+    Application,
+    Logs,
+    Recycle,
+    Other,
+}
+
+impl Category {
+    pub const ALL: [Self; 9] = [
+        Self::Temporary,
+        Self::WindowsUpdate,
+        Self::Browser,
+        Self::Shader,
+        Self::Development,
+        Self::Application,
+        Self::Logs,
+        Self::Recycle,
+        Self::Other,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Temporary => "Temporary files",
+            Self::WindowsUpdate => "Windows update caches",
+            Self::Browser => "Browser caches",
+            Self::Shader => "Shader caches",
+            Self::Development => "Development caches",
+            Self::Application => "Application caches",
+            Self::Logs => "Logs and crash dumps",
+            Self::Recycle => "Recycle Bin",
+            Self::Other => "Other supported targets",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Target {
     pub id: &'static str,
@@ -45,6 +86,21 @@ pub struct Target {
     pub kind: Kind,
     /// Services stopped while the folders are emptied, then started again.
     pub services: &'static [&'static str],
+}
+
+pub fn category(target: &Target) -> Category {
+    match target.id {
+        "usertemp" | "wintemp" => Category::Temporary,
+        "wu" | "do" => Category::WindowsUpdate,
+        "chrome" | "edge" | "brave" | "opera" | "vivaldi" | "firefox" => Category::Browser,
+        "shader" => Category::Shader,
+        "vscode" | "npm" | "pip" | "nuget" => Category::Development,
+        "discord" | "teams" | "spotify" | "steam" | "office" | "storecache" => Category::Application,
+        "wer" | "dumps" | "logs" | "eventlogs" => Category::Logs,
+        "recycle" => Category::Recycle,
+        "thumbs" | "fontcache" | "inet" | "recent" | "winold" | "component" => Category::Other,
+        _ => Category::Other,
+    }
 }
 
 macro_rules! t {
@@ -543,6 +599,10 @@ mod tests {
             }
         }
         assert_eq!(TARGETS.len(), 32);
+        let expected = [2, 2, 6, 1, 4, 6, 4, 1, 6];
+        for (category, expected_count) in Category::ALL.into_iter().zip(expected) {
+            assert_eq!(TARGETS.iter().filter(|target| self::category(target) == category).count(), expected_count, "{}", category.label());
+        }
     }
 
     #[test]
