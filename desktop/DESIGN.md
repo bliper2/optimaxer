@@ -59,6 +59,10 @@ The System Snapshot page uses a compact, collapsible history because each captur
 
 The Store Downloads panel separates active session transfers from recent completed files. Recent files come from the local bounded history, with Open and Show in folder actions; the UI does not infer installation state from a download.
 
+## Background work and cancellation
+
+Workers receive a cancellation token only for read-only Cleaner size scans. The scan checks it during wildcard expansion and directory traversal; a cancelled scan discards all partial sizes and selections. Mutating jobs do not receive a cancellation token, because stopping them after a system change or file deletion could leave partial state without a reliable rollback path.
+
 ## Motion
 
 Three lengths: fast 90 ms (hover, press), base 160 ms (selection, toggles), slow 260 ms (page enter). Everything eases out. Pages fade in with a 10 px rise when you switch view. The Store/Optimaxer thumb slides, toasts fade and rise in and fade out, and loading content pulses as skeleton rows. The activity dock uses the same global animation time when it opens or closes, including the reduced-motion setting.
