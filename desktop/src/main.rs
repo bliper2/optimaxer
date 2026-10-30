@@ -5,6 +5,7 @@ mod appearance;
 mod kit;
 mod model;
 mod net;
+mod notifications;
 mod opti;
 mod opti_ui;
 mod shots;

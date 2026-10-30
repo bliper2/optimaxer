@@ -824,6 +824,14 @@ impl OptiUi {
         }
     }
 
+    pub fn operation_entries(&self) -> &[OperationEntry] {
+        &self.operations
+    }
+
+    pub fn current_job(&self) -> Option<&str> {
+        self.busy.as_deref()
+    }
+
     /// Open a downloaded installer from the store through Optimaxer: a restore point first, then the file.
     pub fn request_run_installer(&mut self, path: PathBuf) {
         let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();

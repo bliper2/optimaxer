@@ -117,6 +117,9 @@ pub struct Settings {
     pub opti_restart_required: bool,
     /// Tweak IDs pinned by the user on the Tweaks page.
     pub opti_tweak_favorites: Vec<String>,
+    /// Stable IDs acknowledged in the desktop notification center.
+    #[serde(default)]
+    pub dismissed_notifications: Vec<String>,
     /// System uptime when the restart reminder was recorded. A lower uptime means Windows rebooted.
     pub opti_restart_uptime: u64,
     /// No transitions or pulses. Defaults to the Windows "animation effects" setting.
@@ -141,7 +144,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let dir = dirs::download_dir().unwrap_or_else(|| PathBuf::from(".")).join("Orion");
-        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), sidebar_collapsed: false, opti_restore_point: true, opti_restart_required: false, opti_tweak_favorites: Vec::new(), opti_restart_uptime: 0, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, density: crate::theme::Density::Comfortable, ui_scale: crate::theme::UiScale::Default, corner_radius: None, palette: crate::theme::Palette::System, custom_accent: crate::theme::hex_color(crate::theme::BRAND), auto_update: true }
+        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), sidebar_collapsed: false, opti_restore_point: true, opti_restart_required: false, opti_tweak_favorites: Vec::new(), dismissed_notifications: Vec::new(), opti_restart_uptime: 0, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, density: crate::theme::Density::Comfortable, ui_scale: crate::theme::UiScale::Default, corner_radius: None, palette: crate::theme::Palette::System, custom_accent: crate::theme::hex_color(crate::theme::BRAND), auto_update: true }
     }
 }
 
@@ -437,6 +440,7 @@ mod tests {
         assert_eq!(settings.ui_scale, crate::theme::UiScale::Default);
         assert_eq!(settings.corner_radius, None);
         assert_eq!(settings.custom_accent, "#7478F8");
+        assert!(settings.dismissed_notifications.is_empty());
         assert!(!settings.sidebar_collapsed);
         assert!(!settings.opti_restart_required);
         assert_eq!(settings.opti_restart_uptime, 0);
@@ -461,6 +465,17 @@ mod tests {
         let saved = serde_json::to_string(&settings).unwrap();
         let loaded: Settings = serde_json::from_str(&saved).unwrap();
         assert_eq!(loaded.corner_radius, Some(3));
+    }
+
+    #[test]
+    fn dismissed_notifications_survive_settings_round_trip() {
+        let settings = Settings {
+            dismissed_notifications: vec!["restart:3600".into()],
+            ..Settings::default()
+        };
+        let saved = serde_json::to_string(&settings).unwrap();
+        let loaded: Settings = serde_json::from_str(&saved).unwrap();
+        assert_eq!(loaded.dismissed_notifications, ["restart:3600"]);
     }
 
     #[test]
