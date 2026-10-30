@@ -127,6 +127,8 @@ pub struct Settings {
     pub density: crate::theme::Density,
     /// Scale for text and interface dimensions.
     pub ui_scale: crate::theme::UiScale,
+    /// Custom radius for controls; `None` follows the selected control style.
+    pub corner_radius: Option<u8>,
     /// Named color palette; control shape remains controlled by `style`.
     #[serde(deserialize_with = "crate::theme::deserialize_palette")]
     pub palette: crate::theme::Palette,
@@ -139,7 +141,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let dir = dirs::download_dir().unwrap_or_else(|| PathBuf::from(".")).join("Orion");
-        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), sidebar_collapsed: false, opti_restore_point: true, opti_restart_required: false, opti_tweak_favorites: Vec::new(), opti_restart_uptime: 0, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, density: crate::theme::Density::Comfortable, ui_scale: crate::theme::UiScale::Default, palette: crate::theme::Palette::System, custom_accent: crate::theme::hex_color(crate::theme::BRAND), auto_update: true }
+        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), sidebar_collapsed: false, opti_restore_point: true, opti_restart_required: false, opti_tweak_favorites: Vec::new(), opti_restart_uptime: 0, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, density: crate::theme::Density::Comfortable, ui_scale: crate::theme::UiScale::Default, corner_radius: None, palette: crate::theme::Palette::System, custom_accent: crate::theme::hex_color(crate::theme::BRAND), auto_update: true }
     }
 }
 
@@ -153,6 +155,7 @@ impl Settings {
             accent: self.accent(),
             density: self.density,
             scale: self.ui_scale,
+            corner_radius: self.corner_radius,
         }
     }
 
@@ -432,6 +435,7 @@ mod tests {
         assert_eq!(settings.palette, crate::theme::Palette::System);
         assert_eq!(settings.density, crate::theme::Density::Comfortable);
         assert_eq!(settings.ui_scale, crate::theme::UiScale::Default);
+        assert_eq!(settings.corner_radius, None);
         assert_eq!(settings.custom_accent, "#7478F8");
         assert!(!settings.sidebar_collapsed);
         assert!(!settings.opti_restart_required);
@@ -449,6 +453,14 @@ mod tests {
         let saved = serde_json::to_string(&settings).unwrap();
         let loaded: Settings = serde_json::from_str(&saved).unwrap();
         assert_eq!(loaded.opti_tweak_favorites, ["game-mode", "dark-mode"]);
+    }
+
+    #[test]
+    fn custom_corner_radius_survives_settings_round_trip() {
+        let settings = Settings { corner_radius: Some(3), ..Settings::default() };
+        let saved = serde_json::to_string(&settings).unwrap();
+        let loaded: Settings = serde_json::from_str(&saved).unwrap();
+        assert_eq!(loaded.corner_radius, Some(3));
     }
 
     #[test]

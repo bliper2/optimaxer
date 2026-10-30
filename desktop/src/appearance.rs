@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-const FORMAT_VERSION: u32 = 2;
+const FORMAT_VERSION: u32 = 3;
 const MAX_PRESET_BYTES: u64 = 16 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -22,6 +22,8 @@ pub struct Preset {
     density: crate::theme::Density,
     #[serde(default)]
     ui_scale: crate::theme::UiScale,
+    #[serde(default)]
+    corner_radius: Option<u8>,
 }
 
 impl Preset {
@@ -35,11 +37,12 @@ impl Preset {
             reduce_motion: settings.reduce_motion,
             density: settings.density,
             ui_scale: settings.ui_scale,
+            corner_radius: settings.corner_radius,
         }
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if !matches!(self.format_version, 1 | FORMAT_VERSION) {
+        if !matches!(self.format_version, 1 | 2 | FORMAT_VERSION) {
             return Err(format!(
                 "Unsupported appearance format version {}.",
                 self.format_version
@@ -50,6 +53,9 @@ impl Preset {
         }
         if theme::parse_hex_color(&self.custom_accent).is_none() {
             return Err("Custom accent must be a six-digit #RRGGBB color.".into());
+        }
+        if self.corner_radius.is_some_and(|radius| radius > 16) {
+            return Err("Corner radius must be between 0 and 16 px.".into());
         }
         Ok(())
     }
@@ -62,6 +68,7 @@ impl Preset {
         settings.reduce_motion = self.reduce_motion;
         settings.density = self.density;
         settings.ui_scale = self.ui_scale;
+        settings.corner_radius = self.corner_radius;
     }
 }
 
@@ -114,6 +121,7 @@ mod tests {
             reduce_motion: true,
             density: crate::theme::Density::Compact,
             ui_scale: crate::theme::UiScale::Larger,
+            corner_radius: Some(6),
             ..Settings::default()
         };
         let preset = Preset::capture(&source);
@@ -134,6 +142,7 @@ mod tests {
         assert!(destination.reduce_motion);
         assert_eq!(destination.density, crate::theme::Density::Compact);
         assert_eq!(destination.ui_scale, crate::theme::UiScale::Larger);
+        assert_eq!(destination.corner_radius, Some(6));
         assert_eq!(destination.download_dir, "keep-this-path");
         assert!(!destination.auto_update);
     }
@@ -141,7 +150,7 @@ mod tests {
     #[test]
     fn invalid_version_mode_and_accent_are_rejected() {
         let mut preset = Preset::capture(&Settings::default());
-        preset.format_version = 3;
+        preset.format_version = 4;
         assert!(preset.validate().unwrap_err().contains("version"));
         preset.format_version = FORMAT_VERSION;
         preset.theme = "automatic-ish".into();
@@ -149,6 +158,9 @@ mod tests {
         preset.theme = "system".into();
         preset.custom_accent = "red".into();
         assert!(preset.validate().unwrap_err().contains("accent"));
+        preset.custom_accent = "#7478F8".into();
+        preset.corner_radius = Some(17);
+        assert!(preset.validate().unwrap_err().contains("Corner radius"));
     }
 
     #[test]
@@ -164,6 +176,19 @@ mod tests {
         preset.apply(&mut settings);
         assert_eq!(settings.density, crate::theme::Density::Comfortable);
         assert_eq!(settings.ui_scale, crate::theme::UiScale::Default);
+        assert_eq!(settings.corner_radius, None);
+    }
+
+    #[test]
+    fn version_two_preset_migrates_without_changing_style_default_radius() {
+        let json = r##"{"format_version":2,"theme":"dark","style":"windows","palette":"system","custom_accent":"#7478F8","reduce_motion":false,"density":"compact","ui_scale":"large"}"##;
+        let preset: Preset = serde_json::from_str(json).unwrap();
+        preset.validate().unwrap();
+        let mut settings = Settings { corner_radius: Some(12), ..Settings::default() };
+        preset.apply(&mut settings);
+        assert_eq!(settings.density, crate::theme::Density::Compact);
+        assert_eq!(settings.ui_scale, crate::theme::UiScale::Large);
+        assert_eq!(settings.corner_radius, None);
     }
 
     #[test]

@@ -3,7 +3,7 @@ use crate::model::{self, AppItem, Catalog, Sort, ANDROID, PC, TV};
 use crate::net::{self, DlStatus, Download, Settings};
 use crate::opti_ui::{OptiEvent, OptiUi};
 use crate::update::{self, Release};
-use crate::theme::{self, ease_out, mix, motion, semibold, tokens, Tone, R_LG, R_MD, S1, S2, S3, S4, S5, T_BODY, T_CAPTION, T_DISPLAY, T_HEADING, T_SMALL};
+use crate::theme::{self, ease_out, mix, motion, semibold, tokens, Tone, S1, S2, S3, S4, S5, T_BODY, T_CAPTION, T_DISPLAY, T_HEADING, T_SMALL};
 use egui::{Align, Color32, CornerRadius, FontId, Layout, Margin, RichText, Sense, Stroke, StrokeKind, Ui, WidgetInfo, Role, vec2};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -774,7 +774,7 @@ impl OrionApp {
         let a = fade_in.min(fade_out);
         egui::Area::new(egui::Id::unique("orion-toast")).anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -48.0 + (1.0 - fade_in) * 10.0)).order(egui::Order::Tooltip).interactable(false).show(ctx, |ui| {
             ui.set_opacity(a);
-            egui::Frame::new().fill(t.surface3).stroke(Stroke::new(1.0, t.hairline)).corner_radius(R_MD + 2).inner_margin(Margin::symmetric(S4 as i8, S3 as i8)).shadow(ctx.global_style().visuals.popup_shadow).show(ui, |ui| {
+            egui::Frame::new().fill(t.surface3).stroke(Stroke::new(1.0, t.hairline)).corner_radius(t.card_radius()).inner_margin(Margin::symmetric(S4 as i8, S3 as i8)).shadow(ctx.global_style().visuals.popup_shadow).show(ui, |ui| {
                 ui.set_max_width(520.0);
                 ui.label(RichText::new(msg).color(t.text));
             });
@@ -791,20 +791,21 @@ impl OrionApp {
         if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
             *idx = (*idx + n - 1) % n;
         }
+        let t = tokens(ctx);
         let screen = ctx.content_rect();
         let mut close = false;
         let mut step: i32 = 0;
         egui::Area::new(egui::Id::NULL.with("lightbox")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
             let (rect, backdrop) = ui.allocate_exact_size(screen.size(), Sense::click());
             ui.painter().rect_filled(rect, 0.0, Color32::from_black_alpha(225));
-            let img = ui.put(rect.shrink2(vec2(80.0, 56.0)), egui::Image::new(urls[*idx].as_str()).corner_radius(R_MD).sense(Sense::click()));
+            let img = ui.put(rect.shrink2(vec2(80.0, 56.0)), egui::Image::new(urls[*idx].as_str()).corner_radius(t.card_radius()).sense(Sense::click()));
             if backdrop.clicked() && !img.clicked() {
                 close = true;
             }
             if n > 1 {
                 let side = |ui: &mut Ui, x: f32, label: &str| {
                     let r = egui::Rect::from_center_size(egui::pos2(x, rect.center().y), vec2(44.0, 64.0));
-                    ui.put(r, egui::Button::new(RichText::new(label).size(T_HEADING).color(Color32::WHITE)).fill(Color32::from_white_alpha(28)).corner_radius(R_MD)).clicked()
+                    ui.put(r, egui::Button::new(RichText::new(label).size(T_HEADING).color(Color32::WHITE)).fill(Color32::from_white_alpha(28)).corner_radius(t.ctl_radius())).clicked()
                 };
                 if side(ui, rect.left() + 40.0, "<") {
                     step = -1;
@@ -816,7 +817,7 @@ impl OrionApp {
             let caption = format!("{} / {}", *idx + 1, n);
             ui.painter().text(egui::pos2(rect.center().x, rect.bottom() - 24.0), egui::Align2::CENTER_CENTER, caption, FontId::proportional(T_SMALL), Color32::from_white_alpha(200));
             let x = egui::Rect::from_center_size(egui::pos2(rect.right() - 32.0, rect.top() + 28.0), vec2(40.0, 40.0));
-            if ui.put(x, egui::Button::new(RichText::new("x").size(T_HEADING).color(Color32::WHITE)).fill(Color32::from_white_alpha(28)).corner_radius(R_MD)).on_hover_text("Close").clicked() {
+            if ui.put(x, egui::Button::new(RichText::new("x").size(T_HEADING).color(Color32::WHITE)).fill(Color32::from_white_alpha(28)).corner_radius(t.ctl_radius())).on_hover_text("Close").clicked() {
                 close = true;
             }
         });
@@ -1135,7 +1136,7 @@ impl OrionApp {
                 egui::ScrollArea::horizontal().id_salt("shots").show(ui, |ui| {
                     ui.horizontal(|ui| {
                         for (i, s) in app.screenshots.iter().enumerate() {
-                            let resp = ui.add(egui::Image::new(s.as_str()).fit_to_exact_size(vec2(320.0, 190.0)).corner_radius(R_LG).sense(Sense::click()));
+                            let resp = ui.add(egui::Image::new(s.as_str()).fit_to_exact_size(vec2(320.0, 190.0)).corner_radius(t.card_radius()).sense(Sense::click()));
                             let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Click to enlarge");
                             if resp.clicked() {
                                 self.lightbox = Some((app.screenshots.clone(), i));
@@ -1251,7 +1252,7 @@ impl OrionApp {
                                         Some(f) => (f, format!("{:.0}%   {} of {}", f * 100.0, model::format_size(Some(done)), model::format_size(Some(total)))),
                                         None => (0.0, model::format_size(Some(done))),
                                     };
-                                    ui.add(egui::ProgressBar::new(f).fill(t.action).desired_height(8.0).corner_radius(4).animate(d.fraction().is_none()).desired_width(240.0));
+                                    ui.add(egui::ProgressBar::new(f).fill(t.action).desired_height(8.0).corner_radius(t.ctl_radius().min(4)).animate(d.fraction().is_none()).desired_width(240.0));
                                     ui.label(RichText::new(text).size(T_SMALL).color(t.muted));
                                     if kit::ghost(ui, "Cancel", true).clicked() {
                                         d.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1389,6 +1390,42 @@ impl OrionApp {
                     })
                     .response
                     .on_hover_text("Changes text and interface size across Store and Optimaxer.");
+                    let mut custom_radius = self.settings.corner_radius.is_some();
+                    if ui.checkbox(&mut custom_radius, "Customize corner radius").changed() {
+                        let previous = self.settings.corner_radius;
+                        self.settings.corner_radius = custom_radius.then(|| {
+                            theme::Tokens::of(
+                                self.settings.effective_dark(),
+                                self.settings.style,
+                                self.settings.accent(),
+                            )
+                            .with_palette(self.settings.palette, self.settings.accent())
+                            .ctl_radius()
+                            .min(16)
+                        });
+                        self.reapply_theme(ctx);
+                        if let Err(error) = self.settings.save_checked() {
+                            self.settings.corner_radius = previous;
+                            self.reapply_theme(ctx);
+                            self.toast = Some((format!("Corner radius was not saved: {error}"), Instant::now()));
+                        }
+                    }
+                    if let Some(mut radius) = self.settings.corner_radius {
+                        let previous = radius;
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Radius").color(t.muted));
+                            ui.add(egui::Slider::new(&mut radius, 0..=16).suffix(" px"));
+                        });
+                        if radius != previous {
+                            self.settings.corner_radius = Some(radius);
+                            self.reapply_theme(ctx);
+                            if let Err(error) = self.settings.save_checked() {
+                                self.settings.corner_radius = Some(previous);
+                                self.reapply_theme(ctx);
+                                self.toast = Some((format!("Corner radius was not saved: {error}"), Instant::now()));
+                            }
+                        }
+                    }
                     let mut palette = self.settings.palette;
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Palette").color(t.muted));

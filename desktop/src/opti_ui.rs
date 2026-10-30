@@ -25,7 +25,7 @@ use crate::opti::snapshots::{self, SystemSnapshot};
 use crate::opti::startup;
 use crate::opti::state::{backup_dir, State};
 use crate::opti::tools::{self, Tool};
-use crate::theme::{self, mix, semibold, tokens, Tone, R_LG, R_MD, S1, S2, S3, S4, S5, T_BODY, T_CAPTION, T_HEADING, T_SMALL, T_TITLE};
+use crate::theme::{self, mix, semibold, tokens, Tone, S1, S2, S3, S4, S5, T_BODY, T_CAPTION, T_HEADING, T_SMALL, T_TITLE};
 use egui::{Align, Color32, CornerRadius, FontId, Layout, Margin, RichText, Sense, Stroke, StrokeKind, Ui, vec2};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -1695,7 +1695,7 @@ impl OptiUi {
         }
         let t = tokens(ctx);
         if !self.elevated {
-            egui::Frame::new().fill(mix(t.canvas, t.warn, 0.14)).corner_radius(R_LG).inner_margin(Margin::symmetric(S4 as i8, S3 as i8)).show(ui, |ui| {
+            egui::Frame::new().fill(mix(t.canvas, t.warn, 0.14)).corner_radius(t.card_radius()).inner_margin(Margin::symmetric(S4 as i8, S3 as i8)).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Changes need administrator rights. Everything can be read without them.").color(t.text));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1712,7 +1712,7 @@ impl OptiUi {
             ui.add_space(S3);
         }
         if self.restart_pending {
-            egui::Frame::new().fill(mix(t.canvas, t.warn, 0.11)).corner_radius(R_LG).inner_margin(Margin::symmetric(S4 as i8, S3 as i8)).show(ui, |ui| {
+            egui::Frame::new().fill(mix(t.canvas, t.warn, 0.11)).corner_radius(t.card_radius()).inner_margin(Margin::symmetric(S4 as i8, S3 as i8)).show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     kit::chip(ui, "Restart required", Tone::Warn);
                     ui.label(RichText::new("Restart Windows when convenient to finish applying system changes.").color(t.text));
@@ -3132,7 +3132,7 @@ impl OptiUi {
                             ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
                         }
                         if click.has_focus() {
-                            ui.painter().rect_stroke(r.response.rect, CornerRadius::same(R_MD), Stroke::new(2.0, t.ring()), StrokeKind::Inside);
+                            ui.painter().rect_stroke(r.response.rect, CornerRadius::same(t.ctl_radius()), Stroke::new(2.0, t.ring()), StrokeKind::Inside);
                         }
                         if click.clicked() && ctx.pointer_interact_pos().is_some_and(|p| favorite_rect.contains(p)) {
                             let previous_favorites = settings.opti_tweak_favorites.clone();
