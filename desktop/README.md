@@ -43,7 +43,7 @@ Smart optimize and Auto-detect read the machine (laptop or desktop, SSD or HDD a
 
 Services. About 220 services with Optimaxer's recommended Manual and Disabled lists. 57 core services are hidden and cannot be changed. A JSON backup is written before every change, and "Restore last backup" puts it back.
 
-Startup. Run keys and Startup folders, switched on and off with the same StartupApproved flag Task Manager uses. Scheduled tasks that run at logon are not listed.
+Startup. User and machine Run keys, Startup folders, and third-party scheduled tasks with logon or boot triggers. Microsoft tasks are excluded. Registry and folder entries use the StartupApproved flag; scheduled tasks use Task Scheduler's enable state.
 
 Cleaner. 32 targets: temp files, update and shader caches, browser and app caches, dumps, logs, event logs, Recycle Bin, component store and Windows.old. Scan first, then clean. Junctions and symlinks are never followed.
 
