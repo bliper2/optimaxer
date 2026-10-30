@@ -234,6 +234,10 @@ pub struct Settings {
     pub custom_surfaces: crate::theme::CustomSurfaces,
     /// Look for a newer release when the app starts. Nothing is downloaded until you press the update button.
     pub auto_update: bool,
+    /// Seconds between live CPU, memory, disk, network and GPU samples.
+    pub opti_sample_interval_seconds: u64,
+    /// Visible duration of live Performance and Overview charts.
+    pub opti_history_seconds: u64,
 }
 
 impl Default for Settings {
@@ -264,6 +268,8 @@ impl Default for Settings {
             custom_accent: crate::theme::hex_color(crate::theme::BRAND),
             custom_surfaces: crate::theme::CustomSurfaces::default(),
             auto_update: true,
+            opti_sample_interval_seconds: 1,
+            opti_history_seconds: 60,
         }
     }
 }
@@ -327,10 +333,25 @@ impl Settings {
     }
 
     pub fn load() -> Self {
-        fs::read(data_dir().join("settings.json"))
+        let mut settings: Self = fs::read(data_dir().join("settings.json"))
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        settings.normalize_telemetry();
+        settings
+    }
+
+    pub fn telemetry_config(&self) -> crate::opti::sysmon::TelemetryConfig {
+        crate::opti::sysmon::TelemetryConfig::new(
+            self.opti_sample_interval_seconds,
+            self.opti_history_seconds,
+        )
+    }
+
+    fn normalize_telemetry(&mut self) {
+        let telemetry = self.telemetry_config();
+        self.opti_sample_interval_seconds = telemetry.interval_seconds();
+        self.opti_history_seconds = telemetry.history_seconds();
     }
     pub fn save_checked(&self) -> Result<(), String> {
         if READ_ONLY.load(Ordering::Relaxed) {
@@ -759,7 +780,30 @@ mod tests {
         assert!(settings.opti_tweak_favorites.is_empty());
         assert!(settings.store_favorites.is_empty());
         assert!(settings.cleaner_exclusions.is_empty());
+        assert_eq!(settings.opti_sample_interval_seconds, 1);
+        assert_eq!(settings.opti_history_seconds, 60);
         assert!(settings.effective_dark());
+    }
+
+    #[test]
+    fn telemetry_preferences_round_trip_and_invalid_values_normalize() {
+        let mut settings: Settings = serde_json::from_str(
+            r#"{"opti_sample_interval_seconds":5,"opti_history_seconds":120}"#,
+        )
+        .unwrap();
+        assert_eq!(settings.telemetry_config().interval_seconds(), 5);
+        assert_eq!(settings.telemetry_config().history_seconds(), 120);
+
+        let saved = serde_json::to_string(&settings).unwrap();
+        let loaded: Settings = serde_json::from_str(&saved).unwrap();
+        assert_eq!(loaded.opti_sample_interval_seconds, 5);
+        assert_eq!(loaded.opti_history_seconds, 120);
+
+        settings.opti_sample_interval_seconds = 3;
+        settings.opti_history_seconds = 90;
+        settings.normalize_telemetry();
+        assert_eq!(settings.opti_sample_interval_seconds, 1);
+        assert_eq!(settings.opti_history_seconds, 60);
     }
 
     #[test]

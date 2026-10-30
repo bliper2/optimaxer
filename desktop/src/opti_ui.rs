@@ -484,7 +484,10 @@ pub struct OptiUi {
     events: Vec<OptiEvent>,
     /// `ctx.input(|i| i.time)` when the page last changed, for the enter transition.
     page_started: f64,
-    sampler: crate::opti::sysmon::Sampler,
+    telemetry_worker: Option<crate::opti::sysmon::TelemetryWorker>,
+    telemetry_frame: crate::opti::sysmon::TelemetryFrame,
+    telemetry_config: crate::opti::sysmon::TelemetryConfig,
+    telemetry_error: Option<String>,
     telemetry_needs_reset: bool,
     info: Option<crate::opti::sysmon::SysInfo>,
     processes: Vec<ProcessInfo>,
@@ -1169,6 +1172,14 @@ impl OptiUi {
             Ok(entries) => (entries, None),
             Err(error) => (Vec::new(), Some(error)),
         };
+        let (telemetry_worker, telemetry_error) = match crate::opti::sysmon::TelemetryWorker::new()
+        {
+            Ok(worker) => (Some(worker), None),
+            Err(error) => (
+                None,
+                Some(format!("Live system readings could not start: {error}")),
+            ),
+        };
         Self {
             page: Page::Overview,
             cat: Arc::new(Catalog::load()),
@@ -1241,7 +1252,10 @@ impl OptiUi {
             bench: Vec::new(),
             events: Vec::new(),
             page_started: 0.0,
-            sampler: crate::opti::sysmon::Sampler::new(),
+            telemetry_worker,
+            telemetry_frame: crate::opti::sysmon::TelemetryFrame::default(),
+            telemetry_config: crate::opti::sysmon::TelemetryConfig::new(1, 60),
+            telemetry_error,
             telemetry_needs_reset: true,
             info: None,
             processes: Vec::new(),
@@ -1284,7 +1298,11 @@ impl OptiUi {
     fn set_page(&mut self, ctx: &egui::Context, p: Page) {
         let live = |page| matches!(page, Page::Overview | Page::Performance);
         if live(p) != live(self.page) {
-            self.telemetry_needs_reset = true;
+            if live(p) {
+                self.telemetry_needs_reset = true;
+            } else {
+                self.suspend_telemetry();
+            }
         }
         if p == Page::Gaming && self.page != Page::Gaming {
             self.game_states_loaded = false;
@@ -2834,7 +2852,7 @@ impl OptiUi {
                         .auto_shrink([false, false])
                         .show(ui, |ui| match self.page {
                             Page::Overview => self.overview_page(ui, ctx, settings),
-                            Page::Performance => self.performance_page(ui, ctx),
+                            Page::Performance => self.performance_page(ui, ctx, settings),
                             Page::Diagnostics => self.diagnostics_page(ui, ctx),
                             Page::Snapshots => self.snapshots_page(ui, ctx),
                             Page::Processes => self.processes_page(ui, ctx),
@@ -3000,33 +3018,69 @@ impl OptiUi {
         )
     }
 
-    fn tick_telemetry(&mut self, ctx: &egui::Context) {
-        if self.telemetry_needs_reset {
-            self.sampler.reset_window();
-            self.telemetry_needs_reset = false;
+    fn tick_telemetry(&mut self, ctx: &egui::Context, settings: &Settings) {
+        let config = settings.telemetry_config();
+        let reconfigured = self.telemetry_needs_reset || config != self.telemetry_config;
+        if let Some(worker) = &self.telemetry_worker {
+            let result = if self.telemetry_needs_reset {
+                worker.resume(config)
+            } else if config != self.telemetry_config {
+                worker.configure(config)
+            } else {
+                Ok(())
+            };
+            if let Err(error) = result {
+                self.telemetry_error = Some(error);
+                self.telemetry_worker = None;
+            } else if self.telemetry_needs_reset || config != self.telemetry_config {
+                self.telemetry_config = config;
+                self.telemetry_needs_reset = false;
+            }
         }
-        self.sampler.tick();
-        ctx.request_repaint_after(Duration::from_secs(1));
+        if let Some(worker) = &self.telemetry_worker
+            && let Some(update) = worker.try_latest()
+        {
+            if let Some(info) = update.info {
+                self.info = Some(info);
+            }
+            self.telemetry_frame = update.frame;
+        }
+        let repaint_after = if reconfigured {
+            Duration::from_millis(100)
+        } else if self.info.is_none() {
+            Duration::from_millis(250)
+        } else {
+            config.interval()
+        };
+        if self.telemetry_worker.is_some() {
+            ctx.request_repaint_after(repaint_after);
+        }
     }
 
     pub fn suspend_telemetry(&mut self) {
+        if let Some(worker) = &self.telemetry_worker
+            && let Err(error) = worker.pause()
+        {
+            self.telemetry_error = Some(error);
+            self.telemetry_worker = None;
+        }
         self.telemetry_needs_reset = true;
     }
 
     fn overview_page(&mut self, ui: &mut Ui, ctx: &egui::Context, settings: &Settings) {
-        use crate::opti::sysmon::{format_uptime, read_info};
+        use crate::opti::sysmon::format_uptime;
         let t = tokens(ctx);
-        self.tick_telemetry(ctx);
-        let info = self
-            .info
-            .get_or_insert_with(|| read_info(&WinSystem))
-            .clone();
-        let s = self.sampler.latest;
+        self.tick_telemetry(ctx, settings);
+        let info = self.info.clone().unwrap_or_default();
+        let s = self.telemetry_frame.latest;
         kit::page_header(
             ui,
             "Overview",
             "Live readings from this PC, and the quickest ways to tune it.",
         );
+        if let Some(error) = &self.telemetry_error {
+            ui.label(RichText::new(error).size(T_SMALL).color(t.warn));
+        }
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let gap = S3;
             ui.spacing_mut().item_spacing = vec2(gap, gap);
@@ -3155,9 +3209,18 @@ impl OptiUi {
                         ui.add(egui::Label::new(RichText::new(v).size(T_BODY).color(t.text)).wrap());
                         ui.end_row();
                     };
-                    row("Processor", if info.cpu.is_empty() { "Unknown".into() } else { info.cpu.clone() });
-                    row("Graphics", if info.gpus.is_empty() { "Unknown".into() } else { info.gpus.join(", ") });
-                    row("Windows", info.os.clone());
+                    let system_info = |value: String| {
+                        if self.info.is_none() {
+                            "Reading system information…".into()
+                        } else if value.is_empty() {
+                            "Unknown".into()
+                        } else {
+                            value
+                        }
+                    };
+                    row("Processor", system_info(info.cpu.clone()));
+                    row("Graphics", system_info(info.gpus.join(", ")));
+                    row("Windows", system_info(info.os.clone()));
                     row("Uptime", format_uptime(s.uptime));
                     row("Processes", s.processes.to_string());
                     if let Some(tr) = &self.traits {
@@ -3226,6 +3289,7 @@ impl OptiUi {
         title: &str,
         value: Option<f32>,
         data: &VecDeque<Option<f32>>,
+        history_capacity: usize,
         color: Color32,
     ) {
         let t = tokens(ui.ctx());
@@ -3245,19 +3309,28 @@ impl OptiUi {
                 });
             });
             ui.add_space(S1);
-            kit::sparkline(ui, vec2(ui.available_width(), 86.0), data, color);
+            kit::sparkline(
+                ui,
+                vec2(ui.available_width(), 86.0),
+                data,
+                history_capacity,
+                color,
+            );
         });
     }
 
-    fn performance_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+    fn performance_page(&mut self, ui: &mut Ui, ctx: &egui::Context, settings: &Settings) {
         let t = tokens(ctx);
-        self.tick_telemetry(ctx);
-        let snapshot = self.sampler.latest;
+        self.tick_telemetry(ctx, settings);
+        let snapshot = self.telemetry_frame.latest;
         kit::page_header(
             ui,
             "Performance",
             "Live CPU, memory, disk, adapter traffic and Windows GPU engine readings. GPU load is the busiest reported physical engine across adapters.",
         );
+        if let Some(error) = &self.telemetry_error {
+            ui.label(RichText::new(error).size(T_SMALL).color(t.warn));
+        }
         let processor = if snapshot.cpu_available {
             format!("{:.0}%", snapshot.cpu)
         } else {
@@ -3331,24 +3404,26 @@ impl OptiUi {
             });
         }
         ui.add_space(S2);
+        let history_seconds = self.telemetry_config.history_seconds();
+        let history_capacity = self.telemetry_config.history_capacity();
         let load_charts = [
             (
-                "Processor, last 60 seconds",
-                &self.sampler.cpu_history,
+                format!("Processor, last {history_seconds} seconds"),
+                &self.telemetry_frame.cpu_history,
                 snapshot.cpu_available.then_some(snapshot.cpu),
                 kit::load_color(&t, snapshot.cpu),
             ),
             (
-                "Memory, last 60 seconds",
-                &self.sampler.ram_history,
+                format!("Memory, last {history_seconds} seconds"),
+                &self.telemetry_frame.ram_history,
                 snapshot
                     .ram_available
                     .then_some(snapshot.ram_fraction() * 100.0),
                 kit::load_color(&t, snapshot.ram_fraction() * 100.0),
             ),
             (
-                "Busiest GPU engine, last 60 seconds",
-                &self.sampler.gpu_history,
+                format!("Busiest GPU engine, last {history_seconds} seconds"),
+                &self.telemetry_frame.gpu_history,
                 snapshot.gpu_busiest_engine,
                 snapshot
                     .gpu_busiest_engine
@@ -3357,27 +3432,34 @@ impl OptiUi {
         ];
         if ui.available_width() < 900.0 {
             for (title, history, value, color) in load_charts {
-                Self::performance_load_chart(ui, title, value, history, color);
+                Self::performance_load_chart(ui, &title, value, history, history_capacity, color);
                 ui.add_space(S2);
             }
         } else {
             ui.columns(3, |columns| {
                 for (column, (title, history, value, color)) in columns.iter_mut().zip(load_charts)
                 {
-                    Self::performance_load_chart(column, title, value, history, color);
+                    Self::performance_load_chart(
+                        column,
+                        &title,
+                        value,
+                        history,
+                        history_capacity,
+                        color,
+                    );
                 }
             });
         }
         ui.add_space(S2);
-        let network_history = &self.sampler.network_history;
-        let disk_history = &self.sampler.disk_history;
+        let network_history = &self.telemetry_frame.network_history;
+        let disk_history = &self.telemetry_frame.disk_history;
         let draw_network = |ui: &mut Ui| {
             let width = ui.available_width();
             kit::card(ui, |ui| {
                 ui.set_width(width - 2.0 * S4 - 2.0);
                 ui.horizontal_wrapped(|ui| {
                     ui.label(
-                        RichText::new("Adapter traffic, last 60 seconds")
+                        RichText::new(format!("Adapter traffic, last {history_seconds} seconds"))
                             .font(FontId::new(T_BODY, semibold()))
                             .color(t.text),
                     );
@@ -3417,6 +3499,7 @@ impl OptiUi {
                     ui,
                     vec2(ui.available_width(), 100.0),
                     network_history,
+                    history_capacity,
                     t.brand_text,
                     t.good,
                 );
@@ -3428,7 +3511,7 @@ impl OptiUi {
                 ui.set_width(width - 2.0 * S4 - 2.0);
                 ui.horizontal_wrapped(|ui| {
                     ui.label(
-                        RichText::new("Disk activity, last 60 seconds")
+                        RichText::new(format!("Disk activity, last {history_seconds} seconds"))
                             .font(FontId::new(T_BODY, semibold()))
                             .color(t.text),
                     );
@@ -3450,6 +3533,7 @@ impl OptiUi {
                     ui,
                     vec2(ui.available_width(), 100.0),
                     disk_history,
+                    history_capacity,
                     t.brand_text,
                 );
             });
