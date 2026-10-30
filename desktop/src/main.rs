@@ -15,7 +15,7 @@ mod update;
 mod winget;
 mod winget_icons;
 
-/// 1180 x 760 normally; `ORION_SHOTS_SIZE=1440x900` sets another size for the developer screenshot run.
+/// 1180 x 760 normally; `ORION_SHOTS_SIZE=760x520` tests the minimum layout and `1440x900` tests a wide layout.
 fn window_size() -> [f32; 2] {
     std::env::var("ORION_SHOTS_SIZE")
         .ok()
