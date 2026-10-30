@@ -209,6 +209,9 @@ pub struct Settings {
     /// Stable IDs acknowledged in the desktop notification center.
     #[serde(default)]
     pub dismissed_notifications: Vec<String>,
+    /// Exact files or directories protected from path-based Cleaner targets.
+    #[serde(default)]
+    pub cleaner_exclusions: Vec<String>,
     /// System uptime when the restart reminder was recorded. A lower uptime means Windows rebooted.
     pub opti_restart_uptime: u64,
     /// No transitions or pulses. Defaults to the Windows "animation effects" setting.
@@ -250,6 +253,7 @@ impl Default for Settings {
             opti_tweak_favorites: Vec::new(),
             store_favorites: Vec::new(),
             dismissed_notifications: Vec::new(),
+            cleaner_exclusions: Vec::new(),
             opti_restart_uptime: 0,
             reduce_motion: crate::theme::system_reduces_motion(),
             style: crate::theme::Style::Windows,
@@ -754,6 +758,7 @@ mod tests {
         assert_eq!(settings.opti_restart_uptime, 0);
         assert!(settings.opti_tweak_favorites.is_empty());
         assert!(settings.store_favorites.is_empty());
+        assert!(settings.cleaner_exclusions.is_empty());
         assert!(settings.effective_dark());
     }
 
@@ -813,6 +818,17 @@ mod tests {
         let saved = serde_json::to_string(&settings).unwrap();
         let loaded: Settings = serde_json::from_str(&saved).unwrap();
         assert_eq!(loaded.dismissed_notifications, ["restart:3600"]);
+    }
+
+    #[test]
+    fn cleaner_exclusions_survive_settings_round_trip() {
+        let settings = Settings {
+            cleaner_exclusions: vec![r"C:\Games\Keep".into()],
+            ..Settings::default()
+        };
+        let saved = serde_json::to_string(&settings).unwrap();
+        let loaded: Settings = serde_json::from_str(&saved).unwrap();
+        assert_eq!(loaded.cleaner_exclusions, [r"C:\Games\Keep"]);
     }
 
     #[test]
