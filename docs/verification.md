@@ -77,3 +77,5 @@ Use disposable machines or snapshots for operations that change the operating sy
 The Rust edition deliberately omits the PowerShell features listed in its [README](../desktop/README.md#what-was-not-ported). This audit does not add those features or claim live round-trip validation for every tweak.
 
 The v2.15.21 Gaming page summarizes current registry-backed Game Mode, per-user Game DVR, machine Game DVR policy and fullscreen-optimization configuration. Labels distinguish matching values, differing values and unavailable IDs; the UI explicitly says these readings do not measure live Game Bar or capture activity. A classifier test covers all three states. The 1180 × 760 screenshot walk visually checked the summary row; interactive runtime state was not tested.
+
+The v2.15.22 Store download history retains the 40 newest completed files across restarts. Tests cover persistence, deduplication, the bound and corrupt-file preservation. The UI actions on a downloaded file still need interactive verification.

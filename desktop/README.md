@@ -29,7 +29,7 @@ The app checks GitHub for a newer release when it starts and shows a banner. Not
 
 ## The Store
 
-Unchanged from the original client. It loads `config.json`, `apps.json` and `mirror.json` from GitHub, GitLab, Codeberg and JSDelivr in that order, falls back to a cached copy, then to the catalog embedded in the exe. Downloads run on worker threads with progress and cancel, and file names are sanitized before anything touches the disk. Downloads only start when you press a button.
+Unchanged from the original client. It loads `config.json`, `apps.json` and `mirror.json` from GitHub, GitLab, Codeberg and JSDelivr in that order, falls back to a cached copy, then to the catalog embedded in the exe. Downloads run on worker threads with progress and cancel, and file names are sanitized before anything touches the disk. Downloads only start when you press a button. The Downloads panel keeps the current session and the 40 newest completed files across restarts in `%LOCALAPPDATA%\OrionStore\recent-downloads.json`; it labels them as downloads, never installed apps. Clearing finished session rows does not delete the saved history or downloaded files. Failed and cancelled transfers are not saved to recent history.
 
 ## Optimaxer pages
 

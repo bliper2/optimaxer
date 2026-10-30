@@ -99,6 +99,58 @@ pub fn save_cache(c: &Catalog) {
 /// Set by the developer screenshot run so it never rewrites the user's saved settings.
 pub static READ_ONLY: AtomicBool = AtomicBool::new(false);
 
+const MAX_RECENT_DOWNLOADS: usize = 40;
+const MAX_RECENT_DOWNLOAD_HISTORY_BYTES: u64 = 64 * 1024;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RecentDownload {
+    pub file: String,
+    pub path: PathBuf,
+    pub completed_at: u64,
+}
+
+pub fn load_recent_downloads() -> Result<Vec<RecentDownload>, String> {
+    load_recent_downloads_from(&data_dir().join("recent-downloads.json"))
+}
+
+fn load_recent_downloads_from(path: &Path) -> Result<Vec<RecentDownload>, String> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("Could not read {}: {error}", path.display())),
+    };
+    let mut bytes = Vec::new();
+    file.take(MAX_RECENT_DOWNLOAD_HISTORY_BYTES + 1).read_to_end(&mut bytes)
+        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+    if bytes.len() as u64 > MAX_RECENT_DOWNLOAD_HISTORY_BYTES {
+        return Err("Download history exceeds the 64 KiB size limit".into());
+    }
+    let records: Vec<RecentDownload> = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("Could not read download history: {error}"))?;
+    if records.len() > MAX_RECENT_DOWNLOADS {
+        return Err(format!("Download history exceeds the {MAX_RECENT_DOWNLOADS}-item limit"));
+    }
+    Ok(records)
+}
+
+pub fn record_recent_download(record: RecentDownload) -> Result<Vec<RecentDownload>, String> {
+    if READ_ONLY.load(Ordering::Relaxed) {
+        return Ok(Vec::new());
+    }
+    let records = record_recent_download_at(&data_dir().join("recent-downloads.json"), record)?;
+    Ok(records)
+}
+
+fn record_recent_download_at(path: &Path, record: RecentDownload) -> Result<Vec<RecentDownload>, String> {
+    let mut records = load_recent_downloads_from(path)?;
+    records.retain(|item| item.path != record.path);
+    records.insert(0, record);
+    records.truncate(MAX_RECENT_DOWNLOADS);
+    let bytes = serde_json::to_vec_pretty(&records).map_err(|e| format!("Could not encode download history: {e}"))?;
+    write_atomic(path, &bytes)?;
+    Ok(records)
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -238,6 +290,7 @@ pub struct Download {
     pub total: AtomicU64,
     pub cancel: AtomicBool,
     pub status: Mutex<DlStatus>,
+    pub history_recorded: AtomicBool,
 }
 
 impl Download {
@@ -330,6 +383,7 @@ pub fn start_download(url: String, file: String, dir: PathBuf, on_change: impl F
         total: AtomicU64::new(0),
         cancel: AtomicBool::new(false),
         status: Mutex::new(DlStatus::Running),
+        history_recorded: AtomicBool::new(false),
     });
     let job = dl.clone();
     std::thread::spawn(move || {
@@ -414,7 +468,7 @@ mod tests {
 
     fn download_job() -> Download {
         Download { file: "setup.exe".into(), done: AtomicU64::new(0), total: AtomicU64::new(0),
-            cancel: AtomicBool::new(false), status: Mutex::new(DlStatus::Running) }
+            cancel: AtomicBool::new(false), status: Mutex::new(DlStatus::Running), history_recorded: AtomicBool::new(false) }
     }
 
     #[test]
@@ -442,6 +496,63 @@ mod tests {
         let c = embedded();
         assert!(!c.apps.is_empty());
         assert!(c.apps.iter().all(|a| !a.id.is_empty() && !a.name.is_empty()));
+    }
+
+    #[test]
+    fn recent_download_history_persists_deduplicates_and_stays_bounded() {
+        let root = std::env::temp_dir().join(format!("orion-recent-downloads-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let history = root.join("recent-downloads.json");
+        for i in 0..MAX_RECENT_DOWNLOADS + 2 {
+            record_recent_download_at(&history, RecentDownload {
+                file: format!("tool-{i}.zip"),
+                path: root.join(format!("tool-{i}.zip")),
+                completed_at: i as u64,
+            }).unwrap();
+        }
+        let duplicate_path = root.join("tool-41.zip");
+        let records = record_recent_download_at(&history, RecentDownload {
+            file: "renamed.zip".into(),
+            path: duplicate_path.clone(),
+            completed_at: 99,
+        }).unwrap();
+        assert_eq!(records.len(), MAX_RECENT_DOWNLOADS);
+        assert_eq!(records[0].file, "renamed.zip");
+        assert_eq!(records.iter().filter(|item| item.path == duplicate_path).count(), 1);
+        assert_eq!(load_recent_downloads_from(&history).unwrap().len(), MAX_RECENT_DOWNLOADS);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn corrupt_recent_history_is_reported_and_preserved() {
+        let root = std::env::temp_dir().join(format!("orion-recent-downloads-corrupt-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let history = root.join("recent-downloads.json");
+        fs::write(&history, b"not json").unwrap();
+        assert!(load_recent_downloads_from(&history).is_err());
+        assert!(record_recent_download_at(&history, RecentDownload {
+            file: "setup.exe".into(), path: root.join("setup.exe"), completed_at: 1,
+        }).is_err());
+        assert_eq!(fs::read(&history).unwrap(), b"not json");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn oversized_recent_history_is_rejected_without_replacement() {
+        let root = std::env::temp_dir().join(format!("orion-recent-downloads-large-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let history = root.join("recent-downloads.json");
+        let bytes = vec![b'x'; MAX_RECENT_DOWNLOAD_HISTORY_BYTES as usize + 1];
+        fs::write(&history, &bytes).unwrap();
+        assert!(load_recent_downloads_from(&history).is_err());
+        assert!(record_recent_download_at(&history, RecentDownload {
+            file: "setup.exe".into(), path: root.join("setup.exe"), completed_at: 1,
+        }).is_err());
+        assert_eq!(fs::read(&history).unwrap(), bytes);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
