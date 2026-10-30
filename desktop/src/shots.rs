@@ -16,7 +16,7 @@ pub struct Shots {
 }
 
 /// (file name, seconds to wait after navigating before the capture)
-pub const STEPS: [(&str, f64); 15] = [
+pub const STEPS: [(&str, f64); 16] = [
     ("store", 9.0),
     ("store-detail", 3.0),
     ("optimaxer-overview", 14.0),
@@ -32,6 +32,7 @@ pub const STEPS: [(&str, f64); 15] = [
     ("optimaxer-cleaner", 3.0),
     ("optimaxer-network", 3.0),
     ("optimaxer-tools", 3.0),
+    ("settings", 3.0),
 ];
 
 pub fn page_name(slug: &str) -> String {
@@ -118,6 +119,7 @@ mod tests {
         assert!(STEPS.iter().any(|(name, _)| *name == "optimaxer-gaming"));
         assert!(STEPS.iter().any(|(name, _)| *name == "optimaxer-diagnostics"));
         assert!(STEPS.iter().any(|(name, _)| *name == "optimaxer-system-snapshot"));
+        assert!(STEPS.iter().any(|(name, _)| *name == "settings"));
     }
 
     #[test]

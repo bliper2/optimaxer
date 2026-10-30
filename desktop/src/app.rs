@@ -550,6 +550,10 @@ impl OrionApp {
                             self.open_detail(ctx, a);
                         }
                     }
+                    "settings" => {
+                        self.set_section(ctx, Section::Optimaxer);
+                        self.show_settings = true;
+                    }
                     other => {
                         self.set_section(ctx, Section::Optimaxer);
                         self.opti.show_page(ctx, &crate::shots::page_name(other));
@@ -1697,18 +1701,35 @@ impl OrionApp {
                         }
                     }
                     let mut palette = self.settings.palette;
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Palette").color(t.muted));
-                        egui::ComboBox::from_id_salt("appearance-palette").selected_text(palette.label()).show_ui(ui, |ui| {
-                            for choice in theme::Palette::ALL {
-                                ui.selectable_value(&mut palette, choice, choice.label());
-                            }
-                        });
+                    ui.label(RichText::new("Palette").font(FontId::new(T_SMALL, semibold())).color(t.muted));
+                    egui::Grid::new("appearance-palette-gallery").num_columns(3).spacing(vec2(S3, S1)).show(ui, |ui| {
+                        for (index, choice) in theme::Palette::ALL.into_iter().enumerate() {
+                            let dark = choice.forced_dark().unwrap_or(self.settings.effective_dark());
+                            let sample = theme::Tokens::of(dark, self.settings.style, self.settings.accent())
+                                .with_palette(choice, self.settings.accent());
+                            ui.horizontal(|ui| {
+                                let (swatch, _) = ui.allocate_exact_size(vec2(27.0, 10.0), egui::Sense::hover());
+                                for (offset, color) in [sample.brand, sample.good, sample.warn].into_iter().enumerate() {
+                                    let rect = egui::Rect::from_min_size(swatch.min + vec2(offset as f32 * 9.0, 0.0), vec2(8.0, 10.0));
+                                    ui.painter().rect_filled(rect, CornerRadius::same(2), color);
+                                }
+                                if ui.selectable_label(palette == choice, choice.label())
+                                    .on_hover_text(format!("Preview {} accent and status colors", choice.label())).clicked() {
+                                    palette = choice;
+                                }
+                            });
+                            if index % 3 == 2 { ui.end_row(); }
+                        }
                     });
                     if palette != self.settings.palette {
+                        let previous = self.settings.palette;
                         self.settings.palette = palette;
                         self.reapply_theme(ctx);
-                        self.settings.save();
+                        if let Err(error) = self.settings.save_checked() {
+                            self.settings.palette = previous;
+                            self.reapply_theme(ctx);
+                            self.toast = Some((format!("Palette was not saved: {error}"), Instant::now()));
+                        }
                     }
                     if self.settings.palette == theme::Palette::Custom {
                         let mut accent = theme::parse_hex_color(&self.settings.custom_accent).unwrap_or(theme::BRAND);

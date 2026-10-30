@@ -21,6 +21,8 @@ The exe starts without administrator rights. The Store works as normal. The Opti
 
 A calm tool surface on a tonal ladder instead of lines, with indigo for selection and focus and lime for the one main action of each view. Settings keeps control shape separate from color: Windows, Classic and Material styles combine with 16 named palettes, including OLED, Nord, Solarized and a custom theme. Comfortable or compact spacing, 90%, 100%, 110% or 125% interface scale, and an optional 0–16 px corner radius persist and travel with versioned appearance presets. System/light/dark modes remain, with fixed dark/light palettes identifying their mode. The Custom theme saves its accent and separate light/dark surfaces; text is contrast-adjusted and imported surface sets are validated. Motion respects the Windows accessibility setting; hover, selection, page and modal transitions stay restrained. The Commands button or `Ctrl+K` opens a searchable palette for existing pages, Store search, Downloads and Settings. Text contrast is checked by tests. The tokens, components and motion are written up in [DESIGN.md](DESIGN.md). Current feature differences are in [the edition comparison](../docs/edition-comparison.md).
 
+Appearance settings show palette samples for the selected accent and semantic status colors. Palette selection applies immediately and rolls the live theme back if its settings write fails.
+
 ## Updates
 
 The app checks GitHub for a newer release when it starts and shows a banner. Nothing is downloaded until you press "Update and restart". The zip is checked against the SHA-256 that GitHub publishes for it before anything is replaced, and a release without a checksum is refused. The running exe is renamed to `.old`, the new one takes its place, and the old file is removed on the next start. Settings has a switch for the startup check and a "Check now" button.
@@ -103,7 +105,7 @@ powershell -NoProfile -File tools\export-optimaxer.ps1
 
 ## Screenshots
 
-`ORION_SHOTS=<folder>` makes the app walk through its pages, save each one as a PNG of its own window, and exit. It uses egui's viewport screenshot, so only the app window is captured. Set `ORION_SHOTS_SIDEBAR_COLLAPSED=true` to capture the Optimaxer icon rail, `ORION_SHOTS_RESTART_REQUIRED=true` to capture the restart reminder, or `ORION_SHOTS_PROFILE_OPEN=true` to expand Profiles on the Tweaks page. Screenshot mode never saves these overrides to settings.
+`ORION_SHOTS=<folder>` makes the app walk through its pages, save each one as a PNG of its own window, capture Settings, and exit (16 steps). It uses egui's viewport screenshot, so only the app window is captured. Set `ORION_SHOTS_SIDEBAR_COLLAPSED=true` to capture the Optimaxer icon rail, `ORION_SHOTS_RESTART_REQUIRED=true` to capture the restart reminder, or `ORION_SHOTS_PROFILE_OPEN=true` to expand Profiles on the Tweaks page. Screenshot mode never saves these overrides to settings.
 
 ## License
 
