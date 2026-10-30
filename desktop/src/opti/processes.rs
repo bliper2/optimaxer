@@ -1,11 +1,16 @@
 //! Read-only process data for the Performance page. Fields that Windows denies remain unavailable.
 
 use std::collections::HashMap;
-use std::ffi::OsString;
+use std::ffi::{OsString, c_void};
 use std::os::windows::ffi::OsStringExt;
-use std::path::PathBuf;
+use std::os::windows::prelude::OsStrExt;
+use std::path::{Path, PathBuf};
+use std::slice;
 use std::time::Instant;
-use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, HANDLE};
+use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, GetLastError, HANDLE};
+use windows_sys::Win32::Storage::FileSystem::{
+    GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+};
 use windows_sys::Win32::System::ProcessStatus::{
     EnumProcesses, GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
 };
@@ -16,6 +21,7 @@ use windows_sys::Win32::System::Threading::{
 
 const INITIAL_PROCESS_CAPACITY: usize = 1024;
 const MAX_PROCESSES: usize = 16_384;
+const MAX_VERSION_INFO_SIZE: u32 = 8 * 1024 * 1024;
 const PROCESS_QUERY_ACCESS: u32 = PROCESS_QUERY_INFORMATION | PROCESS_VM_READ;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -30,6 +36,13 @@ pub struct ProcessInfo {
 }
 
 pub type CpuTimes = HashMap<u32, (u64, Instant)>;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Translation {
+    language: u16,
+    code_page: u16,
+}
 
 struct ProcessHandle(HANDLE);
 
@@ -64,6 +77,103 @@ pub fn scan(
             .then(left.pid.cmp(&right.pid))
     });
     Ok((processes, current))
+}
+
+/// Read the executable's embedded CompanyName field. This is descriptive file metadata, not a
+/// signature check, and is deliberately queried only when the user inspects a process.
+pub fn company_name(path: &Path) -> Result<Option<String>, String> {
+    let path_wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: `path_wide` is a valid NUL-terminated UTF-16 path for the duration of the call.
+    let size = unsafe { GetFileVersionInfoSizeW(path_wide.as_ptr(), std::ptr::null_mut()) };
+    if size == 0 {
+        // Windows reports missing version resources through GetLastError. Some providers leave
+        // the error code clear, which also means that no company field is available.
+        let error = unsafe { GetLastError() };
+        if error == 0 || matches!(error, 1812..=1815) {
+            return Ok(None);
+        }
+        return Err(format!(
+            "Windows could not read executable version metadata: {}",
+            std::io::Error::from_raw_os_error(error as i32)
+        ));
+    }
+    if size > MAX_VERSION_INFO_SIZE {
+        return Err("Executable version metadata exceeds the 8 MiB read limit.".into());
+    }
+
+    let mut buffer = vec![0u8; size as usize];
+    // SAFETY: buffer has the exact capacity reported by GetFileVersionInfoSizeW.
+    if unsafe { GetFileVersionInfoW(path_wide.as_ptr(), 0, size, buffer.as_mut_ptr().cast()) } == 0
+    {
+        let error = unsafe { GetLastError() };
+        return Err(format!(
+            "Windows could not read executable version metadata: {}",
+            std::io::Error::from_raw_os_error(error as i32)
+        ));
+    }
+
+    company_name_from_version_info(&buffer)
+}
+
+fn company_name_from_version_info(buffer: &[u8]) -> Result<Option<String>, String> {
+    let translation_path: Vec<u16> = "\\VarFileInfo\\Translation"
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    let mut translations_ptr: *mut c_void = std::ptr::null_mut();
+    let mut translations_len = 0u32;
+    // SAFETY: the version block and output pointers remain valid for the call.
+    let found = unsafe {
+        VerQueryValueW(
+            buffer.as_ptr().cast(),
+            translation_path.as_ptr(),
+            &mut translations_ptr,
+            &mut translations_len,
+        )
+    };
+    if found == 0 || translations_ptr.is_null() {
+        return Ok(None);
+    }
+
+    let translation_count = translations_len as usize / size_of::<Translation>();
+    if translation_count == 0 || translation_count > 64 {
+        return Ok(None);
+    }
+    // SAFETY: VerQueryValueW returns a view into `buffer`; length is in bytes and the result is
+    // aligned according to the Windows version-resource format.
+    let translations =
+        unsafe { slice::from_raw_parts(translations_ptr.cast::<Translation>(), translation_count) };
+    for translation in translations {
+        let query = format!(
+            "\\StringFileInfo\\{:04x}{:04x}\\CompanyName",
+            translation.language, translation.code_page
+        );
+        let query_wide: Vec<u16> = query.encode_utf16().chain(Some(0)).collect();
+        let mut value_ptr: *mut c_void = std::ptr::null_mut();
+        let mut value_len = 0u32;
+        // SAFETY: the query is NUL-terminated and the version block stays alive through the call.
+        let found = unsafe {
+            VerQueryValueW(
+                buffer.as_ptr().cast(),
+                query_wide.as_ptr(),
+                &mut value_ptr,
+                &mut value_len,
+            )
+        };
+        if found == 0 || value_ptr.is_null() || value_len == 0 || value_len > 4096 {
+            continue;
+        }
+        // SAFETY: VerQueryValueW supplies `value_len` UTF-16 code units within `buffer`.
+        let value = unsafe { slice::from_raw_parts(value_ptr.cast::<u16>(), value_len as usize) };
+        let company = String::from_utf16_lossy(value)
+            .trim_matches('\0')
+            .trim()
+            .to_string();
+        if !company.is_empty() {
+            return Ok(Some(company));
+        }
+    }
+    Ok(None)
 }
 
 fn process_ids() -> Result<Vec<u32>, String> {
@@ -253,5 +363,27 @@ mod tests {
                 .cpu_percent
                 .is_some()
         );
+    }
+
+    #[test]
+    fn company_name_reads_embedded_windows_version_metadata() {
+        let system_root = std::env::var_os("WINDIR").expect("Windows sets WINDIR");
+        let image = PathBuf::from(system_root)
+            .join("System32")
+            .join("kernel32.dll");
+        assert_eq!(
+            company_name(&image).unwrap().as_deref(),
+            Some("Microsoft Corporation")
+        );
+    }
+
+    #[test]
+    fn company_name_reports_a_missing_executable() {
+        let image = std::env::temp_dir().join(format!(
+            "optimaxer-missing-process-image-{}.exe",
+            std::process::id()
+        ));
+        assert!(!image.exists());
+        assert!(company_name(&image).is_err());
     }
 }
