@@ -226,8 +226,22 @@ enum Msg {
     Diagnostic(DiagnosticCheck, DiagnosticResult),
     Snapshots(Result<Vec<SystemSnapshot>, String>),
     Processes(Result<(Vec<ProcessInfo>, CpuTimes), String>),
+    ProcessPublisher(u32, PathBuf, Result<Option<String>, String>),
     RestartRequired,
     BackupIntegrity(Vec<BackupCheck>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ProcessInspection {
+    pid: u32,
+    name: String,
+    image_path: Option<PathBuf>,
+}
+
+enum ProcessPublisherState {
+    Loading,
+    Ready(Option<String>),
+    Error(String),
 }
 
 #[derive(Clone)]
@@ -394,6 +408,8 @@ pub struct OptiUi {
     process_last_scan: Option<Instant>,
     process_search: String,
     process_sort: usize,
+    process_inspection: Option<ProcessInspection>,
+    process_publisher: Option<ProcessPublisherState>,
     services_loaded: bool,
     startup_loaded: bool,
 }
@@ -1145,6 +1161,8 @@ impl OptiUi {
             process_last_scan: None,
             process_search: String::new(),
             process_sort: 0,
+            process_inspection: None,
+            process_publisher: None,
             services_loaded: false,
             startup_loaded: false,
         }
@@ -1457,6 +1475,17 @@ impl OptiUi {
                 Msg::Snapshots(Err(error)) => self.snapshots_error = Some(error),
                 Msg::BackupIntegrity(checks) => self.backup_integrity = Some(checks),
                 Msg::Processes(Ok((rows, cpu_times))) => {
+                    if let Some(selected) = self.process_inspection.as_ref() {
+                        let latest = rows.iter().find(|process| process.pid == selected.pid);
+                        if latest.is_none_or(|process| process.image_path != selected.image_path) {
+                            self.process_inspection = None;
+                            self.process_publisher = None;
+                        } else if let (Some(selected), Some(latest)) =
+                            (self.process_inspection.as_mut(), latest)
+                        {
+                            selected.name.clone_from(&latest.name);
+                        }
+                    }
                     self.processes = rows;
                     self.process_cpu = cpu_times;
                     self.process_error = None;
@@ -1465,6 +1494,16 @@ impl OptiUi {
                 Msg::Processes(Err(error)) => {
                     self.process_error = Some(error);
                     self.process_loading = false;
+                }
+                Msg::ProcessPublisher(pid, path, result) => {
+                    if self.process_inspection.as_ref().is_some_and(|selected| {
+                        selected.pid == pid && selected.image_path.as_ref() == Some(&path)
+                    }) {
+                        self.process_publisher = Some(match result {
+                            Ok(name) => ProcessPublisherState::Ready(name),
+                            Err(error) => ProcessPublisherState::Error(error),
+                        });
+                    }
                 }
                 Msg::RestartRequired => self.restart_pending = true,
             }
@@ -1505,6 +1544,31 @@ impl OptiUi {
             .unwrap_or(1);
         let worker = self.worker(ctx);
         std::thread::spawn(move || worker.send(Msg::Processes(processes::scan(&previous, cores))));
+    }
+
+    fn inspect_process(&mut self, ctx: &egui::Context, process: ProcessInfo) {
+        let selected = ProcessInspection {
+            pid: process.pid,
+            name: process.name,
+            image_path: process.image_path,
+        };
+        let Some(path) = selected.image_path.clone() else {
+            self.process_inspection = Some(selected);
+            self.process_publisher = Some(ProcessPublisherState::Ready(None));
+            return;
+        };
+
+        let pid = selected.pid;
+        self.process_inspection = Some(selected);
+        self.process_publisher = Some(ProcessPublisherState::Loading);
+        let worker = self.worker(ctx);
+        std::thread::spawn(move || {
+            worker.send(Msg::ProcessPublisher(
+                pid,
+                path.clone(),
+                processes::company_name(&path),
+            ));
+        });
     }
 
     fn refresh_status(&mut self, ctx: &egui::Context) {
@@ -3680,7 +3744,7 @@ impl OptiUi {
         kit::page_header(
             ui,
             "Processes",
-            "Read-only process list. CPU is sampled over time; Windows may restrict paths and memory details for protected processes.",
+            "Read-only process list. Select a process to inspect its executable path and embedded company metadata; Windows may restrict access.",
         );
         ui.horizontal_wrapped(|ui| {
             ui.add_sized(
@@ -3726,6 +3790,74 @@ impl OptiUi {
                     .size(T_SMALL)
                     .color(t.warn),
             );
+        }
+        if let Some(selected) = &self.process_inspection {
+            ui.add_space(S2);
+            kit::card(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new("Process details")
+                            .font(FontId::new(T_BODY, semibold()))
+                            .color(t.text),
+                    );
+                    ui.label(
+                        RichText::new(format!("{} · PID {}", selected.name, selected.pid))
+                            .size(T_SMALL)
+                            .color(t.muted),
+                    );
+                });
+                ui.add_space(S1);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new("Publisher metadata")
+                            .size(T_SMALL)
+                            .color(t.muted),
+                    );
+                    match &self.process_publisher {
+                        Some(ProcessPublisherState::Loading) | None => {
+                            ui.label(
+                                RichText::new("Reading executable…")
+                                    .size(T_SMALL)
+                                    .color(t.subtle),
+                            );
+                        }
+                        Some(ProcessPublisherState::Ready(Some(name))) => {
+                            ui.label(RichText::new(name).size(T_SMALL).color(t.text));
+                        }
+                        Some(ProcessPublisherState::Ready(None)) => {
+                            ui.label(
+                                RichText::new("Not embedded in this file")
+                                    .size(T_SMALL)
+                                    .color(t.subtle),
+                            );
+                        }
+                        Some(ProcessPublisherState::Error(error)) => {
+                            ui.label(RichText::new(error).size(T_SMALL).color(t.warn));
+                        }
+                    }
+                });
+                ui.label(
+                    RichText::new("CompanyName comes from executable version metadata; it is not a verified digital signature.")
+                        .size(T_CAPTION)
+                        .color(t.subtle),
+                );
+                ui.add_space(S1);
+                let path = selected
+                    .image_path
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "Windows denied access to this executable path.".into());
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(path)
+                            .size(T_CAPTION)
+                            .monospace()
+                            .color(t.muted),
+                    )
+                    .wrap(),
+                );
+            });
         }
         if self.processes.is_empty() {
             if self.process_loading {
@@ -3796,6 +3928,8 @@ impl OptiUi {
             return;
         }
 
+        let selected_pid = self.process_inspection.as_ref().map(|process| process.pid);
+        let mut inspection_clicked = None;
         egui_extras::TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
@@ -3840,13 +3974,16 @@ impl OptiUi {
                 body.rows(29.0, rows.len(), |mut row| {
                     let process = rows[row.index()];
                     row.col(|ui| {
-                        ui.add(
-                            egui::Label::new(
+                        if ui
+                            .selectable_label(
+                                selected_pid == Some(process.pid),
                                 RichText::new(&process.name).size(T_SMALL).color(t.text),
                             )
-                            .truncate(),
-                        )
-                        .on_hover_text(&process.name);
+                            .on_hover_text("Select to inspect executable details")
+                            .clicked()
+                        {
+                            inspection_clicked = Some(process.pid);
+                        }
                     });
                     row.col(|ui| {
                         ui.label(
@@ -3893,6 +4030,19 @@ impl OptiUi {
                     });
                 });
             });
+        if let Some(pid) = inspection_clicked {
+            if selected_pid == Some(pid) {
+                self.process_inspection = None;
+                self.process_publisher = None;
+            } else if let Some(process) = self
+                .processes
+                .iter()
+                .find(|process| process.pid == pid)
+                .cloned()
+            {
+                self.inspect_process(ctx, process);
+            }
+        }
     }
 
     fn run_diagnostic(&mut self, ctx: &egui::Context, check: DiagnosticCheck) {
