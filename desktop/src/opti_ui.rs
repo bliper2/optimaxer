@@ -53,6 +53,25 @@ pub enum Page {
     Tools,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PageGroup {
+    Workspace,
+    Optimization,
+    System,
+}
+
+impl PageGroup {
+    const ALL: [Self; 3] = [Self::Workspace, Self::Optimization, Self::System];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Workspace => "Workspace",
+            Self::Optimization => "Optimization",
+            Self::System => "System",
+        }
+    }
+}
+
 impl Page {
     const ALL: [Page; 13] = [
         Page::Overview,
@@ -103,6 +122,14 @@ impl Page {
             Page::Cleaner => "Cleaner",
             Page::Network => "Network",
             Page::Tools => "Tools",
+        }
+    }
+
+    fn group(self) -> PageGroup {
+        match self {
+            Self::Overview | Self::Performance | Self::Processes | Self::Activity => PageGroup::Workspace,
+            Self::Gaming | Self::Tweaks | Self::Services | Self::Startup | Self::Cleaner | Self::Network => PageGroup::Optimization,
+            Self::Diagnostics | Self::Snapshots | Self::Tools => PageGroup::System,
         }
     }
 }
@@ -1667,9 +1694,16 @@ impl OptiUi {
             ui.label(RichText::new("Optimaxer").font(FontId::new(T_SMALL, semibold())).color(t.subtle));
             ui.add_space(S1);
         }
-        for p in Page::ALL {
-            if kit::nav_item_icon(ui, self.page == p, Some(p.icon()), p.label(), None).clicked() && self.page != p {
-                self.set_page(ctx, p);
+        for group in PageGroup::ALL {
+            if !collapsed {
+                ui.add_space(S2);
+                ui.label(RichText::new(group.label()).font(FontId::new(T_CAPTION, semibold())).color(t.subtle));
+                ui.add_space(S1);
+            }
+            for page in Page::ALL.into_iter().filter(|page| page.group() == group) {
+                if kit::nav_item_icon(ui, self.page == page, Some(page.icon()), page.label(), None).clicked() && self.page != page {
+                    self.set_page(ctx, page);
+                }
             }
         }
         if !collapsed && let Some(tr) = &self.traits {
@@ -4008,6 +4042,14 @@ mod tests {
     fn tr(laptop: bool) -> Traits {
         let gpus = vec!["NVIDIA GeForce RTX 3090".to_string()];
         Traits { laptop, ssd: true, ram_gb: 32.0, threads: 16, tags: hw::tags_for(laptop, true, true, 32.0, 16, &gpus, 26100), gpus, ..Default::default() }
+    }
+
+    #[test]
+    fn every_navigation_page_belongs_to_one_visible_sidebar_group() {
+        assert_eq!(Page::ALL.len(), 13);
+        for (group, expected_count) in PageGroup::ALL.into_iter().zip([4, 6, 3]) {
+            assert_eq!(Page::ALL.into_iter().filter(|page| page.group() == group).count(), expected_count, "{}", group.label());
+        }
     }
 
     #[test]

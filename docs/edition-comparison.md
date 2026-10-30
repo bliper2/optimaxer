@@ -1,6 +1,6 @@
 # Edition comparison
 
-Snapshot of the repository at v2.15.15. This describes implemented scope, not a parity promise. The Rust desktop app is the primary target for the UI work; the PowerShell and Linux editions remain independent products.
+Snapshot of the repository at v2.15.16. This describes implemented scope, not a parity promise. The Rust desktop app is the primary target for the UI work; the PowerShell and Linux editions remain independent products.
 
 | Area | PowerShell / WPF (Windows) | Python / Tkinter (Linux) | Rust / egui (Windows) |
 | --- | --- | --- | --- |
