@@ -75,3 +75,5 @@ Use disposable machines or snapshots for operations that change the operating sy
 - UI: keyboard-only use, display scaling, long localized names, and interactive controls at minimum window size.
 
 The Rust edition deliberately omits the PowerShell features listed in its [README](../desktop/README.md#what-was-not-ported). This audit does not add those features or claim live round-trip validation for every tweak.
+
+The v2.15.21 Gaming page summarizes current registry-backed Game Mode, per-user Game DVR, machine Game DVR policy and fullscreen-optimization configuration. Labels distinguish matching values, differing values and unavailable IDs; the UI explicitly says these readings do not measure live Game Bar or capture activity. A classifier test covers all three states. The 1180 × 760 screenshot walk visually checked the summary row; interactive runtime state was not tested.

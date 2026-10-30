@@ -377,6 +377,14 @@ fn risk_order(risk: &str) -> u8 {
     }
 }
 
+fn setting_match_label(value: Option<bool>) -> &'static str {
+    match value {
+        Some(true) => "Configured",
+        Some(false) => "Values differ",
+        None => "Unavailable",
+    }
+}
+
 fn tweak_matches_view(tweak: &Tweak, applied: bool, fits: bool, favorite: bool, state: usize, view: usize, compatibility: usize) -> bool {
     let state_matches = match state {
         1 => applied,
@@ -3026,6 +3034,35 @@ impl OptiUi {
         kit::card(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("Windows gaming setting status").font(FontId::new(T_BODY, semibold())).color(t.text));
+                ui.label(RichText::new("Registry configuration only; this does not measure live Game Bar or capture activity.").size(T_SMALL).color(t.muted));
+            });
+            ui.add_space(S1);
+            ui.horizontal_wrapped(|ui| {
+                for (label, id) in [
+                    ("Game Mode", "game-mode"),
+                    ("Game DVR capture", "game-dvr"),
+                    ("DVR machine policy", "game-dvr-policy"),
+                    ("Global fullscreen override", "game-fso"),
+                ] {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(label).size(T_SMALL).color(t.text));
+                        let current = self.status.get(id).copied();
+                        let tone = match current {
+                            Some(true) => Tone::Good,
+                            Some(false) => Tone::Warn,
+                            None => Tone::Bad,
+                        };
+                        kit::chip(ui, setting_match_label(current), tone);
+                    });
+                    ui.add_space(S2);
+                }
+            });
+        });
+        ui.add_space(S2);
+        kit::card(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
                 kit::chip(ui, &format!("{} settings", supported.len()), Tone::Brand);
                 ui.label(RichText::new("Current state is read from Windows. Incompatible settings stay visible with the reason they were skipped.").size(T_SMALL).color(t.muted));
             });
@@ -4301,6 +4338,13 @@ mod tests {
         assert_ne!(risk_tone("Safe"), risk_tone("Advanced"));
         assert_eq!(risk_tone(""), risk_tone("Safe"));
         assert_eq!(risk_tone("Moderate"), Tone::Warn);
+    }
+
+    #[test]
+    fn gaming_status_labels_distinguish_unavailable_from_changed_values() {
+        assert_eq!(setting_match_label(Some(true)), "Configured");
+        assert_eq!(setting_match_label(Some(false)), "Values differ");
+        assert_eq!(setting_match_label(None), "Unavailable");
     }
 
     #[test]
