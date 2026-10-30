@@ -117,6 +117,8 @@ pub struct Settings {
     pub opti_restart_required: bool,
     /// Tweak IDs pinned by the user on the Tweaks page.
     pub opti_tweak_favorites: Vec<String>,
+    /// Orion Store catalog IDs saved by the user.
+    pub store_favorites: Vec<String>,
     /// Stable IDs acknowledged in the desktop notification center.
     #[serde(default)]
     pub dismissed_notifications: Vec<String>,
@@ -147,11 +149,23 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let dir = dirs::download_dir().unwrap_or_else(|| PathBuf::from(".")).join("Orion");
-        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), sidebar_collapsed: false, opti_restore_point: true, opti_restart_required: false, opti_tweak_favorites: Vec::new(), dismissed_notifications: Vec::new(), opti_restart_uptime: 0, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, density: crate::theme::Density::Comfortable, ui_scale: crate::theme::UiScale::Default, corner_radius: None, palette: crate::theme::Palette::System, custom_accent: crate::theme::hex_color(crate::theme::BRAND), custom_surfaces: crate::theme::CustomSurfaces::default(), auto_update: true }
+        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), sidebar_collapsed: false, opti_restore_point: true, opti_restart_required: false, opti_tweak_favorites: Vec::new(), store_favorites: Vec::new(), dismissed_notifications: Vec::new(), opti_restart_uptime: 0, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, density: crate::theme::Density::Comfortable, ui_scale: crate::theme::UiScale::Default, corner_radius: None, palette: crate::theme::Palette::System, custom_accent: crate::theme::hex_color(crate::theme::BRAND), custom_surfaces: crate::theme::CustomSurfaces::default(), auto_update: true }
     }
 }
 
 impl Settings {
+    pub fn toggle_store_favorite(&mut self, id: &str) -> bool {
+        if self.store_favorites.iter().any(|favorite| favorite == id) {
+            self.store_favorites.retain(|favorite| favorite != id);
+            false
+        } else {
+            self.store_favorites.push(id.to_owned());
+            self.store_favorites.sort();
+            self.store_favorites.dedup();
+            true
+        }
+    }
+
     pub fn appearance(&self) -> crate::theme::Appearance {
         crate::theme::Appearance {
             dark: self.effective_dark(),
@@ -446,6 +460,7 @@ mod tests {
         assert!(!settings.opti_restart_required);
         assert_eq!(settings.opti_restart_uptime, 0);
         assert!(settings.opti_tweak_favorites.is_empty());
+        assert!(settings.store_favorites.is_empty());
         assert!(settings.effective_dark());
     }
 
@@ -458,6 +473,22 @@ mod tests {
         let saved = serde_json::to_string(&settings).unwrap();
         let loaded: Settings = serde_json::from_str(&saved).unwrap();
         assert_eq!(loaded.opti_tweak_favorites, ["game-mode", "dark-mode"]);
+    }
+
+    #[test]
+    fn store_favorites_toggle_in_stable_order_and_survive_settings_round_trip() {
+        let mut settings = Settings {
+            store_favorites: vec!["beta".into()],
+            ..Settings::default()
+        };
+        assert!(settings.toggle_store_favorite("alpha"));
+        assert_eq!(settings.store_favorites, ["alpha", "beta"]);
+        assert!(!settings.toggle_store_favorite("beta"));
+        assert_eq!(settings.store_favorites, ["alpha"]);
+
+        let saved = serde_json::to_string(&settings).unwrap();
+        let loaded: Settings = serde_json::from_str(&saved).unwrap();
+        assert_eq!(loaded.store_favorites, ["alpha"]);
     }
 
     #[test]

@@ -16,9 +16,10 @@ pub struct Shots {
 }
 
 /// (file name, seconds to wait after navigating before the capture)
-pub const STEPS: [(&str, f64); 16] = [
+pub const STEPS: [(&str, f64); 17] = [
     ("store", 9.0),
     ("store-detail", 3.0),
+    ("store-favorites", 3.0),
     ("optimaxer-overview", 14.0),
     ("optimaxer-performance", 4.0),
     ("optimaxer-diagnostics", 4.0),
@@ -119,6 +120,7 @@ mod tests {
         assert!(STEPS.iter().any(|(name, _)| *name == "optimaxer-gaming"));
         assert!(STEPS.iter().any(|(name, _)| *name == "optimaxer-diagnostics"));
         assert!(STEPS.iter().any(|(name, _)| *name == "optimaxer-system-snapshot"));
+        assert!(STEPS.iter().any(|(name, _)| *name == "store-favorites"));
         assert!(STEPS.iter().any(|(name, _)| *name == "settings"));
     }
 

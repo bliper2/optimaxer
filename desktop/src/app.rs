@@ -14,6 +14,10 @@ use std::time::{Duration, Instant};
 
 const CARD_H: f32 = 108.0;
 const GAP: f32 = 12.0;
+// Below this width, move Store search to its own row and replace text actions with icons.
+const TOP_BAR_COMPACT_WIDTH: f32 = 1280.0;
+// The full text actions and native window controls share the row with Store search.
+const TOP_BAR_ACTIONS_WIDTH: f32 = 780.0;
 const PLATFORMS: [&str; 4] = [PC, ANDROID, TV, "All"];
 
 enum UpdateState {
@@ -143,6 +147,7 @@ pub struct OrionApp {
     note: String,
     query: String,
     category: String,
+    favorites_only: bool,
     view: Vec<AppItem>,
     featured: Vec<AppItem>,
     dirty: bool,
@@ -202,6 +207,10 @@ fn shuffled(apps: &[AppItem], seed: u32) -> Vec<AppItem> {
         v.swap(i, (r * (i + 1) as f64) as usize);
     }
     v
+}
+
+fn retain_store_favorites(apps: &mut Vec<AppItem>, favorite_ids: &[String]) {
+    apps.retain(|app| favorite_ids.contains(&app.id));
 }
 
 impl OrionApp {
@@ -270,6 +279,7 @@ impl OrionApp {
             note: String::new(),
             query: if std::env::var_os("ORION_SHOTS").is_some() { std::env::var("ORION_SHOTS_QUERY").unwrap_or_default() } else { String::new() },
             category: "All".into(),
+            favorites_only: false,
             view: Vec::new(),
             featured: Vec::new(),
             dirty: true,
@@ -455,7 +465,10 @@ impl OrionApp {
 
     fn refilter(&mut self) {
         self.view = model::search(&self.query, &self.category, self.platform_filter(), self.settings.sort, &self.catalog.apps);
-        self.featured = if self.settings.sort == Sort::Home && self.query.trim().is_empty() && self.category == "All" && self.view.len() > 8 {
+        if self.favorites_only {
+            retain_store_favorites(&mut self.view, &self.settings.store_favorites);
+        }
+        self.featured = if !self.favorites_only && self.settings.sort == Sort::Home && self.query.trim().is_empty() && self.category == "All" && self.view.len() > 8 {
             shuffled(&self.view, daily_seed()).into_iter().take(4).collect()
         } else {
             Vec::new()
@@ -470,6 +483,18 @@ impl OrionApp {
             *counts.entry(a.category.clone()).or_default() += 1;
         }
         counts.into_iter().collect()
+    }
+
+    fn toggle_store_favorite(&mut self, id: &str) {
+        let previous = self.settings.store_favorites.clone();
+        let saved = self.settings.toggle_store_favorite(id);
+        if let Err(error) = self.settings.save_checked() {
+            self.settings.store_favorites = previous;
+            self.say(format!("Favorite was not saved: {error}"));
+            return;
+        }
+        self.dirty = true;
+        self.say(if saved { "Added to Favorites" } else { "Removed from Favorites" });
     }
 
     fn say(&mut self, msg: impl Into<String>) {
@@ -552,6 +577,13 @@ impl OrionApp {
                         if let Some(a) = self.view.first().cloned() {
                             self.open_detail(ctx, a);
                         }
+                    }
+                    "store-favorites" => {
+                        self.set_section(ctx, Section::Store);
+                        self.detail = None;
+                        self.category = "All".into();
+                        self.favorites_only = true;
+                        self.dirty = true;
                     }
                     "settings" => {
                         self.set_section(ctx, Section::Optimaxer);
@@ -1114,7 +1146,7 @@ impl OrionApp {
         let t = tokens(ctx);
         let notification_count = self.notifications().len();
         egui::Panel::top("top").show_separator_line(false).frame(egui::Frame::new().fill(t.rail).inner_margin(Margin::symmetric(S5 as i8, S3 as i8))).show(root, |ui| {
-            let compact = ui.available_width() < 1000.0;
+            let compact = ui.available_width() < TOP_BAR_COMPACT_WIDTH;
             ui.horizontal(|ui| {
                 // the bar is the window's drag handle now that the system title bar is gone; widgets added after it sit on top
                 let drag = ui.interact(ui.max_rect(), ui.scope_id().with("titlebar"), Sense::click_and_drag());
@@ -1133,7 +1165,7 @@ impl OrionApp {
                 }
                 ui.add_space(S4);
                 if self.section == Section::Store && !compact {
-                    let w = (ui.available_width() - 330.0).clamp(180.0, 480.0);
+                    let w = (ui.available_width() - TOP_BAR_ACTIONS_WIDTH).clamp(180.0, 480.0);
                     let resp = ui.add_sized([w, 34.0], egui::TextEdit::singleline(&mut self.query).id(self.search_id).hint_text("Search apps, authors, tags  (Ctrl+F)").margin(Margin::symmetric(S3 as i8, 8)));
                     if resp.changed() {
                         self.dirty = true;
@@ -1274,14 +1306,25 @@ impl OrionApp {
                     changed = true;
                 }
             }
+            side_title(ui, "Library");
+            let favorite_count = self.catalog.apps.iter().filter(|app| {
+                self.platform_filter().is_none_or(|platform| app.platform == platform)
+                    && self.settings.store_favorites.contains(&app.id)
+            }).count();
+            if kit::nav_item(ui, self.favorites_only, "Favorites", Some(&favorite_count.to_string())).clicked() && !self.favorites_only {
+                self.category = "All".into();
+                self.favorites_only = true;
+                changed = true;
+            }
             side_title(ui, "Category");
             let cats = self.categories();
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 let all = cats.iter().map(|c| c.1).sum::<usize>();
                 for (name, n) in std::iter::once(("All".to_string(), all)).chain(cats) {
-                    let selected = self.category == name;
+                    let selected = !self.favorites_only && self.category == name;
                     if kit::nav_item(ui, selected, &name, Some(&n.to_string())).clicked() && !selected {
                         self.category = name;
+                        self.favorites_only = false;
                         changed = true;
                     }
                 }
@@ -1298,7 +1341,13 @@ impl OrionApp {
     fn store_view(&mut self, ctx: &egui::Context, ui: &mut Ui) {
         let t = tokens(ctx);
         ui.horizontal(|ui| {
-            let title = if self.query.trim().is_empty() { format!("{} apps", self.settings.platform) } else { format!("Results for \"{}\"", self.query.trim()) };
+            let title = if !self.query.trim().is_empty() {
+                format!("Results for \"{}\"", self.query.trim())
+            } else if self.favorites_only {
+                "Favorites".into()
+            } else {
+                format!("{} apps", self.settings.platform)
+            };
             ui.label(RichText::new(title).font(FontId::new(theme::T_TITLE, semibold())).color(t.text));
             ui.label(RichText::new(format!("{}", self.view.len())).size(T_SMALL).color(t.subtle));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1319,6 +1368,8 @@ impl OrionApp {
         if self.view.is_empty() {
             if self.loading && self.catalog.apps.is_empty() {
                 kit::skeleton(ui, 6);
+            } else if self.favorites_only && self.settings.store_favorites.is_empty() {
+                kit::empty_state(ui, "No favorite apps", "Open an app and add it to Favorites.");
             } else {
                 kit::empty_state(ui, "No apps match", "Try another platform or category, or clear the search.");
             }
@@ -1375,7 +1426,13 @@ impl OrionApp {
                 icon(ui, &app, 96.0);
                 ui.add_space(S2);
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(&app.name).font(FontId::new(T_DISPLAY, semibold())).color(t.text));
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new(&app.name).font(FontId::new(T_DISPLAY, semibold())).color(t.text));
+                        let saved = self.settings.store_favorites.contains(&app.id);
+                        if kit::ghost(ui, if saved { "Remove favorite" } else { "Add to favorites" }, true).clicked() {
+                            self.toggle_store_favorite(&app.id);
+                        }
+                    });
                     ui.label(RichText::new(format!("by {}", app.author)).size(T_BODY).color(t.muted));
                     ui.add_space(S1);
                     ui.horizontal(|ui| {
@@ -1910,8 +1967,9 @@ fn resize_edges(ctx: &egui::Context) {
 #[cfg(test)]
 mod app_tests {
     use super::{
-        PaletteCommand, matching_palette_commands,
+        PaletteCommand, matching_palette_commands, retain_store_favorites,
     };
+    use crate::model::AppItem;
 
     #[test]
     fn palette_lists_all_commands_for_blank_query() {
@@ -1959,5 +2017,16 @@ mod app_tests {
     #[test]
     fn palette_returns_no_commands_for_unknown_query() {
         assert!(matching_palette_commands("not a command").is_empty());
+    }
+
+    #[test]
+    fn store_favorites_filter_preserves_catalog_order() {
+        let mut apps = vec![
+            AppItem { id: "first".into(), ..AppItem::default() },
+            AppItem { id: "saved".into(), ..AppItem::default() },
+            AppItem { id: "last".into(), ..AppItem::default() },
+        ];
+        retain_store_favorites(&mut apps, &["saved".into(), "last".into()]);
+        assert_eq!(apps.iter().map(|app| app.id.as_str()).collect::<Vec<_>>(), ["saved", "last"]);
     }
 }
