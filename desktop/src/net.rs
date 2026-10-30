@@ -100,6 +100,7 @@ pub fn save_cache(c: &Catalog) {
 pub static READ_ONLY: AtomicBool = AtomicBool::new(false);
 
 const MAX_RECENT_DOWNLOADS: usize = 40;
+const MAX_RECENT_DOWNLOAD_HISTORY_BYTES: u64 = 64 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RecentDownload {
@@ -113,11 +114,23 @@ pub fn load_recent_downloads() -> Result<Vec<RecentDownload>, String> {
 }
 
 fn load_recent_downloads_from(path: &Path) -> Result<Vec<RecentDownload>, String> {
-    match fs::read(path) {
-        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| format!("Could not read download history: {e}")),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
-        Err(error) => Err(format!("Could not read {}: {error}", path.display())),
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("Could not read {}: {error}", path.display())),
+    };
+    let mut bytes = Vec::new();
+    file.take(MAX_RECENT_DOWNLOAD_HISTORY_BYTES + 1).read_to_end(&mut bytes)
+        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+    if bytes.len() as u64 > MAX_RECENT_DOWNLOAD_HISTORY_BYTES {
+        return Err("Download history exceeds the 64 KiB size limit".into());
     }
+    let records: Vec<RecentDownload> = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("Could not read download history: {error}"))?;
+    if records.len() > MAX_RECENT_DOWNLOADS {
+        return Err(format!("Download history exceeds the {MAX_RECENT_DOWNLOADS}-item limit"));
+    }
+    Ok(records)
 }
 
 pub fn record_recent_download(record: RecentDownload) -> Result<Vec<RecentDownload>, String> {
@@ -523,6 +536,22 @@ mod tests {
             file: "setup.exe".into(), path: root.join("setup.exe"), completed_at: 1,
         }).is_err());
         assert_eq!(fs::read(&history).unwrap(), b"not json");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn oversized_recent_history_is_rejected_without_replacement() {
+        let root = std::env::temp_dir().join(format!("orion-recent-downloads-large-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let history = root.join("recent-downloads.json");
+        let bytes = vec![b'x'; MAX_RECENT_DOWNLOAD_HISTORY_BYTES as usize + 1];
+        fs::write(&history, &bytes).unwrap();
+        assert!(load_recent_downloads_from(&history).is_err());
+        assert!(record_recent_download_at(&history, RecentDownload {
+            file: "setup.exe".into(), path: root.join("setup.exe"), completed_at: 1,
+        }).is_err());
+        assert_eq!(fs::read(&history).unwrap(), bytes);
         fs::remove_dir_all(root).unwrap();
     }
 
