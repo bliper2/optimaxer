@@ -160,6 +160,7 @@ enum Msg {
     Services(Vec<SvcRow>),
     Startup(startup::Listing),
     Scan(Vec<(&'static str, Option<u64>)>),
+    CleanPreview(&'static str, Result<cleaner::Preview, String>),
     Adapters(Vec<String>),
     Bench(Vec<(String, Option<f64>)>),
     History(Result<Vec<HistoryEntry>, String>),
@@ -298,6 +299,8 @@ pub struct OptiUi {
     st_sel: HashSet<String>,
     clean_sizes: HashMap<&'static str, Option<u64>>,
     clean_sel: HashSet<&'static str>,
+    clean_preview: Option<(&'static str, cleaner::Preview)>,
+    clean_preview_error: Option<(&'static str, String)>,
     adapters: Vec<String>,
     bench: Vec<(String, Option<f64>)>,
     events: Vec<OptiEvent>,
@@ -826,6 +829,8 @@ impl OptiUi {
             st_sel: HashSet::new(),
             clean_sizes: HashMap::new(),
             clean_sel: HashSet::new(),
+            clean_preview: None,
+            clean_preview_error: None,
             adapters: Vec::new(),
             bench: Vec::new(),
             events: Vec::new(),
@@ -1006,6 +1011,14 @@ impl OptiUi {
                         self.clean_sizes.insert(id, size);
                     }
                 }
+                Msg::CleanPreview(id, Ok(preview)) => {
+                    self.clean_preview = Some((id, preview));
+                    self.clean_preview_error = None;
+                }
+                Msg::CleanPreview(id, Err(error)) => {
+                    self.clean_preview_error = Some((id, error));
+                    self.clean_preview = None;
+                }
                 Msg::Adapters(a) => self.adapters = a,
                 Msg::Bench(b) => self.bench = b,
                 Msg::History(Ok(entries)) => {
@@ -1128,6 +1141,17 @@ impl OptiUi {
             let total: u64 = sizes.iter().filter_map(|s| s.1).sum();
             w.log(&format!("Scan finished: {} can be reclaimed.", format_size(Some(total))));
             w.send(Msg::Scan(sizes));
+        });
+    }
+
+    fn preview_cleaner(&mut self, ctx: &egui::Context, id: &'static str) {
+        let Some(target) = cleaner::TARGETS.iter().find(|target| target.id == id).cloned() else { return };
+        self.clean_preview = None;
+        self.clean_preview_error = None;
+        self.spawn(ctx, "Listing affected paths", move |worker| {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cleaner::preview(&target)))
+                .map_err(|_| "Path preview could not be completed.".to_string());
+            worker.send(Msg::CleanPreview(id, result));
         });
     }
 
@@ -3687,6 +3711,7 @@ impl OptiUi {
         let idle = self.busy.is_none();
         let total: u64 = self.clean_sizes.values().flatten().sum();
         let picked: Vec<&'static str> = cleaner::TARGETS.iter().map(|t| t.id).filter(|id| self.clean_sel.contains(id)).collect();
+        let preview_id = if picked.len() == 1 { picked.first().copied() } else { None };
         ui.horizontal_wrapped(|ui| {
             if kit::secondary(ui, "Scan", idle).clicked() {
                 self.scan_cleaner(ctx);
@@ -3700,12 +3725,50 @@ impl OptiUi {
                     .collect();
                 self.pending = Some(Pending { title: "Clean".into(), intro: "Delete the selected items? This cannot be undone.".into(), lines, action: Action::Clean(picked.clone()), restore_option: false, ok_label: format!("Delete {} item{}", picked.len(), if picked.len() == 1 { "" } else { "s" }) });
             }
+            if kit::secondary(ui, "Preview paths", idle && preview_id.is_some()).clicked() {
+                self.preview_cleaner(ctx, preview_id.unwrap());
+            }
             if total > 0 {
                 ui.label(RichText::new(format!("{} can be reclaimed", format_size(Some(total)))).font(FontId::new(T_BODY, semibold())).color(t.good));
             } else if self.clean_sizes.is_empty() {
                 ui.label(RichText::new("Scan to see how much each item can free.").size(T_SMALL).color(t.muted));
             }
         });
+        if let Some((id, preview)) = &self.clean_preview
+            && let Some(target) = cleaner::TARGETS.iter().find(|target| target.id == *id)
+        {
+            ui.add_space(S2);
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("Path preview · {}", target.name)).font(FontId::new(T_BODY, semibold())));
+                    if preview.truncated { kit::chip(ui, "List truncated", Tone::Warn); }
+                });
+                ui.add(egui::Label::new(RichText::new(preview.summary).size(T_SMALL).color(t.muted)).wrap());
+                if preview.unreadable_directories > 0 {
+                    ui.label(RichText::new(format!("{} directories could not be read; preview may be incomplete.", preview.unreadable_directories)).size(T_SMALL).color(t.warn));
+                }
+                if preview.files.is_empty() {
+                    ui.label(RichText::new("No accessible file paths found for this target.").size(T_SMALL).color(t.subtle));
+                } else {
+                    ui.label(RichText::new(format!("{} files listed · size can change before confirmation", preview.files.len())).size(T_CAPTION).color(t.subtle));
+                    egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
+                        for file in &preview.files {
+                            ui.horizontal(|ui| {
+                                ui.add(egui::Label::new(RichText::new(&file.path).monospace().size(T_CAPTION).color(t.text)).truncate()).on_hover_text(&file.path);
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    ui.label(RichText::new(format_size(Some(file.bytes))).size(T_CAPTION).color(t.muted));
+                                });
+                            });
+                        }
+                    });
+                }
+            });
+        }
+        if let Some((id, error)) = &self.clean_preview_error
+            && cleaner::TARGETS.iter().any(|target| target.id == *id)
+        {
+            ui.label(RichText::new(format!("Path preview failed: {error}")).size(T_SMALL).color(t.bad));
+        }
         ui.add_space(S2);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for tg in cleaner::TARGETS {

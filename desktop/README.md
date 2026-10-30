@@ -47,7 +47,7 @@ Services. About 220 services with Optimaxer's recommended Manual and Disabled li
 
 Startup. User and machine Run keys, Startup folders, and third-party scheduled tasks with logon or boot triggers. Microsoft tasks are excluded. Registry and folder entries use the StartupApproved flag; scheduled tasks use Task Scheduler's enable state.
 
-Cleaner. 32 targets: temp files, update and shader caches, browser and app caches, dumps, logs, event logs, Recycle Bin, component store and Windows.old. Scan first, then clean. Junctions and symlinks are never followed.
+Cleaner. 32 targets: temp files, update and shader caches, browser and app caches, dumps, logs, event logs, Recycle Bin, component store and Windows.old. Scan first, then optionally preview up to 200 matched file paths for one selected target before confirming cleanup. Preview skips junctions and symlinks, is bounded, and reports when the list is truncated or folders are unreadable. Recycle Bin and component-store operations show their scope because Windows exposes no per-item paths for those APIs. Event log file listings can be incomplete because the actual cleanup uses `wevtutil`. Cleanup remains irreversible; the preview is a point-in-time listing.
 
 Network. DNS provider switch with DNS-over-HTTPS where the provider offers it, flush, stack reset, and a latency benchmark (TCP connect time to port 53).
 

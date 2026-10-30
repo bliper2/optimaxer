@@ -9,6 +9,22 @@ use std::path::{Path, PathBuf};
 use windows_sys::Win32::UI::Shell::{SHEmptyRecycleBinW, SHQueryRecycleBinW, SHQUERYRBINFO};
 
 const REPARSE: u32 = 0x400;
+const MAX_PREVIEW_FILES: usize = 200;
+const MAX_PREVIEW_NODES: usize = 4096;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewFile {
+    pub path: String,
+    pub bytes: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Preview {
+    pub files: Vec<PreviewFile>,
+    pub truncated: bool,
+    pub unreadable_directories: usize,
+    pub summary: &'static str,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -129,9 +145,18 @@ pub fn wild_match(pattern: &str, name: &str) -> bool {
 
 /// Expands wildcard segments against the file system and returns paths that exist.
 pub fn expand(pattern: &str) -> Vec<PathBuf> {
+    expand_inner(pattern, usize::MAX).0
+}
+
+fn expand_limited(pattern: &str, limit: usize) -> (Vec<PathBuf>, bool) {
+    expand_inner(pattern, limit)
+}
+
+fn expand_inner(pattern: &str, limit: usize) -> (Vec<PathBuf>, bool) {
     let mut segs = pattern.split('\\').filter(|s| !s.is_empty());
-    let Some(root) = segs.next() else { return Vec::new() };
+    let Some(root) = segs.next() else { return (Vec::new(), false) };
     let mut current = vec![PathBuf::from(format!("{root}\\"))];
+    let mut truncated = false;
     for seg in segs {
         let mut next = Vec::new();
         for base in &current {
@@ -141,19 +166,28 @@ pub fn expand(pattern: &str) -> Vec<PathBuf> {
             if seg.contains('*') {
                 for e in fs::read_dir(base).into_iter().flatten().filter_map(Result::ok) {
                     if wild_match(seg, &e.file_name().to_string_lossy()) {
+                        if next.len() == limit {
+                            truncated = true;
+                            break;
+                        }
                         next.push(e.path());
                     }
                 }
             } else {
                 let p = base.join(seg);
                 if fs::symlink_metadata(&p).is_ok() {
+                    if next.len() == limit {
+                        truncated = true;
+                        break;
+                    }
                     next.push(p);
                 }
             }
+            if truncated { break; }
         }
         current = next;
     }
-    current
+    (current, truncated)
 }
 
 fn is_reparse(m: &fs::Metadata) -> bool {
@@ -195,6 +229,76 @@ fn item_size(p: &Path) -> u64 {
 
 fn concrete_paths(t: &Target) -> Vec<PathBuf> {
     t.paths.iter().filter_map(|p| expand_template(p)).flat_map(|p| expand(&p)).filter(|p| deep_enough(p)).collect()
+}
+
+fn preview_concrete_paths(target: &Target) -> (Vec<PathBuf>, bool) {
+    let mut paths = Vec::new();
+    let mut truncated = false;
+    for pattern in target.paths {
+        let Some(pattern) = expand_template(pattern) else { continue };
+        let remaining = MAX_PREVIEW_NODES.saturating_sub(paths.len());
+        let (matches, more) = expand_limited(&pattern, remaining);
+        paths.extend(matches.into_iter().filter(|path| deep_enough(path)));
+        if more {
+            truncated = true;
+            break;
+        }
+    }
+    (paths, truncated)
+}
+
+fn preview_paths(paths: &[PathBuf], initially_truncated: bool) -> (Vec<PreviewFile>, bool, usize) {
+    let mut files = Vec::new();
+    let mut pending = paths.to_vec();
+    let mut truncated = initially_truncated;
+    let mut unreadable_directories = 0;
+    let mut visited = 0;
+    while let Some(path) = pending.pop() {
+        if visited == MAX_PREVIEW_NODES {
+            truncated = true;
+            break;
+        }
+        visited += 1;
+        let Ok(metadata) = fs::symlink_metadata(&path) else { continue };
+        if is_reparse(&metadata) { continue; }
+        if metadata.is_dir() {
+            let entries = match fs::read_dir(&path) {
+                Ok(entries) => entries,
+                Err(_) => { unreadable_directories += 1; continue; }
+            };
+            let mut children = Vec::new();
+            for entry in entries.filter_map(Result::ok) {
+                if pending.len() + visited + children.len() == MAX_PREVIEW_NODES {
+                    truncated = true;
+                    break;
+                }
+                children.push(entry.path());
+            }
+            children.sort();
+            for child in children.into_iter().rev() { pending.push(child); }
+            continue;
+        }
+        if files.len() == MAX_PREVIEW_FILES {
+            truncated = true;
+            break;
+        }
+        files.push(PreviewFile { path: path.to_string_lossy().into_owned(), bytes: metadata.len() });
+    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    (files, truncated, unreadable_directories)
+}
+
+/// Preview file paths without mutation. System-managed operations return a scope summary.
+pub fn preview(target: &Target) -> Preview {
+    let (paths, summary, path_truncated) = match target.kind {
+        Kind::Paths => { let (paths, truncated) = preview_concrete_paths(target); (paths, "Matched files are listed below. Cleaner empties matched directories but keeps their roots; junctions and symlinks are skipped.", truncated) },
+        Kind::EventLogs => { let (paths, truncated) = preview_concrete_paths(target); (paths, "Accessible .evtx files are listed. Cleaner clears event logs through wevtutil; Windows may deny access to some log files.", truncated) },
+        Kind::WinOld => { let (paths, truncated) = preview_concrete_paths(target); (paths, "Files found under Windows.old are listed. Cleaning this target removes the previous installation and its rollback option.", truncated) },
+        Kind::Recycle => (Vec::new(), "All current Recycle Bin items are affected. The Windows shell API reports total size, not per-item paths.", false),
+        Kind::Component => (Vec::new(), "DISM removes superseded Windows components. Windows does not provide affected component paths through this operation.", false),
+    };
+    let (files, truncated, unreadable_directories) = preview_paths(&paths, path_truncated);
+    Preview { files, truncated, unreadable_directories, summary }
 }
 
 /// Bytes that cleaning would free. `None` means the size cannot be known up front (component store).
@@ -375,6 +479,32 @@ mod tests {
     }
 
     #[test]
+    fn preview_lists_real_files_and_sizes_without_changing_them() {
+        let d = temp("preview");
+        fs::create_dir_all(d.join("nested")).unwrap();
+        fs::write(d.join("a.tmp"), vec![0u8; 23]).unwrap();
+        fs::write(d.join("nested").join("b.tmp"), vec![0u8; 41]).unwrap();
+        let (files, truncated, unreadable) = preview_paths(std::slice::from_ref(&d), false);
+        assert_eq!(files.len(), 2);
+        assert_eq!(files.iter().map(|file| file.bytes).sum::<u64>(), 64);
+        assert!(!truncated);
+        assert_eq!(unreadable, 0);
+        assert!(d.join("a.tmp").exists());
+        assert!(d.join("nested").join("b.tmp").exists());
+    }
+
+    #[test]
+    fn preview_bounds_file_count_and_marks_truncation() {
+        let d = temp("preview-bound");
+        for index in 0..=MAX_PREVIEW_FILES {
+            fs::write(d.join(format!("{index:03}.tmp")), b"x").unwrap();
+        }
+        let (files, truncated, _) = preview_paths(std::slice::from_ref(&d), false);
+        assert_eq!(files.len(), MAX_PREVIEW_FILES);
+        assert!(truncated);
+    }
+
+    #[test]
     fn shallow_paths_are_refused() {
         assert!(!deep_enough(Path::new(r"C:\")));
         assert!(!deep_enough(Path::new(r"C:\Windows")));
@@ -391,6 +521,8 @@ mod tests {
         if !ok {
             return; // cannot create a junction here; nothing to verify
         }
+        let (preview, _, _) = preview_paths(std::slice::from_ref(&d), false);
+        assert!(preview.is_empty(), "the preview must not follow a junction");
         assert_eq!(clear_item(&d), 0);
         assert!(victim.join("keep.txt").exists(), "the junction target must survive");
         assert_eq!(dir_size(&link), 0);
