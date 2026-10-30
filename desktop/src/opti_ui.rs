@@ -318,7 +318,7 @@ fn tweak_matches_view(tweak: &Tweak, applied: bool, fits: bool, favorite: bool, 
         _ => true,
     };
     let view_matches = match view {
-        1 => tweak.auto_pick(),
+        1 => tweak.auto_pick() && fits,
         2 => favorite,
         _ => true,
     };
@@ -1683,9 +1683,10 @@ impl OptiUi {
     fn tweak_action_bar(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let t = tokens(ctx);
         let selected = self.selected.len();
-        let recommended = self.selected.iter().filter_map(|id| self.cat.find(id))
-            .filter(|tweak| tweak.auto_pick()).count();
-        let review = selected.saturating_sub(recommended);
+        let recommendation = self.traits.as_ref().map(|traits| {
+            self.selected.iter().filter_map(|id| self.cat.find(id))
+                .filter(|tweak| tweak.auto_pick() && hw::fits(tweak, traits)).count()
+        });
         let undoable = self.selected.iter().filter(|id| self.status.get(*id).copied().unwrap_or(false)).count();
         ui.add_space(S1);
         kit::card(ui, |ui| {
@@ -1693,9 +1694,13 @@ impl OptiUi {
             ui.horizontal_wrapped(|ui| {
                 if selected == 0 {
                     ui.label(RichText::new("Select tweaks to build a change plan.").size(T_SMALL).color(t.muted));
-                } else {
+                } else if let Some(recommended) = recommendation {
+                    let review = selected.saturating_sub(recommended);
                     ui.label(RichText::new(format!("{selected} selected · {recommended} recommended · {review} require review"))
                         .font(FontId::new(T_SMALL, semibold())).color(t.text));
+                } else {
+                    ui.label(RichText::new(format!("{selected} selected · analyzing this PC's compatibility"))
+                        .font(FontId::new(T_SMALL, semibold())).color(t.muted));
                 }
                 if kit::primary(ui, "Preview changes", self.busy.is_none() && selected > 0).clicked() {
                     self.preview_apply(ctx);
@@ -3663,6 +3668,7 @@ mod tests {
 
         assert!(tweak_matches_view(&recommended, true, true, false, 1, 1, 1));
         assert!(!tweak_matches_view(&recommended, false, true, false, 1, 1, 1));
+        assert!(!tweak_matches_view(&recommended, false, false, false, 0, 1, 0));
         assert!(!tweak_matches_view(&opt_in, false, true, false, 0, 1, 0));
         assert!(tweak_matches_view(&opt_in, false, true, true, 2, 2, 1));
         assert!(!tweak_matches_view(&opt_in, false, false, true, 2, 2, 1));
