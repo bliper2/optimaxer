@@ -298,6 +298,10 @@ pub fn score(cat: &Catalog, tr: &Traits, status: &HashMap<String, bool>) -> (usi
     (on, applicable.len())
 }
 
+fn storage_needs_review(snapshot: &crate::opti::sysmon::Snapshot) -> bool {
+    snapshot.disk_available && snapshot.disk_total > 0 && snapshot.disk_fraction() >= 0.9
+}
+
 fn risk_tone(risk: &str) -> Tone {
     match risk {
         "Moderate" => Tone::Warn,
@@ -1834,6 +1838,43 @@ impl OptiUi {
                     self.scan_cleaner(ctx);
                 }
             });
+            let inactive_recommended = if self.status_ready {
+                self.traits.as_ref().map(|tr| {
+                    let (active, total) = score(&self.cat, tr, &self.status);
+                    total.saturating_sub(active)
+                })
+            } else {
+                None
+            };
+            let storage_review = storage_needs_review(&s);
+            if inactive_recommended.is_some_and(|count| count > 0) || storage_review {
+                ui.add_space(S2);
+                kit::card(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(RichText::new("Recommended actions").font(FontId::new(T_BODY, semibold())).color(t.text));
+                    ui.add_space(S1);
+                    if let Some(count) = inactive_recommended.filter(|count| *count > 0) {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(format!("{count} Smart Optimize setting{} not active on this PC.", if count == 1 { " is" } else { "s are" })).size(T_SMALL).color(t.muted));
+                            if kit::secondary(ui, "Review tweaks", self.busy.is_none()).clicked() {
+                                self.tw_state = 2;
+                                self.tw_view = 1;
+                                self.tw_compatibility = 1;
+                                self.set_page(ctx, Page::Tweaks);
+                            }
+                        });
+                    }
+                    if storage_review {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(format!("System drive is {:.0}% full. Scan cleanup targets before choosing what to remove.", s.disk_fraction() * 100.0)).size(T_SMALL).color(t.muted));
+                            if kit::secondary(ui, "Scan storage", self.busy.is_none()).clicked() && self.busy.is_none() {
+                                self.set_page(ctx, Page::Cleaner);
+                                self.scan_cleaner(ctx);
+                            }
+                        });
+                    }
+                });
+            }
             ui.add_space(S1);
             let width = ui.available_width();
             let compact = width < 720.0;
@@ -3532,6 +3573,21 @@ mod tests {
         assert_eq!(score(&cat, &t, &HashMap::new()).0, 0);
         let (_, laptop_total) = score(&cat, &tr(true), &HashMap::new());
         assert!(laptop_total <= total, "desktop-only tweaks must not count on a laptop");
+    }
+
+    #[test]
+    fn storage_review_uses_available_capacity_and_ninety_percent_threshold() {
+        use crate::opti::sysmon::Snapshot;
+
+        let mut snapshot = Snapshot { disk_used: 89, disk_total: 100, disk_available: true, ..Default::default() };
+        assert!(!storage_needs_review(&snapshot));
+        snapshot.disk_used = 90;
+        assert!(storage_needs_review(&snapshot));
+        snapshot.disk_available = false;
+        assert!(!storage_needs_review(&snapshot));
+        snapshot.disk_available = true;
+        snapshot.disk_total = 0;
+        assert!(!storage_needs_review(&snapshot));
     }
 
     #[test]
