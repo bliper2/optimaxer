@@ -510,6 +510,59 @@ class Network(Base):
 
         ox.CTX.runner = names
         self.assertEqual(ox.active_connections()[0]["name"], "Wired: lab")
+
+    def test_cli_dns_set_requires_confirmation_unless_yes_is_explicit(self):
+        with mock.patch.object(ox, "confirm", return_value=False) as confirm:
+            self.assertEqual(ox.main(["--dry-run", "dns", "cloudflare"]), 1)
+        confirm.assert_called_once()
+        self.assertFalse(self.sys.ran("nmcli", "connection", "modify"))
+
+    def test_gui_dns_set_cancels_before_starting_worker(self):
+        class Tree:
+            def selection(self):
+                return ["cloudflare"]
+
+        app = mock.Mock()
+        app.lists = {"dns": {"tree": Tree(), "iids": {"cloudflare": "cloudflare"}}}
+        app.ask_yes.return_value = False
+        ox.Gui.run_dns(app)
+        app.ask_yes.assert_called_once()
+        app.work.assert_not_called()
+
+    def test_gui_dns_restore_cancels_before_starting_worker(self):
+        app = mock.Mock()
+        app.ask_yes.return_value = False
+        ox.Gui.run_dns_restore(app)
+        app.ask_yes.assert_called_once()
+        app.work.assert_not_called()
+
+    def test_text_dns_set_requires_confirmation(self):
+        with mock.patch.object(ox, "pick", return_value=("set", {0})), \
+             mock.patch.object(ox, "confirm", return_value=False) as confirm, \
+             mock.patch.object(ox, "set_dns") as set_dns:
+            ox.menu_network()
+        confirm.assert_called_once()
+        set_dns.assert_not_called()
+
+    def test_text_dns_restore_requires_confirmation(self):
+        with mock.patch.object(ox, "pick", return_value=("restore", set())), \
+             mock.patch.object(ox, "confirm", return_value=False) as confirm, \
+             mock.patch.object(ox, "restore_dns") as restore_dns:
+            ox.menu_network()
+        confirm.assert_called_once()
+        restore_dns.assert_not_called()
+
+    def test_cli_dns_restore_requires_confirmation_unless_yes_is_explicit(self):
+        with mock.patch.object(ox, "confirm", return_value=False) as confirm:
+            self.assertEqual(ox.main(["dns", "restore"]), 1)
+        confirm.assert_called_once()
+        self.assertFalse(self.sys.ran("nmcli", "connection", "modify"))
+        with mock.patch.object(ox, "ask") as ask, \
+             mock.patch.object(ox, "restore_dns", return_value=True) as restore_dns:
+            self.assertEqual(ox.main(["--yes", "dns", "restore"]), 0)
+        ask.assert_not_called()
+        restore_dns.assert_called_once()
+
     def test_dns_failure_keeps_restore_record(self):
         self.assertTrue(ox.set_dns("cloudflare"))
         self.sys.fail_commands.add(("nmcli", "connection", "modify"))

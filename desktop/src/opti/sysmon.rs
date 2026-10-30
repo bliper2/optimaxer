@@ -12,14 +12,16 @@ use windows_sys::Win32::NetworkManagement::IpHelper::{
 };
 use windows_sys::Win32::NetworkManagement::Ndis::NET_IF_OPER_STATUS_UP;
 use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
-use windows_sys::Win32::System::ProcessStatus::EnumProcesses;
 use windows_sys::Win32::System::Performance::{
     PDH_CSTATUS_NEW_DATA, PDH_CSTATUS_VALID_DATA, PDH_FMT_COUNTERVALUE,
     PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_HCOUNTER, PDH_HQUERY, PDH_MORE_DATA,
     PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterArrayW,
     PdhGetFormattedCounterValue, PdhOpenQueryW,
 };
-use windows_sys::Win32::System::SystemInformation::{GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX};
+use windows_sys::Win32::System::ProcessStatus::EnumProcesses;
+use windows_sys::Win32::System::SystemInformation::{
+    GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX,
+};
 use windows_sys::Win32::System::Threading::GetSystemTimes;
 
 pub const HISTORY: usize = 60;
@@ -61,14 +63,22 @@ impl Snapshot {
 }
 
 pub fn fraction(used: u64, total: u64) -> f32 {
-    if total == 0 { 0.0 } else { (used as f64 / total as f64).clamp(0.0, 1.0) as f32 }
+    if total == 0 {
+        0.0
+    } else {
+        (used as f64 / total as f64).clamp(0.0, 1.0) as f32
+    }
 }
 
 /// CPU load in percent between two (idle, kernel, user) readings. Kernel time includes idle time.
 pub fn cpu_percent(prev: (u64, u64, u64), now: (u64, u64, u64)) -> f32 {
     let idle = now.0.wrapping_sub(prev.0);
     let total = now.1.wrapping_sub(prev.1) + now.2.wrapping_sub(prev.2);
-    if total == 0 { 0.0 } else { (100.0 * total.saturating_sub(idle) as f64 / total as f64).clamp(0.0, 100.0) as f32 }
+    if total == 0 {
+        0.0
+    } else {
+        (100.0 * total.saturating_sub(idle) as f64 / total as f64).clamp(0.0, 100.0) as f32
+    }
 }
 
 /// 3d 4h 12m, 4h 12m or 12m.
@@ -86,7 +96,20 @@ fn ft(f: &FILETIME) -> u64 {
 }
 
 fn read_times() -> Option<(u64, u64, u64)> {
-    let (mut i, mut k, mut u) = (FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 }, FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 }, FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 });
+    let (mut i, mut k, mut u) = (
+        FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        },
+        FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        },
+        FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        },
+    );
     // SAFETY: three valid out-pointers.
     (unsafe { GetSystemTimes(&mut i, &mut k, &mut u) } != 0).then(|| (ft(&i), ft(&k), ft(&u)))
 }
@@ -98,12 +121,18 @@ pub(crate) fn read_memory() -> Option<(u64, u64)> {
     if unsafe { GlobalMemoryStatusEx(&mut m) } == 0 {
         return None;
     }
-    Some((m.ullTotalPhys.saturating_sub(m.ullAvailPhys), m.ullTotalPhys))
+    Some((
+        m.ullTotalPhys.saturating_sub(m.ullAvailPhys),
+        m.ullTotalPhys,
+    ))
 }
 
 pub(crate) fn read_disk() -> Option<(u64, u64)> {
     let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
-    let path: Vec<u16> = format!("{drive}\\").encode_utf16().chain(std::iter::once(0)).collect();
+    let path: Vec<u16> = format!("{drive}\\")
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
     let (mut free, mut total, mut total_free) = (0u64, 0u64, 0u64);
     // SAFETY: NUL-terminated path and three valid out-pointers.
     if unsafe { GetDiskFreeSpaceExW(path.as_ptr(), &mut free, &mut total, &mut total_free) } == 0 {
@@ -116,7 +145,11 @@ fn process_count() -> u32 {
     let mut pids = vec![0u32; 4096];
     let mut bytes = 0u32;
     // SAFETY: the buffer size in bytes is passed and `bytes` receives the amount written.
-    if unsafe { EnumProcesses(pids.as_mut_ptr(), (pids.len() * 4) as u32, &mut bytes) } == 0 { 0 } else { bytes / 4 }
+    if unsafe { EnumProcesses(pids.as_mut_ptr(), (pids.len() * 4) as u32, &mut bytes) } == 0 {
+        0
+    } else {
+        bytes / 4
+    }
 }
 
 pub fn uptime_secs() -> u64 {
@@ -177,7 +210,15 @@ impl DiskCounter {
         }
         let mut value = PDH_FMT_COUNTERVALUE::default();
         // SAFETY: counter belongs to the live query and value is a valid output structure.
-        if unsafe { PdhGetFormattedCounterValue(self.counter, PDH_FMT_DOUBLE, std::ptr::null_mut(), &mut value) } != 0 {
+        if unsafe {
+            PdhGetFormattedCounterValue(
+                self.counter,
+                PDH_FMT_DOUBLE,
+                std::ptr::null_mut(),
+                &mut value,
+            )
+        } != 0
+        {
             return None;
         }
         if !matches!(value.CStatus, PDH_CSTATUS_VALID_DATA | PDH_CSTATUS_NEW_DATA) {
@@ -247,12 +288,8 @@ impl GpuCounter {
         if !self.collect() {
             return GpuReading::default();
         }
-        let engine = self
-            .engine
-            .and_then(formatted_counter_array);
-        let memory = self
-            .dedicated_memory
-            .and_then(formatted_counter_array);
+        let engine = self.engine.and_then(formatted_counter_array);
+        let memory = self.dedicated_memory.and_then(formatted_counter_array);
         let busiest_engine_percent = engine.as_deref().and_then(aggregate_gpu_engines);
         let dedicated_memory_bytes = memory.as_deref().and_then(sum_dedicated_memory);
         GpuReading {
@@ -399,10 +436,16 @@ impl Sampler {
 
     /// Takes a new reading when a second has passed. Returns true when it did.
     pub fn tick(&mut self) -> bool {
-        if self.last_at.is_some_and(|t| t.elapsed() < Duration::from_millis(950)) {
+        if self
+            .last_at
+            .is_some_and(|t| t.elapsed() < Duration::from_millis(950))
+        {
             return false;
         }
-        let sample_elapsed = self.last_at.map(|at| at.elapsed().as_secs_f64()).unwrap_or(0.0);
+        let sample_elapsed = self
+            .last_at
+            .map(|at| at.elapsed().as_secs_f64())
+            .unwrap_or(0.0);
         self.last_at = Some(Instant::now());
         let now = read_times();
         let (cpu, cpu_available) = match (self.last_times, now) {
@@ -424,11 +467,24 @@ impl Sampler {
             self.last_network_totals = Some(totals);
         }
         let disk_activity = self.disk_counter.as_ref().and_then(DiskCounter::sample);
-        let gpu = self.gpu_counter.as_ref().map(GpuCounter::sample).unwrap_or_default();
+        let gpu = self
+            .gpu_counter
+            .as_ref()
+            .map(GpuCounter::sample)
+            .unwrap_or_default();
         self.latest = Snapshot {
-            cpu, cpu_available, ram_used, ram_total, ram_available, disk_used, disk_total, disk_available,
-            uptime: uptime_secs(), processes: process_count(),
-            network, network_available: network_totals.is_some(),
+            cpu,
+            cpu_available,
+            ram_used,
+            ram_total,
+            ram_available,
+            disk_used,
+            disk_total,
+            disk_available,
+            uptime: uptime_secs(),
+            processes: process_count(),
+            network,
+            network_available: network_totals.is_some(),
             disk_activity,
             disk_counter_available: self.disk_counter.is_some(),
             gpu_busiest_engine: gpu.busiest_engine_percent,
@@ -514,7 +570,10 @@ fn read_network_totals() -> Option<(u64, u64)> {
         .iter()
         .filter(|row| row.OperStatus == NET_IF_OPER_STATUS_UP && row.Type != MIB_IF_TYPE_LOOPBACK)
         .fold((0u64, 0u64), |(received, sent), row| {
-            (received.saturating_add(row.InOctets), sent.saturating_add(row.OutOctets))
+            (
+                received.saturating_add(row.InOctets),
+                sent.saturating_add(row.OutOctets),
+            )
         });
     Some(totals)
 }
@@ -546,7 +605,11 @@ pub fn format_bytes_per_second(bytes_per_sec: f32) -> String {
         value /= 1024.0;
         unit += 1;
     }
-    if unit == 0 { format!("{value:.0} {}", units[unit]) } else { format!("{value:.1} {}", units[unit]) }
+    if unit == 0 {
+        format!("{value:.0} {}", units[unit])
+    } else {
+        format!("{value:.1} {}", units[unit])
+    }
 }
 
 /// What does not change while the app runs: the processor name, Windows edition and graphics adapters.
@@ -572,10 +635,22 @@ pub fn read_info(sys: &dyn System) -> SysInfo {
     }
     let version = text(cur, "DisplayVersion");
     SysInfo {
-        cpu: text(r"HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0", "ProcessorNameString").split_whitespace().collect::<Vec<_>>().join(" "),
-        os: if version.is_empty() { format!("{name} (build {build})") } else { format!("{name} {version} (build {build})") },
+        cpu: text(
+            r"HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+            "ProcessorNameString",
+        )
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" "),
+        os: if version.is_empty() {
+            format!("{name} (build {build})")
+        } else {
+            format!("{name} {version} (build {build})")
+        },
         gpus: hw::gpu_names(sys),
-        threads: std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(0),
+        threads: std::thread::available_parallelism()
+            .map(|n| n.get() as u32)
+            .unwrap_or(0),
     }
 }
 
@@ -591,7 +666,11 @@ mod tests {
         assert_eq!(cpu_percent((0, 0, 0), (100, 100, 0)), 0.0);
         // kernel time already contains idle time, user time is added on top
         assert_eq!(cpu_percent((0, 0, 0), (60, 80, 20)), 40.0);
-        assert_eq!(cpu_percent((10, 10, 10), (10, 10, 10)), 0.0, "no time passed");
+        assert_eq!(
+            cpu_percent((10, 10, 10), (10, 10, 10)),
+            0.0,
+            "no time passed"
+        );
     }
 
     #[test]
@@ -619,7 +698,10 @@ mod tests {
     fn network_rate_uses_counter_deltas_and_rejects_resets() {
         assert_eq!(
             network_rate((1_000, 2_000), (3_000, 5_000), 2.0),
-            Some(NetworkSample { received_bytes_per_sec: 1_000.0, sent_bytes_per_sec: 1_500.0 })
+            Some(NetworkSample {
+                received_bytes_per_sec: 1_000.0,
+                sent_bytes_per_sec: 1_500.0
+            })
         );
         assert_eq!(network_rate((10, 20), (9, 30), 1.0), None);
         assert_eq!(network_rate((0, 0), (10, 10), 0.0), None);
@@ -657,10 +739,22 @@ mod tests {
     #[test]
     fn gpu_engine_usage_sums_processes_per_engine_and_caps_at_one_hundred() {
         let samples = vec![
-            ("pid_1_luid_0x0000_0x0010_phys_0_eng_0_engtype_3d".into(), 70.0),
-            ("pid_2_luid_0x0000_0x0010_phys_0_eng_0_engtype_3d".into(), 45.0),
-            ("pid_1_luid_0x0000_0x0010_phys_0_eng_1_engtype_copy".into(), 60.0),
-            ("pid_3_luid_0x0000_0x0020_phys_0_eng_0_engtype_3d".into(), 35.0),
+            (
+                "pid_1_luid_0x0000_0x0010_phys_0_eng_0_engtype_3d".into(),
+                70.0,
+            ),
+            (
+                "pid_2_luid_0x0000_0x0010_phys_0_eng_0_engtype_3d".into(),
+                45.0,
+            ),
+            (
+                "pid_1_luid_0x0000_0x0010_phys_0_eng_1_engtype_copy".into(),
+                60.0,
+            ),
+            (
+                "pid_3_luid_0x0000_0x0020_phys_0_eng_0_engtype_3d".into(),
+                35.0,
+            ),
             ("invalid counter instance".into(), 100.0),
         ];
         assert_eq!(aggregate_gpu_engines(&samples), Some(100.0));
@@ -675,7 +769,10 @@ mod tests {
         );
         assert_eq!(sum_dedicated_memory(&[("adapter".into(), f64::NAN)]), None);
         assert_eq!(
-            sum_dedicated_memory(&[("adapter 0".into(), u64::MAX as f64), ("adapter 1".into(), 1.0)]),
+            sum_dedicated_memory(&[
+                ("adapter 0".into(), u64::MAX as f64),
+                ("adapter 1".into(), 1.0)
+            ]),
             None
         );
     }
@@ -696,7 +793,11 @@ mod tests {
             return;
         };
         let reading = counter.sample();
-        assert!(reading.busiest_engine_percent.is_none_or(|value| (0.0..=100.0).contains(&value)));
+        assert!(
+            reading
+                .busiest_engine_percent
+                .is_none_or(|value| (0.0..=100.0).contains(&value))
+        );
     }
 
     #[test]
@@ -727,7 +828,11 @@ mod tests {
         sys.put(cur, "ProductName", RegData::Str("Windows 10 Pro".into()));
         sys.put(cur, "CurrentBuildNumber", RegData::Str("26100".into()));
         sys.put(cur, "DisplayVersion", RegData::Str("24H2".into()));
-        sys.put(r"HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0", "ProcessorNameString", RegData::Str("Intel(R) Core(TM)  i7-14700KF".into()));
+        sys.put(
+            r"HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+            "ProcessorNameString",
+            RegData::Str("Intel(R) Core(TM)  i7-14700KF".into()),
+        );
         let i = read_info(&sys);
         assert_eq!(i.os, "Windows 11 Pro 24H2 (build 26100)");
         assert_eq!(i.cpu, "Intel(R) Core(TM) i7-14700KF");
@@ -748,10 +853,18 @@ mod tests {
         if n.network_available {
             std::thread::sleep(Duration::from_millis(1_000));
             assert!(s.tick());
-            let network = s.latest.network.expect("active adapter counters produce a second sample");
-            assert!(network.received_bytes_per_sec.is_finite() && network.received_bytes_per_sec >= 0.0);
+            let network = s
+                .latest
+                .network
+                .expect("active adapter counters produce a second sample");
+            assert!(
+                network.received_bytes_per_sec.is_finite() && network.received_bytes_per_sec >= 0.0
+            );
             assert!(network.sent_bytes_per_sec.is_finite() && network.sent_bytes_per_sec >= 0.0);
         }
-        assert!(n.disk_activity.is_none_or(|rate| rate.is_finite() && rate >= 0.0));
+        assert!(
+            n.disk_activity
+                .is_none_or(|rate| rate.is_finite() && rate >= 0.0)
+        );
     }
 }

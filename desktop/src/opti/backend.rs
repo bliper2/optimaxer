@@ -2,11 +2,11 @@
 //! external tools. `WinSystem` is the real thing. Tests use `fake::FakeSystem`, so apply/undo logic is verified
 //! without writing a single registry value.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::os::windows::process::CommandExt;
 use std::process::Command;
 use winreg::enums::*;
-use winreg::{RegKey, RegValue, HKEY};
+use winreg::{HKEY, RegKey, RegValue};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -37,10 +37,14 @@ impl RegData {
         match (self, actual) {
             (RegData::Dword(a), RegData::Dword(b)) => a == b,
             (RegData::Qword(a), RegData::Qword(b)) => a == b,
-            (RegData::Dword(a), RegData::Qword(b)) | (RegData::Qword(b), RegData::Dword(a)) => *a as u64 == *b,
+            (RegData::Dword(a), RegData::Qword(b)) | (RegData::Qword(b), RegData::Dword(a)) => {
+                *a as u64 == *b
+            }
             (RegData::Bin(a), RegData::Bin(b)) => a == b,
             (RegData::Multi(a), RegData::Multi(b)) => a == b,
-            (RegData::Str(_) | RegData::Expand(_), _) => self.text().eq_ignore_ascii_case(&actual.text()),
+            (RegData::Str(_) | RegData::Expand(_), _) => {
+                self.text().eq_ignore_ascii_case(&actual.text())
+            }
             _ => false,
         }
     }
@@ -51,7 +55,11 @@ impl RegData {
             RegData::Qword(v) => v.to_string(),
             RegData::Str(s) | RegData::Expand(s) => s.clone(),
             RegData::Multi(v) => v.join(","),
-            RegData::Bin(b) => b.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","),
+            RegData::Bin(b) => b
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
         }
     }
 
@@ -83,18 +91,30 @@ impl RegData {
             "QWord" => RegData::Qword(value.as_i64()? as u64),
             "ExpandString" => RegData::Expand(value.as_str()?.to_string()),
             "MultiString" => RegData::Multi(match value {
-                Value::Array(a) => a.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
+                Value::Array(a) => a
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect(),
                 Value::String(s) => vec![s.clone()],
                 _ => return None,
             }),
-            "Binary" => RegData::Bin(value.as_array()?.iter().filter_map(|v| v.as_u64().map(|n| n as u8)).collect()),
+            "Binary" => RegData::Bin(
+                value
+                    .as_array()?
+                    .iter()
+                    .filter_map(|v| v.as_u64().map(|n| n as u8))
+                    .collect(),
+            ),
             _ => RegData::Str(value.as_str()?.to_string()),
         })
     }
 
     fn to_raw(&self) -> RegValue {
         fn utf16(s: &str) -> Vec<u8> {
-            s.encode_utf16().chain(std::iter::once(0)).flat_map(u16::to_le_bytes).collect()
+            s.encode_utf16()
+                .chain(std::iter::once(0))
+                .flat_map(u16::to_le_bytes)
+                .collect()
         }
         let (bytes, vtype) = match self {
             RegData::Dword(v) => (v.to_le_bytes().to_vec(), REG_DWORD),
@@ -102,7 +122,11 @@ impl RegData {
             RegData::Str(s) => (utf16(s), REG_SZ),
             RegData::Expand(s) => (utf16(s), REG_EXPAND_SZ),
             RegData::Multi(v) => {
-                let mut b: Vec<u8> = v.iter().flat_map(|s| s.encode_utf16().chain(std::iter::once(0))).flat_map(u16::to_le_bytes).collect();
+                let mut b: Vec<u8> = v
+                    .iter()
+                    .flat_map(|s| s.encode_utf16().chain(std::iter::once(0)))
+                    .flat_map(u16::to_le_bytes)
+                    .collect();
                 b.extend_from_slice(&[0, 0]);
                 if v.is_empty() {
                     b.extend_from_slice(&[0, 0]);
@@ -116,21 +140,38 @@ impl RegData {
 
     fn from_raw(v: &RegValue) -> RegData {
         fn units(b: &[u8]) -> Vec<u16> {
-            b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect()
+            b.as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u16::from_le_bytes(*c))
+                .collect()
         }
         let b: &[u8] = &v.bytes;
         match v.vtype {
-            REG_DWORD if b.len() >= 4 => RegData::Dword(u32::from_le_bytes([b[0], b[1], b[2], b[3]])),
-            REG_QWORD if b.len() >= 8 => RegData::Qword(u64::from_le_bytes(b[..8].try_into().unwrap_or_default())),
+            REG_DWORD if b.len() >= 4 => {
+                RegData::Dword(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            }
+            REG_QWORD if b.len() >= 8 => {
+                RegData::Qword(u64::from_le_bytes(b[..8].try_into().unwrap_or_default()))
+            }
             REG_SZ | REG_EXPAND_SZ => {
                 let u = units(b);
                 let end = u.iter().position(|c| *c == 0).unwrap_or(u.len());
                 let s = String::from_utf16_lossy(&u[..end]);
-                if v.vtype == REG_SZ { RegData::Str(s) } else { RegData::Expand(s) }
+                if v.vtype == REG_SZ {
+                    RegData::Str(s)
+                } else {
+                    RegData::Expand(s)
+                }
             }
             REG_MULTI_SZ => {
                 let u = units(b);
-                RegData::Multi(u.split(|c| *c == 0).filter(|p| !p.is_empty()).map(String::from_utf16_lossy).collect())
+                RegData::Multi(
+                    u.split(|c| *c == 0)
+                        .filter(|p| !p.is_empty())
+                        .map(String::from_utf16_lossy)
+                        .collect(),
+                )
             }
             _ => RegData::Bin(b.to_vec()),
         }
@@ -188,7 +229,11 @@ fn split_path(path: &str) -> Option<(HKEY, String)> {
 fn open_read(path: &str) -> Option<RegKey> {
     let (hive, sub) = split_path(path)?;
     let root = RegKey::predef(hive);
-    if sub.is_empty() { Some(root) } else { root.open_subkey_with_flags(&sub, KEY_READ).ok() }
+    if sub.is_empty() {
+        Some(root)
+    } else {
+        root.open_subkey_with_flags(&sub, KEY_READ).ok()
+    }
 }
 
 pub struct WinSystem;
@@ -200,14 +245,19 @@ impl System for WinSystem {
     }
 
     fn reg_set(&self, path: &str, name: &str, data: &RegData) -> Result<(), String> {
-        let (hive, sub) = split_path(path).ok_or_else(|| format!("unsupported registry path {path}"))?;
+        let (hive, sub) =
+            split_path(path).ok_or_else(|| format!("unsupported registry path {path}"))?;
         let root = RegKey::predef(hive);
-        let (key, _) = root.create_subkey_with_flags(&sub, KEY_WRITE).map_err(|e| e.to_string())?;
-        key.set_raw_value(name, &data.to_raw()).map_err(|e| e.to_string())
+        let (key, _) = root
+            .create_subkey_with_flags(&sub, KEY_WRITE)
+            .map_err(|e| e.to_string())?;
+        key.set_raw_value(name, &data.to_raw())
+            .map_err(|e| e.to_string())
     }
 
     fn reg_delete_value(&self, path: &str, name: &str) -> Result<(), String> {
-        let (hive, sub) = split_path(path).ok_or_else(|| format!("unsupported registry path {path}"))?;
+        let (hive, sub) =
+            split_path(path).ok_or_else(|| format!("unsupported registry path {path}"))?;
         let key = match RegKey::predef(hive).open_subkey_with_flags(&sub, KEY_WRITE) {
             Ok(key) => key,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -225,12 +275,17 @@ impl System for WinSystem {
     }
 
     fn reg_create_key(&self, path: &str) -> Result<(), String> {
-        let (hive, sub) = split_path(path).ok_or_else(|| format!("unsupported registry path {path}"))?;
-        RegKey::predef(hive).create_subkey_with_flags(&sub, KEY_WRITE).map(|_| ()).map_err(|e| e.to_string())
+        let (hive, sub) =
+            split_path(path).ok_or_else(|| format!("unsupported registry path {path}"))?;
+        RegKey::predef(hive)
+            .create_subkey_with_flags(&sub, KEY_WRITE)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 
     fn reg_delete_key(&self, path: &str) -> Result<(), String> {
-        let (hive, sub) = split_path(path).ok_or_else(|| format!("unsupported registry path {path}"))?;
+        let (hive, sub) =
+            split_path(path).ok_or_else(|| format!("unsupported registry path {path}"))?;
         if sub.is_empty() {
             return Err("refusing to delete a registry hive".into());
         }
@@ -242,17 +297,31 @@ impl System for WinSystem {
     }
 
     fn reg_subkeys(&self, path: &str) -> Vec<String> {
-        open_read(path).map(|k| k.enum_keys().filter_map(Result::ok).collect()).unwrap_or_default()
+        open_read(path)
+            .map(|k| k.enum_keys().filter_map(Result::ok).collect())
+            .unwrap_or_default()
     }
 
     fn reg_value_names(&self, path: &str) -> Vec<String> {
-        open_read(path).map(|k| k.enum_values().filter_map(Result::ok).map(|(n, _)| n).collect()).unwrap_or_default()
+        open_read(path)
+            .map(|k| {
+                k.enum_values()
+                    .filter_map(Result::ok)
+                    .map(|(n, _)| n)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn svc_get(&self, name: &str) -> Option<SvcState> {
         let key = format!(r"HKLM:\SYSTEM\CurrentControlSet\Services\{name}");
-        let Some(RegData::Dword(start)) = self.reg_get(&key, "Start") else { return None };
-        let delayed = matches!(self.reg_get(&key, "DelayedAutostart"), Some(RegData::Dword(1)));
+        let Some(RegData::Dword(start)) = self.reg_get(&key, "Start") else {
+            return None;
+        };
+        let delayed = matches!(
+            self.reg_get(&key, "DelayedAutostart"),
+            Some(RegData::Dword(1))
+        );
         Some(SvcState { start, delayed })
     }
 
@@ -270,7 +339,11 @@ impl System for WinSystem {
             if self.reg_set(&key, "Start", &RegData::Dword(start)).is_err() {
                 return false;
             }
-            let delayed_result = if start == 2 && delayed { self.reg_set(&key, "DelayedAutostart", &RegData::Dword(1)) } else { self.reg_delete_value(&key, "DelayedAutostart") };
+            let delayed_result = if start == 2 && delayed {
+                self.reg_set(&key, "DelayedAutostart", &RegData::Dword(1))
+            } else {
+                self.reg_delete_value(&key, "DelayedAutostart")
+            };
             if delayed_result.is_err() {
                 return false;
             }
@@ -282,7 +355,15 @@ impl System for WinSystem {
     }
 
     fn task_enabled(&self, full: &str) -> Option<bool> {
-        let out = self.run("schtasks.exe", &["/Query", "/TN", &format!(r"\{}", full.trim_start_matches('\\')), "/XML"]);
+        let out = self.run(
+            "schtasks.exe",
+            &[
+                "/Query",
+                "/TN",
+                &format!(r"\{}", full.trim_start_matches('\\')),
+                "/XML",
+            ],
+        );
         if out.code != 0 {
             return None;
         }
@@ -291,8 +372,26 @@ impl System for WinSystem {
 
     fn task_set(&self, full: &str, enabled: bool) -> Result<(), String> {
         let tn = format!(r"\{}", full.trim_start_matches('\\'));
-        let out = self.run("schtasks.exe", &["/Change", "/TN", &tn, if enabled { "/ENABLE" } else { "/DISABLE" }]);
-        if out.code == 0 { Ok(()) } else { Err(out.text.trim().lines().last().unwrap_or("schtasks failed").to_string()) }
+        let out = self.run(
+            "schtasks.exe",
+            &[
+                "/Change",
+                "/TN",
+                &tn,
+                if enabled { "/ENABLE" } else { "/DISABLE" },
+            ],
+        );
+        if out.code == 0 {
+            Ok(())
+        } else {
+            Err(out
+                .text
+                .trim()
+                .lines()
+                .last()
+                .unwrap_or("schtasks failed")
+                .to_string())
+        }
     }
 
     fn file_exists(&self, path: &str) -> bool {
@@ -300,13 +399,23 @@ impl System for WinSystem {
     }
 
     fn run(&self, exe: &str, args: &[&str]) -> CmdOut {
-        match Command::new(exe).args(args).creation_flags(CREATE_NO_WINDOW).output() {
+        match Command::new(exe)
+            .args(args)
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+        {
             Ok(o) => {
                 let mut bytes = o.stdout;
                 bytes.extend_from_slice(&o.stderr);
-                CmdOut { code: o.status.code().unwrap_or(-1), text: decode_output(&bytes) }
+                CmdOut {
+                    code: o.status.code().unwrap_or(-1),
+                    text: decode_output(&bytes),
+                }
             }
-            Err(e) => CmdOut { code: -1, text: format!("could not start {exe}: {e}") },
+            Err(e) => CmdOut {
+                code: -1,
+                text: format!("could not start {exe}: {e}"),
+            },
         }
     }
 }
@@ -315,7 +424,12 @@ impl System for WinSystem {
 pub fn decode_output(bytes: &[u8]) -> String {
     let zeros = bytes.iter().filter(|b| **b == 0).count();
     if bytes.len() >= 4 && zeros * 3 >= bytes.len() {
-        let u: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
+        let u: Vec<u16> = bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_le_bytes(*c))
+            .collect();
         return String::from_utf16_lossy(&u).replace('\0', "");
     }
     String::from_utf8_lossy(bytes).replace('\0', "")
@@ -326,7 +440,7 @@ pub fn decode_output(bytes: &[u8]) -> String {
 pub mod fake {
     use super::*;
     use std::cell::RefCell;
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
     /// In-memory registry, services, tasks and command log. Paths compare case-insensitively like Windows.
     #[derive(Default)]
@@ -337,13 +451,17 @@ pub mod fake {
         pub tasks: RefCell<BTreeMap<String, bool>>,
         pub commands: RefCell<Vec<String>>,
         pub answers: RefCell<BTreeMap<String, String>>,
+        pub answer_sequences: RefCell<BTreeMap<String, VecDeque<String>>>,
         pub deny_writes: RefCell<BTreeSet<String>>,
         /// Command-line prefixes that exit with code 1.
         pub fail: RefCell<BTreeSet<String>>,
     }
 
     fn k(s: &str) -> String {
-        s.to_lowercase().replace('/', "\\").trim_end_matches('\\').to_string()
+        s.to_lowercase()
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_string()
     }
 
     impl FakeSystem {
@@ -352,7 +470,14 @@ pub mod fake {
             self.values.borrow_mut().insert((k(path), k(name)), data);
         }
         pub fn answer(&self, cmd_prefix: &str, text: &str) {
-            self.answers.borrow_mut().insert(cmd_prefix.to_string(), text.to_string());
+            self.answers
+                .borrow_mut()
+                .insert(cmd_prefix.to_string(), text.to_string());
+        }
+        pub fn answer_sequence(&self, cmd_prefix: &str, answers: &[String]) {
+            self.answer_sequences
+                .borrow_mut()
+                .insert(cmd_prefix.to_string(), answers.iter().cloned().collect());
         }
         pub fn ran(&self, needle: &str) -> bool {
             self.commands.borrow().iter().any(|c| c.contains(needle))
@@ -376,7 +501,10 @@ pub mod fake {
         }
         fn reg_key_exists(&self, path: &str) -> bool {
             let p = k(path);
-            self.keys.borrow().iter().any(|x| *x == p || x.starts_with(&format!("{p}\\")))
+            self.keys
+                .borrow()
+                .iter()
+                .any(|x| *x == p || x.starts_with(&format!("{p}\\")))
         }
         fn reg_create_key(&self, path: &str) -> Result<(), String> {
             self.keys.borrow_mut().insert(k(path));
@@ -384,19 +512,35 @@ pub mod fake {
         }
         fn reg_delete_key(&self, path: &str) -> Result<(), String> {
             let p = k(path);
-            self.keys.borrow_mut().retain(|x| *x != p && !x.starts_with(&format!("{p}\\")));
-            self.values.borrow_mut().retain(|(kp, _), _| *kp != p && !kp.starts_with(&format!("{p}\\")));
+            self.keys
+                .borrow_mut()
+                .retain(|x| *x != p && !x.starts_with(&format!("{p}\\")));
+            self.values
+                .borrow_mut()
+                .retain(|(kp, _), _| *kp != p && !kp.starts_with(&format!("{p}\\")));
             Ok(())
         }
         fn reg_subkeys(&self, path: &str) -> Vec<String> {
             let p = format!("{}\\", k(path));
-            let mut out: Vec<String> = self.keys.borrow().iter().filter_map(|x| x.strip_prefix(&p)).map(|r| r.split('\\').next().unwrap_or("").to_string()).filter(|s| !s.is_empty()).collect();
+            let mut out: Vec<String> = self
+                .keys
+                .borrow()
+                .iter()
+                .filter_map(|x| x.strip_prefix(&p))
+                .map(|r| r.split('\\').next().unwrap_or("").to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
             out.dedup();
             out
         }
         fn reg_value_names(&self, path: &str) -> Vec<String> {
             let p = k(path);
-            self.values.borrow().keys().filter(|(kp, _)| *kp == p).map(|(_, n)| n.clone()).collect()
+            self.values
+                .borrow()
+                .keys()
+                .filter(|(kp, _)| *kp == p)
+                .map(|(_, n)| n.clone())
+                .collect()
         }
         fn svc_get(&self, name: &str) -> Option<SvcState> {
             self.services.borrow().get(&k(name)).copied()
@@ -428,8 +572,30 @@ pub mod fake {
         fn run(&self, exe: &str, args: &[&str]) -> CmdOut {
             let line = format!("{exe} {}", args.join(" "));
             self.commands.borrow_mut().push(line.clone());
-            let text = self.answers.borrow().iter().find(|(p, _)| line.starts_with(p.as_str())).map(|(_, t)| t.clone()).unwrap_or_default();
-            let code = if self.fail.borrow().iter().any(|p| line.starts_with(p.as_str())) { 1 } else { 0 };
+            let text = self
+                .answer_sequences
+                .borrow_mut()
+                .iter_mut()
+                .find(|(prefix, _)| line.starts_with(prefix.as_str()))
+                .and_then(|(_, answers)| answers.pop_front())
+                .or_else(|| {
+                    self.answers
+                        .borrow()
+                        .iter()
+                        .find(|(p, _)| line.starts_with(p.as_str()))
+                        .map(|(_, t)| t.clone())
+                })
+                .unwrap_or_default();
+            let code = if self
+                .fail
+                .borrow()
+                .iter()
+                .any(|p| line.starts_with(p.as_str()))
+            {
+                1
+            } else {
+                0
+            };
             CmdOut { code, text }
         }
     }
@@ -472,13 +638,19 @@ mod tests {
     #[test]
     fn hive_prefixes_parse() {
         assert_eq!(split_path(r"HKLM:\SOFTWARE\X").unwrap().1, r"SOFTWARE\X");
-        assert_eq!(split_path(r"HKEY_CLASSES_ROOT\*\shellex").unwrap().1, r"*\shellex");
+        assert_eq!(
+            split_path(r"HKEY_CLASSES_ROOT\*\shellex").unwrap().1,
+            r"*\shellex"
+        );
         assert!(split_path(r"C:\x").is_none());
     }
 
     #[test]
     fn utf16_output_is_decoded() {
-        let bytes: Vec<u8> = "Windows Resource Protection".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let bytes: Vec<u8> = "Windows Resource Protection"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect();
         assert_eq!(decode_output(&bytes), "Windows Resource Protection");
     }
 }

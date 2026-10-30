@@ -48,7 +48,7 @@ Or download the zip from [Releases](https://github.com/bliper2/optimaxer/release
 - **Startup**: registry, startup-folder **and scheduled-task** entries that run at logon/boot; enable or disable without uninstalling.
 - **Cleaner**: scan, review targets grouped by cleanup type, preview up to 200 matched paths for one selected target, then confirm before cleaning Windows temp files, update/shader/browser/dev-tool caches, logs and other supported locations. System-managed targets disclose when Windows cannot show per-item paths.
 - **Debloat**: curated Appx removal (Microsoft, OEM and game bloat) with safety levels.
-- **Network**: DNS provider switch (+DoH), latency benchmark, stack reset; opt-in hosts-file telemetry block.
+- **Network**: confirmed DNS provider switch (+DoH) with saved originals and restore, latency benchmark, stack reset; opt-in hosts-file telemetry block.
 - **Features**: Hyper-V, WSL, Sandbox, .NET 3.5 and more.
 - **Auto clean**: one checkbox on the Dashboard schedules an hourly background task (runs as SYSTEM, even with Optimaxer closed) that deletes temp files older than an hour. It does not touch memory: the standby list is Windows' file cache, and emptying it every hour only makes Windows read the same files again. Turning it off removes the task.
 - **Tools**: Free RAM (clears every RAM cache Windows allows: process and system working sets, file cache, modified and standby lists including low priority, identical pages and the registry cache; on demand only, never on a schedule), TRIM/defrag, disk health, SFC, DISM, Windows Update reset, icon/Store cache, performance counters, registry backup, update check, System Restore, and:

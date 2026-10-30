@@ -5,9 +5,11 @@ use super::backend::System;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
-use windows_sys::Win32::Foundation::{GetLastError, ERROR_MORE_DATA};
+use windows_sys::Win32::Foundation::{ERROR_MORE_DATA, GetLastError};
 use windows_sys::Win32::System::Services::{
-    CloseServiceHandle, EnumServicesStatusExW, OpenSCManagerW, ENUM_SERVICE_STATUS_PROCESSW, SC_ENUM_PROCESS_INFO, SC_MANAGER_ENUMERATE_SERVICE, SERVICE_RUNNING, SERVICE_STATE_ALL, SERVICE_WIN32,
+    CloseServiceHandle, ENUM_SERVICE_STATUS_PROCESSW, EnumServicesStatusExW, OpenSCManagerW,
+    SC_ENUM_PROCESS_INFO, SC_MANAGER_ENUMERATE_SERVICE, SERVICE_RUNNING, SERVICE_STATE_ALL,
+    SERVICE_WIN32,
 };
 use windows_sys::Win32::UI::Shell::SHLoadIndirectString;
 
@@ -38,7 +40,11 @@ pub struct Data {
 
 impl Data {
     pub fn load() -> Data {
-        serde_json::from_str(DATA.trim_start_matches('\u{feff}')).unwrap_or(Data { service_recs: vec![], protected: vec![], dns: vec![] })
+        serde_json::from_str(DATA.trim_start_matches('\u{feff}')).unwrap_or(Data {
+            service_recs: vec![],
+            protected: vec![],
+            dns: vec![],
+        })
     }
 }
 
@@ -74,7 +80,12 @@ fn pwstr(p: *const u16) -> String {
 
 /// Per-user service instances are named like `CDPUserSvc_3f2a1`.
 pub fn is_per_user_instance(name: &str) -> bool {
-    name.rsplit_once('_').is_some_and(|(_, suffix)| suffix.len() >= 4 && suffix.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()))
+    name.rsplit_once('_').is_some_and(|(_, suffix)| {
+        suffix.len() >= 4
+            && suffix
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+    })
 }
 
 fn resolve(text: &str) -> String {
@@ -84,15 +95,30 @@ fn resolve(text: &str) -> String {
     let src: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
     let mut out = [0u16; 512];
     // SAFETY: both buffers are valid for the lengths passed.
-    let hr = unsafe { SHLoadIndirectString(src.as_ptr(), out.as_mut_ptr(), out.len() as u32, std::ptr::null_mut()) };
-    if hr < 0 { String::new() } else { pwstr(out.as_ptr()) }
+    let hr = unsafe {
+        SHLoadIndirectString(
+            src.as_ptr(),
+            out.as_mut_ptr(),
+            out.len() as u32,
+            std::ptr::null_mut(),
+        )
+    };
+    if hr < 0 {
+        String::new()
+    } else {
+        pwstr(out.as_ptr())
+    }
 }
 
 /// (name, display name, running) for every Win32 service, in one service-manager call.
 fn enumerate() -> Vec<(String, String, bool)> {
     // SAFETY: standard two-call buffer pattern; the buffer is u64-aligned for ENUM_SERVICE_STATUS_PROCESSW.
     unsafe {
-        let scm = OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_ENUMERATE_SERVICE);
+        let scm = OpenSCManagerW(
+            std::ptr::null(),
+            std::ptr::null(),
+            SC_MANAGER_ENUMERATE_SERVICE,
+        );
         if scm.is_null() {
             return Vec::new();
         }
@@ -101,14 +127,32 @@ fn enumerate() -> Vec<(String, String, bool)> {
         let mut resume = 0u32;
         loop {
             let (mut needed, mut count) = (0u32, 0u32);
-            let ok = EnumServicesStatusExW(scm, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL, buf.as_mut_ptr().cast(), (buf.len() * 8) as u32, &mut needed, &mut count, &mut resume, std::ptr::null());
+            let ok = EnumServicesStatusExW(
+                scm,
+                SC_ENUM_PROCESS_INFO,
+                SERVICE_WIN32,
+                SERVICE_STATE_ALL,
+                buf.as_mut_ptr().cast(),
+                (buf.len() * 8) as u32,
+                &mut needed,
+                &mut count,
+                &mut resume,
+                std::ptr::null(),
+            );
             let more = ok == 0 && GetLastError() == ERROR_MORE_DATA;
             if ok == 0 && !more {
                 break;
             }
-            let items = std::slice::from_raw_parts(buf.as_ptr().cast::<ENUM_SERVICE_STATUS_PROCESSW>(), count as usize);
+            let items = std::slice::from_raw_parts(
+                buf.as_ptr().cast::<ENUM_SERVICE_STATUS_PROCESSW>(),
+                count as usize,
+            );
             for s in items {
-                out.push((pwstr(s.lpServiceName), pwstr(s.lpDisplayName), s.ServiceStatusProcess.dwCurrentState == SERVICE_RUNNING));
+                out.push((
+                    pwstr(s.lpServiceName),
+                    pwstr(s.lpDisplayName),
+                    s.ServiceStatusProcess.dwCurrentState == SERVICE_RUNNING,
+                ));
             }
             if !more {
                 break;
@@ -120,21 +164,49 @@ fn enumerate() -> Vec<(String, String, bool)> {
 }
 
 pub fn list(sys: &dyn System, data: &Data) -> Vec<SvcRow> {
-    let recs: HashMap<String, &Rec> = data.service_recs.iter().map(|r| (r.name.to_lowercase(), r)).collect();
+    let recs: HashMap<String, &Rec> = data
+        .service_recs
+        .iter()
+        .map(|r| (r.name.to_lowercase(), r))
+        .collect();
     let mut rows: Vec<SvcRow> = enumerate()
         .into_iter()
         .filter(|(n, _, _)| !is_per_user_instance(n) && !is_protected(data, n))
         .filter_map(|(name, display, running)| {
             let snap = sys.svc_get(&name)?;
-            let desc = match sys.reg_get(&format!(r"HKLM:\SYSTEM\CurrentControlSet\Services\{name}"), "Description") {
-                Some(super::backend::RegData::Str(s) | super::backend::RegData::Expand(s)) => resolve(&s),
+            let desc = match sys.reg_get(
+                &format!(r"HKLM:\SYSTEM\CurrentControlSet\Services\{name}"),
+                "Description",
+            ) {
+                Some(super::backend::RegData::Str(s) | super::backend::RegData::Expand(s)) => {
+                    resolve(&s)
+                }
                 _ => String::new(),
             };
-            let rec = recs.get(&name.to_lowercase()).map(|r| (r.start, r.desc.clone()));
-            Some(SvcRow { name, display, desc, start: snap.start, delayed: snap.delayed, running, rec })
+            let rec = recs
+                .get(&name.to_lowercase())
+                .map(|r| (r.start, r.desc.clone()));
+            Some(SvcRow {
+                name,
+                display,
+                desc,
+                start: snap.start,
+                delayed: snap.delayed,
+                running,
+                rec,
+            })
         })
         .collect();
-    rows.sort_by_key(|r| (match r.rec.as_ref().map(|x| x.0) { Some(3) => 0, Some(4) => 1, _ => 2 }, r.display.to_lowercase()));
+    rows.sort_by_key(|r| {
+        (
+            match r.rec.as_ref().map(|x| x.0) {
+                Some(3) => 0,
+                Some(4) => 1,
+                _ => 2,
+            },
+            r.display.to_lowercase(),
+        )
+    });
     rows
 }
 
@@ -144,14 +216,28 @@ pub fn is_protected(data: &Data, name: &str) -> bool {
 
 /// Writes the current start types to `services-<stamp>.json` (same shape Optimaxer used), then applies the change.
 /// Returns how many services were changed.
-pub fn set_start(sys: &dyn System, data: &Data, names: &[String], start: u32, backups: &Path, log: &mut dyn FnMut(&str)) -> usize {
-    let snaps: Vec<_> = names.iter().filter(|n| !is_protected(data, n)).filter_map(|n| sys.svc_get(n).map(|s| (n.clone(), s))).collect();
+pub fn set_start(
+    sys: &dyn System,
+    data: &Data,
+    names: &[String],
+    start: u32,
+    backups: &Path,
+    log: &mut dyn FnMut(&str),
+) -> usize {
+    let snaps: Vec<_> = names
+        .iter()
+        .filter(|n| !is_protected(data, n))
+        .filter_map(|n| sys.svc_get(n).map(|s| (n.clone(), s)))
+        .collect();
     if snaps.is_empty() {
         return 0;
     }
     let backup: Vec<_> = snaps.iter().map(|(n, s)| serde_json::json!({ "Name": n, "Start": s.start, "Delayed": s.delayed as u32 })).collect();
     let file = backups.join(format!("services-{}.json", super::now_stamp()));
-    match std::fs::write(&file, serde_json::to_vec_pretty(&backup).unwrap_or_default()) {
+    match std::fs::write(
+        &file,
+        serde_json::to_vec_pretty(&backup).unwrap_or_default(),
+    ) {
         Ok(()) => log(&format!("Backup saved: {}", file.display())),
         Err(e) => {
             log(&format!("Backup failed ({e}); nothing was changed"));
@@ -171,21 +257,37 @@ pub fn set_start(sys: &dyn System, data: &Data, names: &[String], start: u32, ba
 }
 
 pub fn restore_latest(sys: &dyn System, backups: &Path, log: &mut dyn FnMut(&str)) -> bool {
-    let mut files: Vec<_> = std::fs::read_dir(backups).into_iter().flatten().filter_map(Result::ok).map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("services-"))).collect();
+    let mut files: Vec<_> = std::fs::read_dir(backups)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("services-"))
+        })
+        .collect();
     files.sort();
     let Some(file) = files.pop() else {
         log("No service backup found.");
         return false;
     };
     let bytes = std::fs::read(&file).unwrap_or_default();
-    let text = String::from_utf8_lossy(bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes)).into_owned();
+    let text = String::from_utf8_lossy(bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes))
+        .into_owned();
     let Ok(list) = serde_json::from_str::<Vec<super::state::SvcRec>>(&text) else {
         log("The service backup is unreadable.");
         return false;
     };
     let data = Data::load();
-    if list.is_empty() || list.iter().any(|b| b.name.is_empty() || !(2..=4).contains(&b.start) || is_protected(&data, &b.name)) {
-        log("The service backup contains no restorable services or invalid/protected entries; nothing was changed.");
+    if list.is_empty()
+        || list.iter().any(|b| {
+            b.name.is_empty() || !(2..=4).contains(&b.start) || is_protected(&data, &b.name)
+        })
+    {
+        log(
+            "The service backup contains no restorable services or invalid/protected entries; nothing was changed.",
+        );
         return false;
     }
     let mut succeeded = true;
@@ -197,15 +299,23 @@ pub fn restore_latest(sys: &dyn System, backups: &Path, log: &mut dyn FnMut(&str
             log(&format!("  WARN could not restore {}", b.name));
         }
     }
-    log(&format!("{} from {}", if succeeded { "Restored" } else { "Restore incomplete" }, file.display()));
+    log(&format!(
+        "{} from {}",
+        if succeeded {
+            "Restored"
+        } else {
+            "Restore incomplete"
+        },
+        file.display()
+    ));
     succeeded
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::opti::backend::fake::FakeSystem;
     use crate::opti::backend::SvcState;
+    use crate::opti::backend::fake::FakeSystem;
 
     #[test]
     #[ignore = "reads the live service manager"]
@@ -222,7 +332,11 @@ mod tests {
         let d = Data::load();
         assert!(d.service_recs.len() > 80 && d.protected.len() > 40 && d.dns.len() == 6);
         assert!(d.service_recs.iter().all(|r| r.start == 3 || r.start == 4));
-        assert!(d.dns.iter().any(|p| p.name == "Cloudflare" && p.v4[0] == "1.1.1.1"));
+        assert!(
+            d.dns
+                .iter()
+                .any(|p| p.name == "Cloudflare" && p.v4[0] == "1.1.1.1")
+        );
     }
 
     #[test]
@@ -235,12 +349,31 @@ mod tests {
     #[test]
     fn protected_services_are_never_changed() {
         let sys = FakeSystem::default();
-        sys.services.borrow_mut().insert("rpcss".into(), SvcState { start: 2, delayed: false });
-        sys.services.borrow_mut().insert("fax".into(), SvcState { start: 2, delayed: false });
+        sys.services.borrow_mut().insert(
+            "rpcss".into(),
+            SvcState {
+                start: 2,
+                delayed: false,
+            },
+        );
+        sys.services.borrow_mut().insert(
+            "fax".into(),
+            SvcState {
+                start: 2,
+                delayed: false,
+            },
+        );
         let data = Data::load();
         let dir = std::env::temp_dir().join(format!("opti-svc-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let n = set_start(&sys, &data, &["RpcSs".into(), "Fax".into()], 4, &dir, &mut |_| {});
+        let n = set_start(
+            &sys,
+            &data,
+            &["RpcSs".into(), "Fax".into()],
+            4,
+            &dir,
+            &mut |_| {},
+        );
         assert_eq!(n, 1);
         assert_eq!(sys.svc_get("RpcSs").unwrap().start, 2);
         assert_eq!(sys.svc_get("Fax").unwrap().start, 4);
@@ -249,7 +382,13 @@ mod tests {
     #[test]
     fn backup_is_written_before_the_change_and_restores() {
         let sys = FakeSystem::default();
-        sys.services.borrow_mut().insert("fax".into(), SvcState { start: 3, delayed: false });
+        sys.services.borrow_mut().insert(
+            "fax".into(),
+            SvcState {
+                start: 3,
+                delayed: false,
+            },
+        );
         let data = Data::load();
         let dir = std::env::temp_dir().join(format!("opti-svc2-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -263,9 +402,22 @@ mod tests {
     #[test]
     fn unwritable_backup_folder_blocks_the_change() {
         let sys = FakeSystem::default();
-        sys.services.borrow_mut().insert("fax".into(), SvcState { start: 3, delayed: false });
+        sys.services.borrow_mut().insert(
+            "fax".into(),
+            SvcState {
+                start: 3,
+                delayed: false,
+            },
+        );
         let data = Data::load();
-        let n = set_start(&sys, &data, &["Fax".into()], 4, Path::new(r"Z:\definitely\missing"), &mut |_| {});
+        let n = set_start(
+            &sys,
+            &data,
+            &["Fax".into()],
+            4,
+            Path::new(r"Z:\definitely\missing"),
+            &mut |_| {},
+        );
         assert_eq!(n, 0);
         assert_eq!(sys.svc_get("Fax").unwrap().start, 3);
     }
@@ -280,7 +432,13 @@ mod tests {
         let mut lines = Vec::new();
         assert!(!restore_latest(&sys, &dir, &mut |l| lines.push(l.to_string())));
         assert!(!lines.iter().any(|l| l.contains("restored Missing")));
-        sys.services.borrow_mut().insert("rpcss".into(), SvcState { start: 2, delayed: false });
+        sys.services.borrow_mut().insert(
+            "rpcss".into(),
+            SvcState {
+                start: 2,
+                delayed: false,
+            },
+        );
         std::fs::write(&file, r#"[{"Name":"RpcSs","Start":4,"Delayed":0}]"#).unwrap();
         assert!(!restore_latest(&sys, &dir, &mut |_| {}));
         assert_eq!(sys.svc_get("RpcSs").unwrap().start, 2);

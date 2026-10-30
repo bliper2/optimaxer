@@ -43,6 +43,49 @@ function New-FakeTweak {
 function Save-Functions { param([string[]]$Names) $h = @{}; foreach ($n in $Names) { $h[$n] = (Get-Item "function:$n").ScriptBlock }; $h }
 function Restore-Functions { param($Saved) foreach ($n in $Saved.Keys) { Set-Item -Path "function:global:$n" -Value $Saved[$n] } }
 function Remove-FakeTweaks { foreach ($t in @($global:OptiCatalog | Where-Object { $_.Id -like 'test-*' })) { $global:OptiCatalog.Remove($t) } }
+function New-FakeDnsSnapshot {
+    [pscustomobject]@{
+        interfaces = @([pscustomobject]@{
+            interface_guid = '11111111-2222-3333-4444-555555555555'; name = 'Ethernet'; status = 'Up'
+            ipv4 = [pscustomobject]@{ dhcp = $false; servers = @('192.0.2.53', '192.0.2.54') }
+            ipv6 = [pscustomobject]@{ dhcp = $true; servers = @() }
+        })
+        doh_supported = $false
+        doh_servers = @()
+    }
+}
+function Install-FakeDnsCommands {
+    function global:Get-OptiDnsSnapshot { param([bool]$RequireDoh = $false) return $global:FakeDnsSnapshot }
+    function global:Invoke-OptiDnsNetsh {
+        param([string[]]$Arguments)
+        $global:FakeDnsMutationCount++
+        $global:FakeDnsBackupSeen = Test-Path -LiteralPath (Get-OptiDnsBackupPath)
+        if ($global:FakeDnsFailProtocol -eq $Arguments[1]) { throw 'simulated netsh failure' }
+        if ($Arguments[0] -eq 'dns') {
+            $global:FakeDnsDohVerbs += $Arguments[1]
+            $server = ($Arguments | Where-Object { $_.StartsWith('server=', [StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1).Substring(7)
+            $global:FakeDnsSnapshot.doh_servers = @($global:FakeDnsSnapshot.doh_servers | Where-Object { $_.server_address -ine $server })
+            if ($Arguments[1] -in @('add', 'set')) {
+                $template = ($Arguments | Where-Object { $_.StartsWith('dohtemplate=', [StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1).Substring(12)
+                $global:FakeDnsSnapshot.doh_servers += [pscustomobject]@{ server_address = $server; doh_template = $template; auto_upgrade = ($Arguments -contains 'autoupgrade=yes'); allow_fallback_to_udp = ($Arguments -contains 'udpfallback=yes') }
+            }
+            return
+        }
+        if ($Arguments[0] -ne 'interface') { throw "unexpected command: $($Arguments -join ' ')" }
+        $adapter = $global:FakeDnsSnapshot.interfaces[0]
+        $property = if ($Arguments[1] -eq 'ipv4') { 'ipv4' } else { 'ipv6' }
+        $addresses = @($Arguments | Where-Object { $_.StartsWith('address=', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { $_.Substring(8) })
+        if ($Arguments -contains 'source=dhcp') { $adapter.$property = [pscustomobject]@{ dhcp = $true; servers = @() } }
+        elseif ($Arguments[2] -eq 'set') { $adapter.$property = [pscustomobject]@{ dhcp = $false; servers = $addresses } }
+        else { $adapter.$property.servers = @($adapter.$property.servers) + $addresses }
+    }
+    function global:Clear-DnsClientCache { }
+}
+function Restore-FakeDnsCommands {
+    param($Saved)
+    Restore-Functions $Saved
+    Remove-Item -LiteralPath 'Function:\Clear-DnsClientCache' -Force -ErrorAction SilentlyContinue
+}
 
 $demoted = 'perf-prefetch', 'perf-paging', 'perf-timer', 'perf-cpupower', 'perf-priosep', 'game-mpo', 'game-fso', 'net-nagle', 'perf-bgapps', 'perf-memcompress', 'perf-fth'
 $refPC = @{ Laptop = $false; SSD = $true; Vendor = ''; RamGB = 63.8; Threads = 28; Gpus = @('NVIDIA GeForce RTX 3090'); Build = 26100
@@ -376,6 +419,110 @@ It 'measurement comparison reports direction per metric' {
 It 'Appx removal checks provisioned copies' {
     Assert ((Get-Command Test-AppxGone).ScriptBlock.ToString() -match 'Get-AppxProvisionedPackage') 'Test-AppxGone ignores provisioning'
     Assert ((Get-TweakById 'ai-remove-apps').Test.ToString() -match 'Test-AppxGone') 'ai-remove-apps test'
+}
+
+Write-Host 'DNS backup and restore'
+It 'DNS changes save originals before mutation and restore both address families' {
+    $saved = Save-Functions @('Get-OptiDnsSnapshot', 'Invoke-OptiDnsNetsh')
+    $global:FakeDnsSnapshot = New-FakeDnsSnapshot
+    $global:FakeDnsMutationCount = 0; $global:FakeDnsBackupSeen = $false; $global:FakeDnsFailProtocol = $null; $global:FakeDnsDohVerbs = @()
+    Install-FakeDnsCommands
+    try {
+        Assert (Set-DnsProvider -Name 'Test DNS' -V4 @('1.1.1.1') -V6 @('2606:4700:4700::1111') -Doh '') 'DNS provider was not applied'
+        Assert $global:FakeDnsBackupSeen 'original DNS was not saved before first mutation'
+        Assert (Test-Path -LiteralPath (Get-OptiDnsBackupPath)) 'DNS backup missing after apply'
+        Assert (Restore-DnsProvider) 'DNS restore failed'
+        Assert (Test-OptiDnsFamilyEqual $global:FakeDnsSnapshot.interfaces[0].ipv4 ([pscustomobject]@{ dhcp = $false; servers = @('192.0.2.53', '192.0.2.54') })) 'IPv4 originals were not restored'
+        Assert (Test-OptiDnsFamilyEqual $global:FakeDnsSnapshot.interfaces[0].ipv6 ([pscustomobject]@{ dhcp = $true; servers = @() })) 'IPv6 DHCP state was not restored'
+        Assert (-not (Test-Path -LiteralPath (Get-OptiDnsBackupPath))) 'verified restore did not remove backup'
+    } finally { Restore-FakeDnsCommands $saved; Remove-Item -LiteralPath (Get-OptiDnsBackupPath) -Force -ErrorAction SilentlyContinue }
+}
+It 'partial DNS apply keeps backup and can be retried through restore' {
+    $saved = Save-Functions @('Get-OptiDnsSnapshot', 'Invoke-OptiDnsNetsh')
+    $global:FakeDnsSnapshot = New-FakeDnsSnapshot
+    $global:FakeDnsMutationCount = 0; $global:FakeDnsBackupSeen = $false; $global:FakeDnsFailProtocol = 'ipv6'
+    Install-FakeDnsCommands
+    try {
+        Assert (-not (Set-DnsProvider -Name 'Test DNS' -V4 @('1.1.1.1') -V6 @('2606:4700:4700::1111') -Doh '')) 'partial failure reported success'
+        Assert $global:FakeDnsBackupSeen 'backup was not present at first mutation'
+        Assert (Test-Path -LiteralPath (Get-OptiDnsBackupPath)) 'partial apply discarded backup'
+        $global:FakeDnsFailProtocol = $null
+        Assert (Restore-DnsProvider) 'restore after partial apply failed'
+        Assert (-not (Test-Path -LiteralPath (Get-OptiDnsBackupPath))) 'verified retry did not clear backup'
+    } finally { Restore-FakeDnsCommands $saved; Remove-Item -LiteralPath (Get-OptiDnsBackupPath) -Force -ErrorAction SilentlyContinue }
+}
+It 'DNS restore leaves external changes untouched and keeps backup' {
+    $saved = Save-Functions @('Get-OptiDnsSnapshot', 'Invoke-OptiDnsNetsh')
+    $global:FakeDnsSnapshot = New-FakeDnsSnapshot
+    $global:FakeDnsMutationCount = 0; $global:FakeDnsBackupSeen = $false; $global:FakeDnsFailProtocol = $null
+    Install-FakeDnsCommands
+    try {
+        Assert (Set-DnsProvider -Name 'Test DNS' -V4 @('1.1.1.1') -V6 @('2606:4700:4700::1111') -Doh '') 'DNS provider was not applied'
+        $beforeRestore = $global:FakeDnsMutationCount
+        $global:FakeDnsSnapshot.interfaces[0].ipv4 = [pscustomobject]@{ dhcp = $false; servers = @('203.0.113.53') }
+        Assert (-not (Restore-DnsProvider)) 'external DNS change was overwritten'
+        Assert ($global:FakeDnsMutationCount -eq $beforeRestore) 'restore mutated DNS before conflict check'
+        Assert ($global:FakeDnsSnapshot.interfaces[0].ipv4.servers[0] -eq '203.0.113.53') 'external DNS change did not remain'
+        Assert (Test-Path -LiteralPath (Get-OptiDnsBackupPath)) 'conflict discarded recovery backup'
+    } finally { Restore-FakeDnsCommands $saved; Remove-Item -LiteralPath (Get-OptiDnsBackupPath) -Force -ErrorAction SilentlyContinue }
+}
+It 'DNS-over-HTTPS restore preserves the original record and rejects a removed record as external drift' {
+    $saved = Save-Functions @('Get-OptiDnsSnapshot', 'Invoke-OptiDnsNetsh')
+    $global:FakeDnsSnapshot = New-FakeDnsSnapshot
+    $global:FakeDnsSnapshot.doh_supported = $true
+    $global:FakeDnsSnapshot.doh_servers = @([pscustomobject]@{ server_address = '1.1.1.1'; doh_template = 'https://old.example/dns-query'; auto_upgrade = $false; allow_fallback_to_udp = $false })
+    $global:FakeDnsMutationCount = 0; $global:FakeDnsBackupSeen = $false; $global:FakeDnsFailProtocol = $null
+    Install-FakeDnsCommands
+    try {
+        Assert (Set-DnsProvider -Name 'Test DNS' -V4 @('1.1.1.1') -V6 @() -Doh 'https://new.example/dns-query') 'DNS-over-HTTPS provider was not applied'
+        Assert ($global:FakeDnsDohVerbs -contains 'set') 'existing DNS-over-HTTPS entry was added instead of updated'
+        $restored = Restore-DnsProvider
+        Assert $restored 'DNS-over-HTTPS restore failed'
+        Assert ($global:FakeDnsSnapshot.doh_servers[0].doh_template -eq 'https://old.example/dns-query') 'original DNS-over-HTTPS template was not restored'
+        Assert (-not $global:FakeDnsSnapshot.doh_servers[0].auto_upgrade) 'original DNS-over-HTTPS auto-upgrade value was not restored'
+
+        Assert (Set-DnsProvider -Name 'Test DNS' -V4 @('1.1.1.1') -V6 @() -Doh 'https://new.example/dns-query') 'DNS-over-HTTPS provider was not reapplied'
+        $beforeRestore = $global:FakeDnsMutationCount
+        $global:FakeDnsSnapshot.doh_servers = @()
+        Assert (-not (Restore-DnsProvider)) 'removed DoH record was treated as unchanged'
+        Assert ($global:FakeDnsMutationCount -eq $beforeRestore) 'restore mutated settings after detecting DoH drift'
+        Assert (Test-Path -LiteralPath (Get-OptiDnsBackupPath)) 'DoH conflict discarded recovery backup'
+    } finally { Restore-FakeDnsCommands $saved; Remove-Item -LiteralPath (Get-OptiDnsBackupPath) -Force -ErrorAction SilentlyContinue }
+}
+It 'DNS provider rejects wrong address family before saving or changing anything' {
+    $saved = Save-Functions @('Get-OptiDnsSnapshot', 'Invoke-OptiDnsNetsh')
+    $global:FakeDnsSnapshot = New-FakeDnsSnapshot
+    $global:FakeDnsMutationCount = 0; $global:FakeDnsFailProtocol = $null
+    Install-FakeDnsCommands
+    try {
+        $threw = $false
+        try { [void](Set-DnsProvider -Name 'Test DNS' -V4 @('::1') -V6 @() -Doh '') } catch { $threw = $true }
+        Assert $threw 'IPv6 address accepted as an IPv4 server'
+        Assert ($global:FakeDnsMutationCount -eq 0) 'invalid address changed DNS'
+        Assert (-not (Test-Path -LiteralPath (Get-OptiDnsBackupPath))) 'invalid address created a misleading backup'
+    } finally { Restore-FakeDnsCommands $saved; Remove-Item -LiteralPath (Get-OptiDnsBackupPath) -Force -ErrorAction SilentlyContinue }
+}
+It 'malformed saved DNS addresses block restore and keep the backup' {
+    $invalid = [pscustomobject]@{
+        version = 1
+        interfaces = @([pscustomobject]@{
+            interface_guid = '11111111-2222-3333-4444-555555555555'; name = 'Ethernet'
+            original_ipv4 = [pscustomobject]@{ dhcp = $false; servers = @('::1') }
+            original_ipv6 = [pscustomobject]@{ dhcp = $true; servers = @() }
+            applied = @([pscustomobject]@{
+                ipv4 = [pscustomobject]@{ dhcp = $true; servers = @() }
+                ipv6 = [pscustomobject]@{ dhcp = $true; servers = @() }
+            })
+        })
+        doh_changes = @()
+    }
+    ConvertTo-Json -InputObject $invalid -Depth 10 | Set-Content -LiteralPath (Get-OptiDnsBackupPath) -Encoding UTF8
+    try {
+        $threw = $false
+        try { [void](Restore-DnsProvider) } catch { $threw = $true }
+        Assert $threw 'wrong-family original accepted from a saved backup'
+        Assert (Test-Path -LiteralPath (Get-OptiDnsBackupPath)) 'invalid saved backup was deleted'
+    } finally { Remove-Item -LiteralPath (Get-OptiDnsBackupPath) -Force -ErrorAction SilentlyContinue }
 }
 
 Write-Host 'safety and failure paths'

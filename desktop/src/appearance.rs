@@ -198,7 +198,10 @@ mod tests {
         let json = r##"{"format_version":2,"theme":"dark","style":"windows","palette":"system","custom_accent":"#7478F8","reduce_motion":false,"density":"compact","ui_scale":"large"}"##;
         let preset: Preset = serde_json::from_str(json).unwrap();
         preset.validate().unwrap();
-        let mut settings = Settings { corner_radius: Some(12), ..Settings::default() };
+        let mut settings = Settings {
+            corner_radius: Some(12),
+            ..Settings::default()
+        };
         preset.apply(&mut settings);
         assert_eq!(settings.density, crate::theme::Density::Compact);
         assert_eq!(settings.ui_scale, crate::theme::UiScale::Large);

@@ -6,10 +6,10 @@ pub mod catalog;
 pub mod cleaner;
 pub mod diagnostics;
 pub mod engine;
-pub mod hw;
-pub mod history;
-pub mod measurements;
 pub mod gaming;
+pub mod history;
+pub mod hw;
+pub mod measurements;
 pub mod network;
 pub mod processes;
 pub mod profiles;
@@ -40,14 +40,23 @@ fn civil(secs: u64) -> (i64, u32, u32, u32, u32, u32) {
 }
 
 fn now_secs() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// `20261023-003711`, for backup file names.
 pub fn now_stamp() -> String {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     let (y, mo, d, h, mi, s) = civil(now.as_secs());
-    format!("{y:04}{mo:02}{d:02}-{h:02}{mi:02}{s:02}-{:09}-{}", now.subsec_nanos(), std::process::id())
+    format!(
+        "{y:04}{mo:02}{d:02}-{h:02}{mi:02}{s:02}-{:09}-{}",
+        now.subsec_nanos(),
+        std::process::id()
+    )
 }
 
 /// `2026-10-23T00:37:11`, for undo records.

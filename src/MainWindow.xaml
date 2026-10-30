@@ -1067,6 +1067,7 @@
               <Button x:Name="BtnDnsBench" Style="{StaticResource BtnAccent}" Content="Benchmark DNS"/>
               <Button x:Name="BtnFlushDns" Content="Flush cache"/>
               <Button x:Name="BtnDnsShow" Content="Show current"/>
+              <Button x:Name="BtnDnsRestore" Content="Restore saved DNS" IsEnabled="False"/>
               <Button x:Name="BtnResetNet" Style="{StaticResource BtnDanger}" Content="Reset network stack"/>
             </WrapPanel>
             <TextBlock Grid.Row="2" Text="DNS provider" Style="{StaticResource ColHead}"/>

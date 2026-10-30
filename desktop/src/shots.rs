@@ -2,8 +2,8 @@
 //! window (egui's viewport screenshot, never the desktop), and exits. Nothing here runs in normal use.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 const ICON_SCREENSHOT_DELAY_SECONDS: f64 = 16.0;
 
@@ -41,15 +41,16 @@ pub const STEPS: [(&str, f64); 18] = [
 ];
 
 pub fn page_name(slug: &str) -> String {
-    slug.strip_prefix("optimaxer-").unwrap_or(slug).replace('-', " ")
+    slug.strip_prefix("optimaxer-")
+        .unwrap_or(slug)
+        .replace('-', " ")
 }
 
 impl Shots {
     pub fn from_env() -> Option<Self> {
         let dir = PathBuf::from(std::env::var_os("ORION_SHOTS")?);
         std::fs::create_dir_all(&dir).ok()?;
-        let load_icons = std::env::var("ORION_SHOTS_LOAD_ICONS")
-            .is_ok_and(|value| value.eq_ignore_ascii_case("true"));
+        let load_icons = load_icons_in_screenshot();
         let (tx, rx) = channel();
         Some(Shots {
             tx,
@@ -104,7 +105,13 @@ impl Shots {
     pub fn save(&mut self, width: usize, height: usize, rgba: &[u8]) {
         if let Some((name, _)) = self.step() {
             let path = self.dir.join(format!("{name}.png"));
-            if let Err(e) = image::save_buffer(&path, rgba, width as u32, height as u32, image::ColorType::Rgba8) {
+            if let Err(e) = image::save_buffer(
+                &path,
+                rgba,
+                width as u32,
+                height as u32,
+                image::ColorType::Rgba8,
+            ) {
                 eprintln!("could not save {}: {e}", path.display());
             }
         }
@@ -116,6 +123,15 @@ impl Shots {
     pub fn finished(&self) -> bool {
         self.idx >= STEPS.len()
     }
+}
+
+pub fn load_icons_in_screenshot() -> bool {
+    let setting = std::env::var("ORION_SHOTS_LOAD_ICONS").ok();
+    screenshot_icons_enabled(setting.as_deref())
+}
+
+fn screenshot_icons_enabled(setting: Option<&str>) -> bool {
+    !setting.is_some_and(|value| value.eq_ignore_ascii_case("false"))
 }
 
 #[cfg(test)]
@@ -160,7 +176,10 @@ mod tests {
             requested: false,
         };
         assert!(s.should_navigate(10.0));
-        assert!(!s.should_capture(14.0), "remote icon capture keeps the extended wait");
+        assert!(
+            !s.should_capture(14.0),
+            "remote icon capture keeps the extended wait"
+        );
         assert!(s.should_capture(10.0 + ICON_SCREENSHOT_DELAY_SECONDS));
 
         let (tx, rx) = channel();
@@ -175,14 +194,33 @@ mod tests {
             requested: false,
         };
         assert!(normal.should_navigate(10.0));
-        assert!(normal.should_capture(14.0), "normal screenshot keeps the short wait");
+        assert!(
+            normal.should_capture(14.0),
+            "normal screenshot keeps the short wait"
+        );
+    }
+
+    #[test]
+    fn screenshot_icons_load_by_default_with_an_offline_opt_out() {
+        assert!(screenshot_icons_enabled(None));
+        assert!(screenshot_icons_enabled(Some("true")));
+        assert!(!screenshot_icons_enabled(Some("false")));
+        assert!(!screenshot_icons_enabled(Some("FALSE")));
     }
 
     #[test]
     fn screenshot_walk_covers_gaming_diagnostics_and_snapshots_pages() {
         assert!(STEPS.iter().any(|(name, _)| *name == "optimaxer-gaming"));
-        assert!(STEPS.iter().any(|(name, _)| *name == "optimaxer-diagnostics"));
-        assert!(STEPS.iter().any(|(name, _)| *name == "optimaxer-system-snapshot"));
+        assert!(
+            STEPS
+                .iter()
+                .any(|(name, _)| *name == "optimaxer-diagnostics")
+        );
+        assert!(
+            STEPS
+                .iter()
+                .any(|(name, _)| *name == "optimaxer-system-snapshot")
+        );
         assert!(STEPS.iter().any(|(name, _)| *name == "store-favorites"));
         assert!(STEPS.iter().any(|(name, _)| *name == "winget"));
         assert!(STEPS.iter().any(|(name, _)| *name == "settings"));

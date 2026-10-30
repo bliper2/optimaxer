@@ -39,7 +39,11 @@ impl Release {
 
 /// `v2.12.0`, `2.12` or `2.12.0-beta` become (2, 12, 0).
 pub fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
-    let core = s.trim().trim_start_matches(['v', 'V']).split(['-', '+']).next()?;
+    let core = s
+        .trim()
+        .trim_start_matches(['v', 'V'])
+        .split(['-', '+'])
+        .next()?;
     let mut parts = core.split('.').map(|p| p.parse::<u32>());
     let major = parts.next()?.ok()?;
     let minor = parts.next().unwrap_or(Ok(0)).ok()?;
@@ -53,20 +57,30 @@ pub fn current_version() -> (u32, u32, u32) {
 
 /// Picks the Windows desktop zip out of a GitHub release JSON.
 pub fn parse_release(v: &Value) -> Result<Release, String> {
-    let tag = v["tag_name"].as_str().ok_or("the release has no tag")?.to_string();
+    let tag = v["tag_name"]
+        .as_str()
+        .ok_or("the release has no tag")?
+        .to_string();
     let version = parse_version(&tag).ok_or_else(|| format!("unreadable version tag {tag}"))?;
     let asset = v["assets"]
         .as_array()
         .into_iter()
         .flatten()
-        .find(|a| a["name"].as_str().is_some_and(|n| n.starts_with(ASSET_PREFIX) && n.ends_with(ASSET_SUFFIX)))
+        .find(|a| {
+            a["name"]
+                .as_str()
+                .is_some_and(|n| n.starts_with(ASSET_PREFIX) && n.ends_with(ASSET_SUFFIX))
+        })
         .ok_or("this release has no desktop download")?;
     Ok(Release {
         version,
         tag,
         notes: v["body"].as_str().unwrap_or("").trim().to_string(),
         page: v["html_url"].as_str().unwrap_or("").to_string(),
-        url: asset["browser_download_url"].as_str().ok_or("the desktop download has no link")?.to_string(),
+        url: asset["browser_download_url"]
+            .as_str()
+            .ok_or("the desktop download has no link")?
+            .to_string(),
         digest: asset["digest"].as_str().unwrap_or("").to_string(),
         size: asset["size"].as_u64().unwrap_or(0),
     })
@@ -77,14 +91,26 @@ pub fn is_newer(r: &Release) -> bool {
 }
 
 fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder().timeout_connect(Some(Duration::from_secs(8))).timeout_recv_response(Some(Duration::from_secs(20))).build().into()
+    ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(8)))
+        .timeout_recv_response(Some(Duration::from_secs(20)))
+        .build()
+        .into()
 }
 
 /// The latest published release, newer or not.
 pub fn latest() -> Result<Release, String> {
     let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
-    let mut resp = agent().get(&url).header("User-Agent", "OrionStore-Optimaxer-Updater").header("Accept", "application/vnd.github+json").call().map_err(|e| format!("could not reach GitHub ({e})"))?;
-    let text = resp.body_mut().read_to_string().map_err(|e| e.to_string())?;
+    let mut resp = agent()
+        .get(&url)
+        .header("User-Agent", "OrionStore-Optimaxer-Updater")
+        .header("Accept", "application/vnd.github+json")
+        .call()
+        .map_err(|e| format!("could not reach GitHub ({e})"))?;
+    let text = resp
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| e.to_string())?;
     let v: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     parse_release(&v)
 }
@@ -103,7 +129,9 @@ pub fn digest_hex(digest: &str) -> Option<String> {
 
 /// The hash line of `certutil -hashfile <file> SHA256`. Older Windows prints it with spaces between bytes.
 pub fn parse_certutil(out: &str) -> Option<String> {
-    out.lines().map(|l| l.replace(' ', "").trim().to_lowercase()).find(|l| l.len() == 64 && l.chars().all(|c| c.is_ascii_hexdigit()))
+    out.lines()
+        .map(|l| l.replace(' ', "").trim().to_lowercase())
+        .find(|l| l.len() == 64 && l.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
 fn stage_dir(rel: &Release) -> PathBuf {
@@ -113,11 +141,28 @@ fn stage_dir(rel: &Release) -> PathBuf {
 }
 
 /// Downloads the zip, reporting (done, total) bytes. Stops early when `cancel` returns true.
-pub fn download(rel: &Release, progress: &dyn Fn(u64, u64), cancel: &dyn Fn() -> bool) -> Result<PathBuf, String> {
+pub fn download(
+    rel: &Release,
+    progress: &dyn Fn(u64, u64),
+    cancel: &dyn Fn() -> bool,
+) -> Result<PathBuf, String> {
     let zip = stage_dir(rel).join(rel.url.rsplit('/').next().unwrap_or("update.zip"));
-    let mut resp = agent().get(&rel.url).header("User-Agent", "OrionStore-Optimaxer-Updater").call().map_err(|e| format!("download failed ({e})"))?;
-    let total = resp.headers().get("content-length").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok()).unwrap_or(rel.size);
-    let mut reader = resp.body_mut().with_config().limit(512 * 1024 * 1024).reader();
+    let mut resp = agent()
+        .get(&rel.url)
+        .header("User-Agent", "OrionStore-Optimaxer-Updater")
+        .call()
+        .map_err(|e| format!("download failed ({e})"))?;
+    let total = resp
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(rel.size);
+    let mut reader = resp
+        .body_mut()
+        .with_config()
+        .limit(512 * 1024 * 1024)
+        .reader();
     let part = zip.with_extension("part");
     let mut out = fs::File::create(&part).map_err(|e| e.to_string())?;
     let (mut buf, mut done, mut last) = (vec![0u8; 64 * 1024], 0u64, Instant::now());
@@ -146,20 +191,49 @@ pub fn download(rel: &Release, progress: &dyn Fn(u64, u64), cancel: &dyn Fn() ->
 
 /// Refuses the file unless its SHA-256 equals the digest GitHub published for the asset.
 pub fn verify(zip: &Path, digest: &str) -> Result<(), String> {
-    let want = digest_hex(digest).ok_or("this release has no published checksum, so it was not installed")?;
-    let out = Command::new("certutil.exe").args(["-hashfile"]).arg(zip).arg("SHA256").creation_flags(CREATE_NO_WINDOW).output().map_err(|e| format!("could not run certutil ({e})"))?;
-    if !out.status.success() { return Err(format!("certutil could not verify the download: {}", String::from_utf8_lossy(&out.stderr).trim())); }
-    let got = parse_certutil(&String::from_utf8_lossy(&out.stdout)).ok_or("could not read the checksum of the download")?;
-    if got == want { Ok(()) } else { Err(format!("the download does not match its published checksum (expected {want}, got {got})")) }
+    let want = digest_hex(digest)
+        .ok_or("this release has no published checksum, so it was not installed")?;
+    let out = Command::new("certutil.exe")
+        .args(["-hashfile"])
+        .arg(zip)
+        .arg("SHA256")
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("could not run certutil ({e})"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "certutil could not verify the download: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let got = parse_certutil(&String::from_utf8_lossy(&out.stdout))
+        .ok_or("could not read the checksum of the download")?;
+    if got == want {
+        Ok(())
+    } else {
+        Err(format!(
+            "the download does not match its published checksum (expected {want}, got {got})"
+        ))
+    }
 }
 
 /// Unpacks the zip with the `tar` that ships with Windows 10 and later, and returns the new exe.
 pub fn extract(zip: &Path, dest: &Path) -> Result<PathBuf, String> {
     let _ = fs::remove_dir_all(dest);
     fs::create_dir_all(dest).map_err(|e| e.to_string())?;
-    let out = Command::new("tar.exe").arg("-xf").arg(zip).arg("-C").arg(dest).creation_flags(CREATE_NO_WINDOW).output().map_err(|e| format!("could not run tar ({e})"))?;
+    let out = Command::new("tar.exe")
+        .arg("-xf")
+        .arg(zip)
+        .arg("-C")
+        .arg(dest)
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("could not run tar ({e})"))?;
     if !out.status.success() {
-        return Err(format!("could not unpack the update: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        return Err(format!(
+            "could not unpack the update: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
     }
     let exe = dest.join(EXE_NAME);
     looks_like_exe(&exe)?;
@@ -172,7 +246,11 @@ pub fn looks_like_exe(p: &Path) -> Result<(), String> {
     let mut head = [0u8; 2];
     f.read_exact(&mut head).map_err(|e| e.to_string())?;
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
-    if &head == b"MZ" && len > 1_000_000 { Ok(()) } else { Err("the update file is not a valid program".into()) }
+    if &head == b"MZ" && len > 1_000_000 {
+        Ok(())
+    } else {
+        Err("the update file is not a valid program".into())
+    }
 }
 
 /// Puts `new` in place of `current`. The running exe is renamed to `<current>.old` first; if copying fails it is
@@ -180,8 +258,13 @@ pub fn looks_like_exe(p: &Path) -> Result<(), String> {
 pub fn swap_exe(current: &Path, new: &Path) -> Result<PathBuf, String> {
     // Finish the copy beside the destination before moving the working program out of the way.
     let staged = current.with_extension(format!("exe.new-{}", std::process::id()));
-    let mut source = fs::File::open(new).map_err(|e| format!("could not write the new version: {e}"))?;
-    let mut dest = fs::OpenOptions::new().write(true).create_new(true).open(&staged).map_err(|e| format!("could not stage the new version: {e}"))?;
+    let mut source =
+        fs::File::open(new).map_err(|e| format!("could not write the new version: {e}"))?;
+    let mut dest = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&staged)
+        .map_err(|e| format!("could not stage the new version: {e}"))?;
     let copied = std::io::copy(&mut source, &mut dest).and_then(|_| dest.sync_all());
     drop(dest);
     if let Err(e) = copied {
@@ -189,20 +272,29 @@ pub fn swap_exe(current: &Path, new: &Path) -> Result<PathBuf, String> {
         return Err(format!("could not write the new version: {e}"));
     }
     let old = current.with_extension("exe.old");
-    if let Err(e) = fs::remove_file(&old) && e.kind() != std::io::ErrorKind::NotFound {
+    if let Err(e) = fs::remove_file(&old)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
         let _ = fs::remove_file(&staged);
         return Err(format!("could not remove the previous update backup: {e}"));
     }
     if let Err(e) = fs::rename(current, &old) {
         let _ = fs::remove_file(&staged);
-        return Err(format!("could not replace the program (is it installed somewhere that needs administrator rights?): {e}"));
+        return Err(format!(
+            "could not replace the program (is it installed somewhere that needs administrator rights?): {e}"
+        ));
     }
     if let Err(e) = fs::rename(&staged, current) {
         let rollback = fs::rename(&old, current);
         let _ = fs::remove_file(&staged);
         return Err(match rollback {
-            Ok(()) => format!("could not write the new version: {e}; the previous program was restored"),
-            Err(r) => format!("could not write the new version: {e}; could not restore the previous program ({r}); recover {}", old.display()),
+            Ok(()) => {
+                format!("could not write the new version: {e}; the previous program was restored")
+            }
+            Err(r) => format!(
+                "could not write the new version: {e}; could not restore the previous program ({r}); recover {}",
+                old.display()
+            ),
         });
     }
     Ok(old)
@@ -218,11 +310,19 @@ pub fn cleanup_old() {
 
 /// Starts the new exe. The caller closes the window afterwards.
 pub fn restart(exe: &Path) -> Result<(), String> {
-    Command::new(exe).spawn().map(|_| ()).map_err(|e| format!("could not start the new version: {e}"))
+    Command::new(exe)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("could not start the new version: {e}"))
 }
 
 /// Download, verify, unpack, then swap the exe at `current`. `progress` gets (done, total) while downloading.
-pub fn install_to(rel: &Release, current: &Path, progress: &dyn Fn(u64, u64), cancel: &dyn Fn() -> bool) -> Result<(), String> {
+pub fn install_to(
+    rel: &Release,
+    current: &Path,
+    progress: &dyn Fn(u64, u64),
+    cancel: &dyn Fn() -> bool,
+) -> Result<(), String> {
     let zip = download(rel, progress, cancel)?;
     verify(&zip, &rel.digest)?;
     let new = extract(&zip, &stage_dir(rel).join("unpacked"))?;
@@ -230,7 +330,11 @@ pub fn install_to(rel: &Release, current: &Path, progress: &dyn Fn(u64, u64), ca
 }
 
 /// Updates the running exe in place and starts the new version.
-pub fn install(rel: &Release, progress: &dyn Fn(u64, u64), cancel: &dyn Fn() -> bool) -> Result<(), String> {
+pub fn install(
+    rel: &Release,
+    progress: &dyn Fn(u64, u64),
+    cancel: &dyn Fn() -> bool,
+) -> Result<(), String> {
     let current = std::env::current_exe().map_err(|e| e.to_string())?;
     install_to(rel, &current, progress, cancel)?;
     restart(&current)
@@ -259,7 +363,10 @@ mod tests {
         assert_eq!(parse_version("2.12"), Some((2, 12, 0)));
         assert_eq!(parse_version("v3.0.1-beta.2"), Some((3, 0, 1)));
         assert_eq!(parse_version("latest"), None);
-        assert!(parse_version("2.10.0").unwrap() > parse_version("2.9.9").unwrap(), "numeric, not text, order");
+        assert!(
+            parse_version("2.10.0").unwrap() > parse_version("2.9.9").unwrap(),
+            "numeric, not text, order"
+        );
         assert!(parse_version("v2.12.0").unwrap() > parse_version("2.11.1").unwrap());
     }
 
@@ -306,9 +413,16 @@ mod tests {
     #[test]
     fn certutil_output_is_parsed_with_or_without_spaces() {
         let hash = "0123456789abcdef".repeat(4);
-        let new = format!("SHA256 hash of file C:\\x.zip:\r\n{hash}\r\nCertUtil: -hashfile command completed successfully.\r\n");
+        let new = format!(
+            "SHA256 hash of file C:\\x.zip:\r\n{hash}\r\nCertUtil: -hashfile command completed successfully.\r\n"
+        );
         assert_eq!(parse_certutil(&new), Some(hash.clone()));
-        let spaced: String = hash.as_bytes().chunks(2).map(|c| std::str::from_utf8(c).unwrap()).collect::<Vec<_>>().join(" ");
+        let spaced: String = hash
+            .as_bytes()
+            .chunks(2)
+            .map(|c| std::str::from_utf8(c).unwrap())
+            .collect::<Vec<_>>()
+            .join(" ");
         let old = format!("SHA256 hash of file x:\r\n{spaced}\r\nCertUtil: done\r\n");
         assert_eq!(parse_certutil(&old), Some(hash));
         assert_eq!(parse_certutil("CertUtil: -hashfile command FAILED"), None);
@@ -346,7 +460,11 @@ mod tests {
         fs::write(&cur, b"old version").unwrap();
         let err = swap_exe(&cur, &d.join("missing.exe")).unwrap_err();
         assert!(err.contains("could not write"), "{err}");
-        assert_eq!(fs::read(&cur).unwrap(), b"old version", "the working program must survive a failed update");
+        assert_eq!(
+            fs::read(&cur).unwrap(),
+            b"old version",
+            "the working program must survive a failed update"
+        );
     }
 
     #[test]
@@ -392,14 +510,33 @@ mod tests {
         data[1] = b'Z';
         fs::write(src.join(EXE_NAME), &data).unwrap();
         let zip = d.join("u.zip");
-        let made = Command::new("tar.exe").arg("-a").arg("-cf").arg(&zip).arg("-C").arg(&src).arg(EXE_NAME).creation_flags(CREATE_NO_WINDOW).status();
+        let made = Command::new("tar.exe")
+            .arg("-a")
+            .arg("-cf")
+            .arg(&zip)
+            .arg("-C")
+            .arg(&src)
+            .arg(EXE_NAME)
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
         if !made.map(|s| s.success()).unwrap_or(false) {
             return; // no tar on this machine: nothing to verify here
         }
-        let out = Command::new("certutil.exe").arg("-hashfile").arg(&zip).arg("SHA256").creation_flags(CREATE_NO_WINDOW).output().unwrap();
-        let hash = parse_certutil(&String::from_utf8_lossy(&out.stdout)).expect("certutil prints a hash");
+        let out = Command::new("certutil.exe")
+            .arg("-hashfile")
+            .arg(&zip)
+            .arg("SHA256")
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .unwrap();
+        let hash =
+            parse_certutil(&String::from_utf8_lossy(&out.stdout)).expect("certutil prints a hash");
         assert!(verify(&zip, &format!("sha256:{hash}")).is_ok());
-        assert!(verify(&zip, &format!("sha256:{}", "0".repeat(64))).unwrap_err().contains("does not match"));
+        assert!(
+            verify(&zip, &format!("sha256:{}", "0".repeat(64)))
+                .unwrap_err()
+                .contains("does not match")
+        );
         let exe = extract(&zip, &d.join("out")).unwrap();
         assert_eq!(fs::metadata(exe).unwrap().len(), 1_200_000);
     }
@@ -416,8 +553,15 @@ mod tests {
         fs::write(&current, &stub).unwrap();
         install_to(&rel, &current, &|_, _| {}, &|| false).expect("verified install");
         assert!(looks_like_exe(&current).is_ok());
-        assert_ne!(fs::metadata(&current).unwrap().len(), 1_500_000, "the stub was replaced by the real exe");
-        assert!(d.join("app.exe.old").exists(), "the previous file is kept until the next start");
+        assert_ne!(
+            fs::metadata(&current).unwrap().len(),
+            1_500_000,
+            "the stub was replaced by the real exe"
+        );
+        assert!(
+            d.join("app.exe.old").exists(),
+            "the previous file is kept until the next start"
+        );
     }
 
     #[test]

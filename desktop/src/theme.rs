@@ -85,22 +85,46 @@ pub struct CustomSurfaces {
 impl Default for CustomSurfaces {
     fn default() -> Self {
         Self {
-            dark: ["#0F1015", "#0B0C10", "#171821", "#1F202B", "#2A2B3A", "#2B2C39"].map(str::to_owned),
-            light: ["#F6F5FC", "#EEEDF8", "#FFFFFF", "#F0EFF9", "#E4E3F2", "#DDDCEC"].map(str::to_owned),
+            dark: [
+                "#0F1015", "#0B0C10", "#171821", "#1F202B", "#2A2B3A", "#2B2C39",
+            ]
+            .map(str::to_owned),
+            light: [
+                "#F6F5FC", "#EEEDF8", "#FFFFFF", "#F0EFF9", "#E4E3F2", "#DDDCEC",
+            ]
+            .map(str::to_owned),
         }
     }
 }
 
 impl CustomSurfaces {
-    pub const LABELS: [&'static str; 6] = ["Background", "Navigation", "Panel", "Control", "Hover", "Border"];
+    pub const LABELS: [&'static str; 6] = [
+        "Background",
+        "Navigation",
+        "Panel",
+        "Control",
+        "Hover",
+        "Border",
+    ];
 
     pub fn active_mut(&mut self, dark: bool) -> &mut [String; 6] {
-        if dark { &mut self.dark } else { &mut self.light }
+        if dark {
+            &mut self.dark
+        } else {
+            &mut self.light
+        }
     }
 
     fn colors(&self, dark: bool) -> [Color32; 6] {
         let fallback = if dark { Tokens::DARK } else { Tokens::LIGHT };
-        let defaults = [fallback.canvas, fallback.rail, fallback.surface1, fallback.surface2, fallback.surface3, fallback.hairline];
+        let defaults = [
+            fallback.canvas,
+            fallback.rail,
+            fallback.surface1,
+            fallback.surface2,
+            fallback.surface3,
+            fallback.hairline,
+        ];
         let values = if dark { &self.dark } else { &self.light };
         std::array::from_fn(|i| parse_hex_color(&values[i]).unwrap_or(defaults[i]))
     }
@@ -132,9 +156,16 @@ impl CustomSurfaces {
                     ("control", custom.surface2),
                     ("hover", custom.surface3),
                 ] {
-                    let (text, muted, subtle) = (contrast_ratio(custom.text, surface), contrast_ratio(custom.muted, surface), contrast_ratio(custom.subtle, surface));
+                    let (text, muted, subtle) = (
+                        contrast_ratio(custom.text, surface),
+                        contrast_ratio(custom.muted, surface),
+                        contrast_ratio(custom.subtle, surface),
+                    );
                     if text < 7.0 || muted < 4.5 || subtle < 4.5 {
-                        return Err(format!("{} {name} color fails contrast checks for {style_name} style (text {text:.2}, muted {muted:.2}, subtle {subtle:.2}).", if dark { "Dark" } else { "Light" }));
+                        return Err(format!(
+                            "{} {name} color fails contrast checks for {style_name} style (text {text:.2}, muted {muted:.2}, subtle {subtle:.2}).",
+                            if dark { "Dark" } else { "Light" }
+                        ));
                     }
                 }
             }
@@ -173,10 +204,23 @@ pub enum Palette {
 
 impl Palette {
     pub const ALL: [Palette; 17] = [
-        Palette::System, Palette::Midnight, Palette::Oled, Palette::Graphite, Palette::Nebula,
-        Palette::Nord, Palette::Arctic, Palette::FluentDark, Palette::FluentLight,
-        Palette::MaterialDark, Palette::MaterialLight, Palette::Emerald, Palette::Crimson,
-        Palette::Solarized, Palette::Porcelain, Palette::Cyberpunk, Palette::Custom,
+        Palette::System,
+        Palette::Midnight,
+        Palette::Oled,
+        Palette::Graphite,
+        Palette::Nebula,
+        Palette::Nord,
+        Palette::Arctic,
+        Palette::FluentDark,
+        Palette::FluentLight,
+        Palette::MaterialDark,
+        Palette::MaterialLight,
+        Palette::Emerald,
+        Palette::Crimson,
+        Palette::Solarized,
+        Palette::Porcelain,
+        Palette::Cyberpunk,
+        Palette::Custom,
     ];
 
     pub fn label(self) -> &'static str {
@@ -447,14 +491,46 @@ impl Tokens {
         recolor(self, colors.brand)
     }
 
-    fn with_custom_surfaces(mut self, palette: Palette, surfaces: &CustomSurfaces, dark: bool) -> Self {
+    fn with_custom_surfaces(
+        mut self,
+        palette: Palette,
+        surfaces: &CustomSurfaces,
+        dark: bool,
+    ) -> Self {
         if palette == Palette::Custom {
-            [self.canvas, self.rail, self.surface1, self.surface2, self.surface3, self.hairline] = surfaces.colors(dark);
-            let backgrounds = [self.canvas, self.rail, self.surface1, self.surface2, self.surface3];
+            [
+                self.canvas,
+                self.rail,
+                self.surface1,
+                self.surface2,
+                self.surface3,
+                self.hairline,
+            ] = surfaces.colors(dark);
+            let backgrounds = [
+                self.canvas,
+                self.rail,
+                self.surface1,
+                self.surface2,
+                self.surface3,
+            ];
             self.text = readable_color(self.text, &backgrounds, dark, 7.0);
             self.muted = readable_accent(self.muted, &backgrounds, dark);
-            self.subtle = readable_accent(self.subtle, &[self.canvas, self.rail, self.surface1, self.surface2, self.surface3], dark);
-            self.brand_text = readable_accent(self.brand, &[self.canvas, self.rail, self.surface1, self.surface2], dark);
+            self.subtle = readable_accent(
+                self.subtle,
+                &[
+                    self.canvas,
+                    self.rail,
+                    self.surface1,
+                    self.surface2,
+                    self.surface3,
+                ],
+                dark,
+            );
+            self.brand_text = readable_accent(
+                self.brand,
+                &[self.canvas, self.rail, self.surface1, self.surface2],
+                dark,
+            );
         }
         self
     }
@@ -467,7 +543,11 @@ impl Tokens {
     /// The colour hover and pressed states move the primary fill toward: away from the text colour, so the text
     /// keeps its contrast in every state.
     pub fn state_target(&self) -> Color32 {
-        if luminance(self.on_action) > 0.5 { Color32::BLACK } else { Color32::WHITE }
+        if luminance(self.on_action) > 0.5 {
+            Color32::BLACK
+        } else {
+            Color32::WHITE
+        }
     }
 
     /// Focus ring and selection indicator: the accent adjusted to read against the surfaces.
@@ -478,13 +558,22 @@ impl Tokens {
     /// Corner radius of buttons and navigation items.
     pub fn ctl_radius(&self) -> u8 {
         self.custom_radius.unwrap_or({
-            if self.pill { 17 } else if self.fluent { 4 } else { R_MD }
+            if self.pill {
+                17
+            } else if self.fluent {
+                4
+            } else {
+                R_MD
+            }
         })
     }
 
     /// Corner radius of cards and tiles.
     pub fn card_radius(&self) -> u8 {
-        self.custom_radius.map_or_else(|| if self.fluent { 8 } else { R_LG }, |radius| radius.saturating_add(4).min(20))
+        self.custom_radius.map_or_else(
+            || if self.fluent { 8 } else { R_LG },
+            |radius| radius.saturating_add(4).min(20),
+        )
     }
 
     pub fn with_custom_radius(mut self, radius: Option<u8>) -> Self {
@@ -496,9 +585,29 @@ impl Tokens {
     /// are adjusted until they meet the contrast the tests demand.
     pub fn fluent(dark: bool, accent: Color32) -> Tokens {
         let (canvas, rail, surface1, surface2, surface3, hairline, text, muted, subtle) = if dark {
-            (c(0x27, 0x27, 0x27), c(0x20, 0x20, 0x20), c(0x2C, 0x2C, 0x2C), c(0x32, 0x32, 0x32), c(0x3D, 0x3D, 0x3D), c(0x45, 0x45, 0x45), c(0xFF, 0xFF, 0xFF), c(0xC8, 0xC8, 0xC8), c(0x9D, 0x9D, 0x9D))
+            (
+                c(0x27, 0x27, 0x27),
+                c(0x20, 0x20, 0x20),
+                c(0x2C, 0x2C, 0x2C),
+                c(0x32, 0x32, 0x32),
+                c(0x3D, 0x3D, 0x3D),
+                c(0x45, 0x45, 0x45),
+                c(0xFF, 0xFF, 0xFF),
+                c(0xC8, 0xC8, 0xC8),
+                c(0x9D, 0x9D, 0x9D),
+            )
         } else {
-            (c(0xF9, 0xF9, 0xF9), c(0xF3, 0xF3, 0xF3), c(0xFF, 0xFF, 0xFF), c(0xFB, 0xFB, 0xFB), c(0xEA, 0xEA, 0xEA), c(0xE0, 0xE0, 0xE0), c(0x1A, 0x1A, 0x1A), c(0x56, 0x56, 0x56), c(0x68, 0x68, 0x68))
+            (
+                c(0xF9, 0xF9, 0xF9),
+                c(0xF3, 0xF3, 0xF3),
+                c(0xFF, 0xFF, 0xFF),
+                c(0xFB, 0xFB, 0xFB),
+                c(0xEA, 0xEA, 0xEA),
+                c(0xE0, 0xE0, 0xE0),
+                c(0x1A, 0x1A, 0x1A),
+                c(0x56, 0x56, 0x56),
+                c(0x68, 0x68, 0x68),
+            )
         };
         let brand_text = readable_accent(accent, &[canvas, rail, surface1, surface2], dark);
         let (action, on_action) = action_colors(accent);
@@ -516,9 +625,21 @@ impl Tokens {
             subtle,
             brand: action,
             brand_text,
-            good: if dark { c(0x6C, 0xCB, 0x5F) } else { c(0x0F, 0x6B, 0x0F) },
-            warn: if dark { c(0xFC, 0xE1, 0x00) } else { c(0x8F, 0x52, 0x00) },
-            bad: if dark { c(0xFF, 0x99, 0xA4) } else { c(0xB4, 0x23, 0x1B) },
+            good: if dark {
+                c(0x6C, 0xCB, 0x5F)
+            } else {
+                c(0x0F, 0x6B, 0x0F)
+            },
+            warn: if dark {
+                c(0xFC, 0xE1, 0x00)
+            } else {
+                c(0x8F, 0x52, 0x00)
+            },
+            bad: if dark {
+                c(0xFF, 0x99, 0xA4)
+            } else {
+                c(0xB4, 0x23, 0x1B)
+            },
             action,
             on_action,
             pill: false,
@@ -535,7 +656,11 @@ impl Tokens {
             Tone::Warn => self.warn,
             Tone::Bad => self.bad,
         };
-        let base = if matches!(tone, Tone::Neutral) { self.surface3 } else { mix(self.surface1, fg, 0.16) };
+        let base = if matches!(tone, Tone::Neutral) {
+            self.surface3
+        } else {
+            mix(self.surface1, fg, 0.16)
+        };
         // the tint moves the background toward the text colour, so lift the text until it reads on the tint
         (base, readable_accent(fg, &[base], self.dark))
     }
@@ -545,7 +670,11 @@ fn recolor(mut t: Tokens, brand: Color32) -> Tokens {
     let surfaces = [t.canvas, t.rail, t.surface1, t.surface2, t.surface3];
     t.text = readable_color(t.text, &surfaces, t.dark, 7.0);
     t.muted = readable_accent(t.muted, &surfaces, t.dark);
-    t.subtle = readable_accent(t.subtle, &[t.canvas, t.rail, t.surface1, t.surface2], t.dark);
+    t.subtle = readable_accent(
+        t.subtle,
+        &[t.canvas, t.rail, t.surface1, t.surface2],
+        t.dark,
+    );
     t.brand = brand;
     t.brand_text = readable_accent(brand, &[t.canvas, t.rail, t.surface1, t.surface2], t.dark);
     (t.action, t.on_action) = action_colors(brand);
@@ -571,99 +700,217 @@ const fn palette_colors(
     hairline: Color32,
     brand: Color32,
 ) -> PaletteColors {
-    PaletteColors { canvas, rail, surface1, surface2, surface3, hairline, brand }
+    PaletteColors {
+        canvas,
+        rail,
+        surface1,
+        surface2,
+        surface3,
+        hairline,
+        brand,
+    }
 }
 
 fn palette_color_set(palette: Palette, dark: bool) -> PaletteColors {
     use Palette as P;
     match (palette, dark) {
         (P::Midnight, true) => palette_colors(
-            c(0x10, 0x17, 0x27), c(0x0B, 0x10, 0x1C), c(0x18, 0x22, 0x36), c(0x20, 0x2D, 0x44),
-            c(0x2B, 0x3A, 0x54), c(0x35, 0x46, 0x60), c(0xA5, 0xB4, 0xFC),
+            c(0x10, 0x17, 0x27),
+            c(0x0B, 0x10, 0x1C),
+            c(0x18, 0x22, 0x36),
+            c(0x20, 0x2D, 0x44),
+            c(0x2B, 0x3A, 0x54),
+            c(0x35, 0x46, 0x60),
+            c(0xA5, 0xB4, 0xFC),
         ),
         (P::Midnight, false) => palette_colors(
-            c(0xF4, 0xF6, 0xFC), c(0xE9, 0xED, 0xF7), c(0xFF, 0xFF, 0xFF), c(0xF0, 0xF2, 0xFA),
-            c(0xE3, 0xE7, 0xF2), c(0xD1, 0xD8, 0xE8), c(0x4F, 0x46, 0xE5),
+            c(0xF4, 0xF6, 0xFC),
+            c(0xE9, 0xED, 0xF7),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xF0, 0xF2, 0xFA),
+            c(0xE3, 0xE7, 0xF2),
+            c(0xD1, 0xD8, 0xE8),
+            c(0x4F, 0x46, 0xE5),
         ),
         (P::Oled, true) => palette_colors(
-            c(0, 0, 0), c(0, 0, 0), c(0x08, 0x08, 0x08), c(0x12, 0x12, 0x12), c(0x1E, 0x1E, 0x1E),
-            c(0x32, 0x32, 0x32), c(0xBB, 0xA5, 0xFF),
+            c(0, 0, 0),
+            c(0, 0, 0),
+            c(0x08, 0x08, 0x08),
+            c(0x12, 0x12, 0x12),
+            c(0x1E, 0x1E, 0x1E),
+            c(0x32, 0x32, 0x32),
+            c(0xBB, 0xA5, 0xFF),
         ),
         (P::Oled, false) => palette_colors(
-            c(0xFA, 0xFA, 0xFA), c(0xF1, 0xF1, 0xF1), c(0xFF, 0xFF, 0xFF), c(0xF2, 0xF2, 0xF2),
-            c(0xE6, 0xE6, 0xE6), c(0xD3, 0xD3, 0xD3), c(0x5B, 0x45, 0xB5),
+            c(0xFA, 0xFA, 0xFA),
+            c(0xF1, 0xF1, 0xF1),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xF2, 0xF2, 0xF2),
+            c(0xE6, 0xE6, 0xE6),
+            c(0xD3, 0xD3, 0xD3),
+            c(0x5B, 0x45, 0xB5),
         ),
         (P::Graphite, true) => palette_colors(
-            c(0x18, 0x19, 0x1B), c(0x12, 0x13, 0x15), c(0x20, 0x21, 0x24), c(0x2A, 0x2C, 0x30),
-            c(0x36, 0x38, 0x3D), c(0x48, 0x4A, 0x50), c(0xA6, 0xC8, 0xFF),
+            c(0x18, 0x19, 0x1B),
+            c(0x12, 0x13, 0x15),
+            c(0x20, 0x21, 0x24),
+            c(0x2A, 0x2C, 0x30),
+            c(0x36, 0x38, 0x3D),
+            c(0x48, 0x4A, 0x50),
+            c(0xA6, 0xC8, 0xFF),
         ),
         (P::Graphite, false) => palette_colors(
-            c(0xF2, 0xF3, 0xF4), c(0xE8, 0xE9, 0xEA), c(0xFF, 0xFF, 0xFF), c(0xF1, 0xF2, 0xF3),
-            c(0xE3, 0xE5, 0xE7), c(0xD1, 0xD4, 0xD8), c(0x35, 0x5D, 0x8A),
+            c(0xF2, 0xF3, 0xF4),
+            c(0xE8, 0xE9, 0xEA),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xF1, 0xF2, 0xF3),
+            c(0xE3, 0xE5, 0xE7),
+            c(0xD1, 0xD4, 0xD8),
+            c(0x35, 0x5D, 0x8A),
         ),
         (P::Nebula, true) => palette_colors(
-            c(0x17, 0x15, 0x24), c(0x10, 0x0F, 0x1A), c(0x20, 0x1D, 0x30), c(0x2C, 0x28, 0x3D),
-            c(0x3A, 0x34, 0x4F), c(0x4B, 0x43, 0x60), c(0xC4, 0xA7, 0xFF),
+            c(0x17, 0x15, 0x24),
+            c(0x10, 0x0F, 0x1A),
+            c(0x20, 0x1D, 0x30),
+            c(0x2C, 0x28, 0x3D),
+            c(0x3A, 0x34, 0x4F),
+            c(0x4B, 0x43, 0x60),
+            c(0xC4, 0xA7, 0xFF),
         ),
         (P::Nebula, false) => palette_colors(
-            c(0xF6, 0xF3, 0xFB), c(0xEC, 0xE8, 0xF4), c(0xFF, 0xFF, 0xFF), c(0xF3, 0xEF, 0xF8),
-            c(0xE8, 0xE2, 0xF1), c(0xD7, 0xCF, 0xE3), c(0x68, 0x4A, 0x9C),
+            c(0xF6, 0xF3, 0xFB),
+            c(0xEC, 0xE8, 0xF4),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xF3, 0xEF, 0xF8),
+            c(0xE8, 0xE2, 0xF1),
+            c(0xD7, 0xCF, 0xE3),
+            c(0x68, 0x4A, 0x9C),
         ),
         (P::Nord, true) => palette_colors(
-            c(0x2E, 0x34, 0x40), c(0x27, 0x2D, 0x38), c(0x35, 0x3C, 0x4A), c(0x3E, 0x46, 0x55),
-            c(0x42, 0x4B, 0x5B), c(0x5A, 0x66, 0x78), c(0x88, 0xC0, 0xD0),
+            c(0x2E, 0x34, 0x40),
+            c(0x27, 0x2D, 0x38),
+            c(0x35, 0x3C, 0x4A),
+            c(0x3E, 0x46, 0x55),
+            c(0x42, 0x4B, 0x5B),
+            c(0x5A, 0x66, 0x78),
+            c(0x88, 0xC0, 0xD0),
         ),
         (P::Nord, false) => palette_colors(
-            c(0xEC, 0xEF, 0xF4), c(0xE5, 0xE9, 0xF0), c(0xFF, 0xFF, 0xFF), c(0xF3, 0xF5, 0xF8),
-            c(0xE5, 0xE9, 0xF0), c(0xD1, 0xD7, 0xE2), c(0x4C, 0x73, 0x8A),
+            c(0xEC, 0xEF, 0xF4),
+            c(0xE5, 0xE9, 0xF0),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xF3, 0xF5, 0xF8),
+            c(0xE5, 0xE9, 0xF0),
+            c(0xD1, 0xD7, 0xE2),
+            c(0x4C, 0x73, 0x8A),
         ),
         (P::Arctic, true) => palette_colors(
-            c(0x12, 0x1D, 0x28), c(0x0C, 0x15, 0x1E), c(0x1A, 0x28, 0x36), c(0x22, 0x34, 0x44),
-            c(0x30, 0x45, 0x57), c(0x40, 0x57, 0x69), c(0x8F, 0xC9, 0xE8),
+            c(0x12, 0x1D, 0x28),
+            c(0x0C, 0x15, 0x1E),
+            c(0x1A, 0x28, 0x36),
+            c(0x22, 0x34, 0x44),
+            c(0x30, 0x45, 0x57),
+            c(0x40, 0x57, 0x69),
+            c(0x8F, 0xC9, 0xE8),
         ),
         (P::Arctic, false) => palette_colors(
-            c(0xF1, 0xF7, 0xFA), c(0xE5, 0xEF, 0xF4), c(0xFF, 0xFF, 0xFF), c(0xEF, 0xF5, 0xF8),
-            c(0xDE, 0xEA, 0xF0), c(0xC8, 0xD8, 0xE2), c(0x2D, 0x68, 0x85),
+            c(0xF1, 0xF7, 0xFA),
+            c(0xE5, 0xEF, 0xF4),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xEF, 0xF5, 0xF8),
+            c(0xDE, 0xEA, 0xF0),
+            c(0xC8, 0xD8, 0xE2),
+            c(0x2D, 0x68, 0x85),
         ),
         (P::Emerald, true) => palette_colors(
-            c(0x12, 0x1D, 0x18), c(0x0B, 0x15, 0x10), c(0x1A, 0x29, 0x21), c(0x23, 0x36, 0x2B),
-            c(0x31, 0x48, 0x39), c(0x42, 0x5D, 0x4A), c(0x77, 0xD6, 0xA3),
+            c(0x12, 0x1D, 0x18),
+            c(0x0B, 0x15, 0x10),
+            c(0x1A, 0x29, 0x21),
+            c(0x23, 0x36, 0x2B),
+            c(0x31, 0x48, 0x39),
+            c(0x42, 0x5D, 0x4A),
+            c(0x77, 0xD6, 0xA3),
         ),
         (P::Emerald, false) => palette_colors(
-            c(0xF1, 0xF7, 0xF3), c(0xE5, 0xEF, 0xE8), c(0xFF, 0xFF, 0xFF), c(0xEF, 0xF5, 0xF1),
-            c(0xDE, 0xEB, 0xE2), c(0xC7, 0xD9, 0xCD), c(0x24, 0x6A, 0x45),
+            c(0xF1, 0xF7, 0xF3),
+            c(0xE5, 0xEF, 0xE8),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xEF, 0xF5, 0xF1),
+            c(0xDE, 0xEB, 0xE2),
+            c(0xC7, 0xD9, 0xCD),
+            c(0x24, 0x6A, 0x45),
         ),
         (P::Crimson, true) => palette_colors(
-            c(0x20, 0x15, 0x18), c(0x17, 0x0D, 0x10), c(0x2B, 0x1C, 0x20), c(0x3A, 0x24, 0x29),
-            c(0x4A, 0x2D, 0x33), c(0x5E, 0x3A, 0x41), c(0xF0, 0x9A, 0xA4),
+            c(0x20, 0x15, 0x18),
+            c(0x17, 0x0D, 0x10),
+            c(0x2B, 0x1C, 0x20),
+            c(0x3A, 0x24, 0x29),
+            c(0x4A, 0x2D, 0x33),
+            c(0x5E, 0x3A, 0x41),
+            c(0xF0, 0x9A, 0xA4),
         ),
         (P::Crimson, false) => palette_colors(
-            c(0xFA, 0xF2, 0xF3), c(0xF1, 0xE6, 0xE8), c(0xFF, 0xFF, 0xFF), c(0xF7, 0xEC, 0xED),
-            c(0xEC, 0xDD, 0xDF), c(0xD9, 0xC7, 0xCA), c(0x9B, 0x32, 0x42),
+            c(0xFA, 0xF2, 0xF3),
+            c(0xF1, 0xE6, 0xE8),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xF7, 0xEC, 0xED),
+            c(0xEC, 0xDD, 0xDF),
+            c(0xD9, 0xC7, 0xCA),
+            c(0x9B, 0x32, 0x42),
         ),
         (P::Solarized, true) => palette_colors(
-            c(0x00, 0x2B, 0x36), c(0x00, 0x22, 0x2B), c(0x07, 0x36, 0x42), c(0x0B, 0x3F, 0x4B),
-            c(0x16, 0x50, 0x5B), c(0x2A, 0x5B, 0x64), c(0x26, 0x8B, 0xD2),
+            c(0x00, 0x2B, 0x36),
+            c(0x00, 0x22, 0x2B),
+            c(0x07, 0x36, 0x42),
+            c(0x0B, 0x3F, 0x4B),
+            c(0x16, 0x50, 0x5B),
+            c(0x2A, 0x5B, 0x64),
+            c(0x26, 0x8B, 0xD2),
         ),
         (P::Solarized, false) => palette_colors(
-            c(0xFD, 0xF6, 0xE3), c(0xF5, 0xEF, 0xDC), c(0xFF, 0xFB, 0xEF), c(0xF5, 0xEF, 0xDC),
-            c(0xEE, 0xE8, 0xD5), c(0xD8, 0xD1, 0xBF), c(0x26, 0x8B, 0xD2),
+            c(0xFD, 0xF6, 0xE3),
+            c(0xF5, 0xEF, 0xDC),
+            c(0xFF, 0xFB, 0xEF),
+            c(0xF5, 0xEF, 0xDC),
+            c(0xEE, 0xE8, 0xD5),
+            c(0xD8, 0xD1, 0xBF),
+            c(0x26, 0x8B, 0xD2),
         ),
         (P::Porcelain, true) => palette_colors(
-            c(0x20, 0x20, 0x20), c(0x17, 0x17, 0x17), c(0x2A, 0x2A, 0x2A), c(0x36, 0x36, 0x36),
-            c(0x44, 0x44, 0x44), c(0x57, 0x57, 0x57), c(0xD8, 0xC6, 0xA4),
+            c(0x20, 0x20, 0x20),
+            c(0x17, 0x17, 0x17),
+            c(0x2A, 0x2A, 0x2A),
+            c(0x36, 0x36, 0x36),
+            c(0x44, 0x44, 0x44),
+            c(0x57, 0x57, 0x57),
+            c(0xD8, 0xC6, 0xA4),
         ),
         (P::Porcelain, false) => palette_colors(
-            c(0xF7, 0xF6, 0xF2), c(0xED, 0xEC, 0xE7), c(0xFF, 0xFF, 0xFC), c(0xF3, 0xF2, 0xED),
-            c(0xE8, 0xE7, 0xE0), c(0xD5, 0xD4, 0xCD), c(0x6D, 0x5D, 0x46),
+            c(0xF7, 0xF6, 0xF2),
+            c(0xED, 0xEC, 0xE7),
+            c(0xFF, 0xFF, 0xFC),
+            c(0xF3, 0xF2, 0xED),
+            c(0xE8, 0xE7, 0xE0),
+            c(0xD5, 0xD4, 0xCD),
+            c(0x6D, 0x5D, 0x46),
         ),
         (P::Cyberpunk, true) => palette_colors(
-            c(0x1C, 0x16, 0x23), c(0x13, 0x0F, 0x19), c(0x25, 0x1C, 0x2D), c(0x32, 0x24, 0x3B),
-            c(0x42, 0x2D, 0x4B), c(0x56, 0x3D, 0x60), c(0xE0, 0x9A, 0xCE),
+            c(0x1C, 0x16, 0x23),
+            c(0x13, 0x0F, 0x19),
+            c(0x25, 0x1C, 0x2D),
+            c(0x32, 0x24, 0x3B),
+            c(0x42, 0x2D, 0x4B),
+            c(0x56, 0x3D, 0x60),
+            c(0xE0, 0x9A, 0xCE),
         ),
         (P::Cyberpunk, false) => palette_colors(
-            c(0xF8, 0xF2, 0xF8), c(0xEF, 0xE7, 0xF0), c(0xFF, 0xFC, 0xFF), c(0xF5, 0xEC, 0xF5),
-            c(0xEA, 0xDE, 0xEB), c(0xD9, 0xC9, 0xDC), c(0x8A, 0x3F, 0x79),
+            c(0xF8, 0xF2, 0xF8),
+            c(0xEF, 0xE7, 0xF0),
+            c(0xFF, 0xFC, 0xFF),
+            c(0xF5, 0xEC, 0xF5),
+            c(0xEA, 0xDE, 0xEB),
+            c(0xD9, 0xC9, 0xDC),
+            c(0x8A, 0x3F, 0x79),
         ),
         _ => unreachable!("palette has no variable color set"),
     }
@@ -671,7 +918,9 @@ fn palette_color_set(palette: Palette, dark: bool) -> PaletteColors {
 
 pub fn parse_hex_color(value: &str) -> Option<Color32> {
     let hex = value.trim().strip_prefix('#')?;
-    if hex.len() != 6 || !hex.is_ascii() { return None; }
+    if hex.len() != 6 || !hex.is_ascii() {
+        return None;
+    }
     let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
     let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
     let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
@@ -701,7 +950,11 @@ pub fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
 pub fn luminance(c: Color32) -> f32 {
     let f = |v: u8| {
         let s = v as f32 / 255.0;
-        if s <= 0.03928 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+        if s <= 0.03928 {
+            s / 12.92
+        } else {
+            ((s + 0.055) / 1.055).powf(2.4)
+        }
     };
     0.2126 * f(c.r()) + 0.7152 * f(c.g()) + 0.0722 * f(c.b())
 }
@@ -719,7 +972,10 @@ pub fn readable_accent(accent: Color32, bgs: &[Color32], dark: bool) -> Color32 
 
 fn readable_color(accent: Color32, bgs: &[Color32], dark: bool, minimum: f32) -> Color32 {
     let toward = if dark { Color32::WHITE } else { Color32::BLACK };
-    (0..=20).map(|i| mix(accent, toward, i as f32 * 0.05)).find(|c| bgs.iter().all(|bg| contrast_ratio(*c, *bg) >= minimum)).unwrap_or(toward)
+    (0..=20)
+        .map(|i| mix(accent, toward, i as f32 * 0.05))
+        .find(|c| bgs.iter().all(|bg| contrast_ratio(*c, *bg) >= minimum))
+        .unwrap_or(toward)
 }
 
 /// Fill and text colour for a button in the accent colour: white or near-black text, whichever reads at 4.5:1, and
@@ -731,7 +987,10 @@ pub fn action_colors(accent: Color32) -> (Color32, Color32) {
     } else if contrast_ratio(ink, accent) >= 4.5 {
         (accent, ink)
     } else {
-        let fill = (1..=20).map(|i| mix(accent, Color32::BLACK, i as f32 * 0.03)).find(|c| contrast_ratio(Color32::WHITE, *c) >= 4.5).unwrap_or(Color32::BLACK);
+        let fill = (1..=20)
+            .map(|i| mix(accent, Color32::BLACK, i as f32 * 0.03))
+            .find(|c| contrast_ratio(Color32::WHITE, *c) >= 4.5)
+            .unwrap_or(Color32::BLACK);
         (fill, Color32::WHITE)
     }
 }
@@ -758,14 +1017,28 @@ fn custom_surfaces_id() -> egui::Id {
 
 /// Tokens for the running theme.
 pub fn tokens(ctx: &egui::Context) -> Tokens {
-    let style = ctx.data(|d| d.get_temp::<Style>(style_id())).unwrap_or_default();
-    let accent = ctx.data(|d| d.get_temp::<Color32>(accent_id())).unwrap_or(DEFAULT_ACCENT);
-    let palette = ctx.data(|d| d.get_temp::<Palette>(palette_id())).unwrap_or_default();
-    let custom_surfaces = ctx.data(|d| d.get_temp::<CustomSurfaces>(custom_surfaces_id())).unwrap_or_default();
-    let radius = ctx.data(|d| d.get_temp::<Option<u8>>(radius_id())).flatten();
+    let style = ctx
+        .data(|d| d.get_temp::<Style>(style_id()))
+        .unwrap_or_default();
+    let accent = ctx
+        .data(|d| d.get_temp::<Color32>(accent_id()))
+        .unwrap_or(DEFAULT_ACCENT);
+    let palette = ctx
+        .data(|d| d.get_temp::<Palette>(palette_id()))
+        .unwrap_or_default();
+    let custom_surfaces = ctx
+        .data(|d| d.get_temp::<CustomSurfaces>(custom_surfaces_id()))
+        .unwrap_or_default();
+    let radius = ctx
+        .data(|d| d.get_temp::<Option<u8>>(radius_id()))
+        .flatten();
     Tokens::of(ctx.global_style().visuals.dark_mode, style, accent)
         .with_palette(palette, accent)
-        .with_custom_surfaces(palette, &custom_surfaces, ctx.global_style().visuals.dark_mode)
+        .with_custom_surfaces(
+            palette,
+            &custom_surfaces,
+            ctx.global_style().visuals.dark_mode,
+        )
         .with_custom_radius(radius)
 }
 
@@ -786,9 +1059,16 @@ pub fn system_dark() -> bool {
 pub fn system_accent() -> Color32 {
     use winreg::enums::HKEY_CURRENT_USER;
     let root = winreg::RegKey::predef(HKEY_CURRENT_USER);
-    let direct = root.open_subkey(r"Software\Microsoft\Windows\DWM").and_then(|k| k.get_value::<u32, _>("AccentColor")).ok().and_then(accent_from_abgr);
+    let direct = root
+        .open_subkey(r"Software\Microsoft\Windows\DWM")
+        .and_then(|k| k.get_value::<u32, _>("AccentColor"))
+        .ok()
+        .and_then(accent_from_abgr);
     let palette = || {
-        let raw = root.open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent").and_then(|k| k.get_raw_value("AccentPalette")).ok()?;
+        let raw = root
+            .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent")
+            .and_then(|k| k.get_raw_value("AccentPalette"))
+            .ok()?;
         accent_from_palette(&raw.bytes)
     };
     direct.or_else(palette).unwrap_or(DEFAULT_ACCENT)
@@ -797,7 +1077,11 @@ pub fn system_accent() -> Color32 {
 /// The registry stores the accent as 0xAABBGGRR. A zero alpha, or a colour that is nearly black or white, means
 /// "not set" and gives `None`.
 pub fn accent_from_abgr(v: u32) -> Option<Color32> {
-    let col = Color32::from_rgb((v & 0xFF) as u8, ((v >> 8) & 0xFF) as u8, ((v >> 16) & 0xFF) as u8);
+    let col = Color32::from_rgb(
+        (v & 0xFF) as u8,
+        ((v >> 8) & 0xFF) as u8,
+        ((v >> 16) & 0xFF) as u8,
+    );
     usable_accent(col, (v >> 24) as u8)
 }
 
@@ -842,7 +1126,11 @@ fn motion_id() -> egui::Id {
 }
 
 pub fn motion(ctx: &egui::Context) -> Motion {
-    Motion { reduce: ctx.data(|d| d.get_temp::<bool>(motion_id())).unwrap_or(false) }
+    Motion {
+        reduce: ctx
+            .data(|d| d.get_temp::<bool>(motion_id()))
+            .unwrap_or(false),
+    }
 }
 
 pub fn ease_out(t: f32) -> f32 {
@@ -851,10 +1139,19 @@ pub fn ease_out(t: f32) -> f32 {
 
 /// True when Windows is set to play no animations (Settings > Accessibility > Visual effects).
 pub fn system_reduces_motion() -> bool {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETCLIENTAREAANIMATION};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SPI_GETCLIENTAREAANIMATION, SystemParametersInfoW,
+    };
     let mut on: i32 = 1;
     // SAFETY: SPI_GETCLIENTAREAANIMATION writes one BOOL through pvParam.
-    let ok = unsafe { SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, (&mut on as *mut i32).cast(), 0) };
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            (&mut on as *mut i32).cast(),
+            0,
+        )
+    };
     ok != 0 && on == 0
 }
 // endregion
@@ -865,7 +1162,9 @@ pub fn install_fonts(ctx: &egui::Context) {
         let path = format!(r"C:\Windows\Fonts\{file}");
         match std::fs::read(path) {
             Ok(bytes) => {
-                fonts.font_data.insert(key.into(), Arc::new(egui::FontData::from_owned(bytes)));
+                fonts
+                    .font_data
+                    .insert(key.into(), Arc::new(egui::FontData::from_owned(bytes)));
                 true
             }
             Err(_) => false,
@@ -874,10 +1173,18 @@ pub fn install_fonts(ctx: &egui::Context) {
     let regular = load("segoe", "segoeui.ttf");
     let semi = load("segoe-semibold", "seguisb.ttf") || load("segoe-semibold", "segoeuib.ttf");
     if regular {
-        fonts.families.entry(FontFamily::Proportional).or_default().insert(0, "segoe".into());
+        fonts
+            .families
+            .entry(FontFamily::Proportional)
+            .or_default()
+            .insert(0, "segoe".into());
     }
     // the semibold family falls back to the regular stack so a missing file never breaks text
-    let mut stack: Vec<String> = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+    let mut stack: Vec<String> = fonts
+        .families
+        .get(&FontFamily::Proportional)
+        .cloned()
+        .unwrap_or_default();
     if semi {
         stack.insert(0, "segoe-semibold".into());
     }
@@ -891,7 +1198,17 @@ pub fn install_fonts(ctx: &egui::Context) {
 /// Builds the whole egui style from the tokens: tonal surfaces, quiet strokes, rounded controls, a visible
 /// focus ring, floating scroll bars and the type scale.
 pub fn apply(ctx: &egui::Context, appearance: Appearance) {
-    let Appearance { dark, reduce_motion, style, palette, accent, density, scale, corner_radius, custom_surfaces } = appearance;
+    let Appearance {
+        dark,
+        reduce_motion,
+        style,
+        palette,
+        accent,
+        density,
+        scale,
+        corner_radius,
+        custom_surfaces,
+    } = appearance;
     let t = Tokens::of(dark, style, accent)
         .with_palette(palette, accent)
         .with_custom_surfaces(palette, &custom_surfaces, dark)
@@ -904,7 +1221,11 @@ pub fn apply(ctx: &egui::Context, appearance: Appearance) {
         d.insert_temp(radius_id(), corner_radius);
         d.insert_temp(custom_surfaces_id(), custom_surfaces);
     });
-    let mut v = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
+    let mut v = if dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
     v.panel_fill = if t.fluent { t.rail } else { t.canvas };
     v.window_fill = t.surface1;
     v.window_stroke = Stroke::new(1.0, t.hairline);
@@ -921,7 +1242,12 @@ pub fn apply(ctx: &egui::Context, appearance: Appearance) {
     v.indent_has_left_vline = false;
     v.selection.bg_fill = mix(t.surface2, t.brand, 0.45);
     v.selection.stroke = Stroke::new(2.0, t.brand);
-    v.window_shadow = egui::Shadow { offset: [0, 10], blur: 32, spread: 0, color: Color32::from_black_alpha(if dark { 140 } else { 40 }) };
+    v.window_shadow = egui::Shadow {
+        offset: [0, 10],
+        blur: 32,
+        spread: 0,
+        color: Color32::from_black_alpha(if dark { 140 } else { 40 }),
+    };
     v.popup_shadow = v.window_shadow;
 
     let r = CornerRadius::same(t.ctl_radius());
@@ -933,7 +1259,11 @@ pub fn apply(ctx: &egui::Context, appearance: Appearance) {
     w.noninteractive.corner_radius = r;
     w.inactive.bg_fill = t.surface2;
     w.inactive.weak_bg_fill = t.surface2;
-    w.inactive.bg_stroke = if t.fluent { Stroke::new(1.0, t.hairline) } else { Stroke::NONE };
+    w.inactive.bg_stroke = if t.fluent {
+        Stroke::new(1.0, t.hairline)
+    } else {
+        Stroke::NONE
+    };
     w.inactive.fg_stroke = Stroke::new(1.0, t.text);
     w.inactive.corner_radius = r;
     w.hovered.bg_fill = t.surface3;
@@ -972,13 +1302,25 @@ pub fn apply(ctx: &egui::Context, appearance: Appearance) {
             }
         }
         s.spacing.scroll = egui::style::ScrollStyle::floating();
-        s.animation_time = Motion { reduce: reduce_motion }.base();
+        s.animation_time = Motion {
+            reduce: reduce_motion,
+        }
+        .base();
         s.text_styles = [
-            (TextStyle::Small, FontId::new(T_CAPTION, FontFamily::Proportional)),
-            (TextStyle::Body, FontId::new(T_BODY, FontFamily::Proportional)),
+            (
+                TextStyle::Small,
+                FontId::new(T_CAPTION, FontFamily::Proportional),
+            ),
+            (
+                TextStyle::Body,
+                FontId::new(T_BODY, FontFamily::Proportional),
+            ),
             (TextStyle::Button, FontId::new(T_BODY, semibold())),
             (TextStyle::Heading, FontId::new(T_TITLE, semibold())),
-            (TextStyle::Monospace, FontId::new(T_SMALL, FontFamily::Monospace)),
+            (
+                TextStyle::Monospace,
+                FontId::new(T_SMALL, FontFamily::Monospace),
+            ),
         ]
         .into();
     });
@@ -1002,7 +1344,12 @@ mod tests {
     ];
 
     fn all() -> Vec<Tokens> {
-        let mut v = vec![Tokens::DARK, Tokens::LIGHT, Tokens::MATERIAL_DARK, Tokens::MATERIAL_LIGHT];
+        let mut v = vec![
+            Tokens::DARK,
+            Tokens::LIGHT,
+            Tokens::MATERIAL_DARK,
+            Tokens::MATERIAL_LIGHT,
+        ];
         for a in ACCENTS {
             v.push(Tokens::fluent(true, a));
             v.push(Tokens::fluent(false, a));
@@ -1095,20 +1442,42 @@ mod tests {
         );
         assert_eq!(tokens(&ctx).ctl_radius(), 3);
         assert_eq!(tokens(&ctx).card_radius(), 7);
-        assert_eq!(ctx.global_style().visuals.widgets.inactive.corner_radius, CornerRadius::same(3));
-        assert_eq!(ctx.global_style().visuals.window_corner_radius, CornerRadius::same(3));
+        assert_eq!(
+            ctx.global_style().visuals.widgets.inactive.corner_radius,
+            CornerRadius::same(3)
+        );
+        assert_eq!(
+            ctx.global_style().visuals.window_corner_radius,
+            CornerRadius::same(3)
+        );
     }
 
     fn surfaces(t: &Tokens) -> [(&'static str, Color32); 5] {
-        [("canvas", t.canvas), ("rail", t.rail), ("surface1", t.surface1), ("surface2", t.surface2), ("surface3", t.surface3)]
+        [
+            ("canvas", t.canvas),
+            ("rail", t.rail),
+            ("surface1", t.surface1),
+            ("surface2", t.surface2),
+            ("surface3", t.surface3),
+        ]
     }
 
     #[test]
     fn body_and_muted_text_meet_wcag_aa_on_every_surface() {
         for t in all() {
             for (name, s) in surfaces(&t) {
-                assert!(contrast_ratio(t.text, s) >= 7.0, "text on {name} (dark={}): {:.2}", t.dark, contrast_ratio(t.text, s));
-                assert!(contrast_ratio(t.muted, s) >= AA, "muted on {name} (dark={}): {:.2}", t.dark, contrast_ratio(t.muted, s));
+                assert!(
+                    contrast_ratio(t.text, s) >= 7.0,
+                    "text on {name} (dark={}): {:.2}",
+                    t.dark,
+                    contrast_ratio(t.text, s)
+                );
+                assert!(
+                    contrast_ratio(t.muted, s) >= AA,
+                    "muted on {name} (dark={}): {:.2}",
+                    t.dark,
+                    contrast_ratio(t.muted, s)
+                );
             }
         }
     }
@@ -1116,8 +1485,18 @@ mod tests {
     #[test]
     fn subtle_text_meets_aa_on_the_surfaces_it_is_used_on() {
         for t in all() {
-            for (name, s) in [("canvas", t.canvas), ("rail", t.rail), ("surface1", t.surface1), ("surface2", t.surface2)] {
-                assert!(contrast_ratio(t.subtle, s) >= AA, "subtle on {name} (dark={}): {:.2}", t.dark, contrast_ratio(t.subtle, s));
+            for (name, s) in [
+                ("canvas", t.canvas),
+                ("rail", t.rail),
+                ("surface1", t.surface1),
+                ("surface2", t.surface2),
+            ] {
+                assert!(
+                    contrast_ratio(t.subtle, s) >= AA,
+                    "subtle on {name} (dark={}): {:.2}",
+                    t.dark,
+                    contrast_ratio(t.subtle, s)
+                );
             }
         }
     }
@@ -1125,12 +1504,32 @@ mod tests {
     #[test]
     fn brand_text_and_tones_are_readable() {
         for t in all() {
-            for (name, s) in [("canvas", t.canvas), ("surface1", t.surface1), ("surface2", t.surface2)] {
-                assert!(contrast_ratio(t.brand_text, s) >= AA, "brand text on {name} (dark={}): {:.2}", t.dark, contrast_ratio(t.brand_text, s));
+            for (name, s) in [
+                ("canvas", t.canvas),
+                ("surface1", t.surface1),
+                ("surface2", t.surface2),
+            ] {
+                assert!(
+                    contrast_ratio(t.brand_text, s) >= AA,
+                    "brand text on {name} (dark={}): {:.2}",
+                    t.dark,
+                    contrast_ratio(t.brand_text, s)
+                );
             }
-            for tone in [Tone::Neutral, Tone::Brand, Tone::Good, Tone::Warn, Tone::Bad] {
+            for tone in [
+                Tone::Neutral,
+                Tone::Brand,
+                Tone::Good,
+                Tone::Warn,
+                Tone::Bad,
+            ] {
                 let (bg, fg) = t.tone(tone);
-                assert!(contrast_ratio(fg, bg) >= AA, "{tone:?} chip (dark={}): {:.2}", t.dark, contrast_ratio(fg, bg));
+                assert!(
+                    contrast_ratio(fg, bg) >= AA,
+                    "{tone:?} chip (dark={}): {:.2}",
+                    t.dark,
+                    contrast_ratio(fg, bg)
+                );
             }
         }
     }
@@ -1139,9 +1538,25 @@ mod tests {
     fn primary_button_text_is_readable_in_every_state() {
         for t in all() {
             let on = t.on_action;
-            assert!(contrast_ratio(on, t.action) >= 4.5, "rest (material={}, dark={}): {:.2}", t.pill, t.dark, contrast_ratio(on, t.action));
-            assert!(contrast_ratio(on, mix(t.action, t.state_target(), t.hover_lift())) >= 4.5, "hover (material={}, dark={})", t.pill, t.dark);
-            assert!(contrast_ratio(on, mix(t.action, t.state_target(), 0.14)) >= 4.5, "pressed (material={}, dark={})", t.pill, t.dark);
+            assert!(
+                contrast_ratio(on, t.action) >= 4.5,
+                "rest (material={}, dark={}): {:.2}",
+                t.pill,
+                t.dark,
+                contrast_ratio(on, t.action)
+            );
+            assert!(
+                contrast_ratio(on, mix(t.action, t.state_target(), t.hover_lift())) >= 4.5,
+                "hover (material={}, dark={})",
+                t.pill,
+                t.dark
+            );
+            assert!(
+                contrast_ratio(on, mix(t.action, t.state_target(), 0.14)) >= 4.5,
+                "pressed (material={}, dark={})",
+                t.pill,
+                t.dark
+            );
         }
     }
 
@@ -1151,7 +1566,12 @@ mod tests {
         for t in all() {
             for (name, s) in [("canvas", t.canvas), ("surface1", t.surface1)] {
                 let ring = t.ring();
-                assert!(contrast_ratio(ring, s) >= 3.0, "focus ring on {name} (dark={}): {:.2}", t.dark, contrast_ratio(ring, s));
+                assert!(
+                    contrast_ratio(ring, s) >= 3.0,
+                    "focus ring on {name} (dark={}): {:.2}",
+                    t.dark,
+                    contrast_ratio(ring, s)
+                );
             }
         }
     }
@@ -1159,19 +1579,39 @@ mod tests {
     #[test]
     fn surfaces_step_in_one_direction() {
         let d = Tokens::DARK;
-        assert!(luminance(d.rail) < luminance(d.canvas) && luminance(d.canvas) < luminance(d.surface1) && luminance(d.surface1) < luminance(d.surface2) && luminance(d.surface2) < luminance(d.surface3));
+        assert!(
+            luminance(d.rail) < luminance(d.canvas)
+                && luminance(d.canvas) < luminance(d.surface1)
+                && luminance(d.surface1) < luminance(d.surface2)
+                && luminance(d.surface2) < luminance(d.surface3)
+        );
         let l = Tokens::LIGHT;
-        assert!(luminance(l.surface1) > luminance(l.canvas) && luminance(l.canvas) > luminance(l.rail) && luminance(l.rail) > luminance(l.surface3));
+        assert!(
+            luminance(l.surface1) > luminance(l.canvas)
+                && luminance(l.canvas) > luminance(l.rail)
+                && luminance(l.rail) > luminance(l.surface3)
+        );
     }
 
     #[test]
     fn the_right_palette_is_chosen() {
-        assert_eq!(Tokens::of(true, Style::Classic, DEFAULT_ACCENT), Tokens::DARK);
-        assert_eq!(Tokens::of(false, Style::Material, DEFAULT_ACCENT), Tokens::MATERIAL_LIGHT);
-        assert!(Tokens::of(true, Style::Material, DEFAULT_ACCENT).pill && !Tokens::of(true, Style::Classic, DEFAULT_ACCENT).pill);
+        assert_eq!(
+            Tokens::of(true, Style::Classic, DEFAULT_ACCENT),
+            Tokens::DARK
+        );
+        assert_eq!(
+            Tokens::of(false, Style::Material, DEFAULT_ACCENT),
+            Tokens::MATERIAL_LIGHT
+        );
+        assert!(
+            Tokens::of(true, Style::Material, DEFAULT_ACCENT).pill
+                && !Tokens::of(true, Style::Classic, DEFAULT_ACCENT).pill
+        );
         assert!(Tokens::MATERIAL_DARK.ctl_radius() > Tokens::DARK.ctl_radius());
         let f = Tokens::of(true, Style::Windows, DEFAULT_ACCENT);
-        assert!(f.fluent && f.ctl_radius() == 4 && f.card_radius() == 8 && f.brand == DEFAULT_ACCENT);
+        assert!(
+            f.fluent && f.ctl_radius() == 4 && f.card_radius() == 8 && f.brand == DEFAULT_ACCENT
+        );
     }
 
     #[test]
@@ -1182,17 +1622,47 @@ mod tests {
                 for style in Style::ALL {
                     let shape = Tokens::of(dark, style, DEFAULT_ACCENT);
                     let t = shape.with_palette(palette, DEFAULT_ACCENT);
-                    assert_eq!(t.fluent, shape.fluent, "{} changed Fluent shape", palette.label());
+                    assert_eq!(
+                        t.fluent,
+                        shape.fluent,
+                        "{} changed Fluent shape",
+                        palette.label()
+                    );
                     assert_eq!(t.pill, shape.pill, "{} changed pill shape", palette.label());
                     for (name, surface) in surfaces(&t) {
-                        assert!(contrast_ratio(t.text, surface) >= 7.0, "{} text on {name}: {:.2}", palette.label(), contrast_ratio(t.text, surface));
-                        assert!(contrast_ratio(t.muted, surface) >= AA, "{} muted on {name}: {:.2}", palette.label(), contrast_ratio(t.muted, surface));
+                        assert!(
+                            contrast_ratio(t.text, surface) >= 7.0,
+                            "{} text on {name}: {:.2}",
+                            palette.label(),
+                            contrast_ratio(t.text, surface)
+                        );
+                        assert!(
+                            contrast_ratio(t.muted, surface) >= AA,
+                            "{} muted on {name}: {:.2}",
+                            palette.label(),
+                            contrast_ratio(t.muted, surface)
+                        );
                     }
                     for surface in [t.canvas, t.surface1, t.surface2] {
-                        assert!(contrast_ratio(t.brand_text, surface) >= AA, "{} brand text: {:.2}", palette.label(), contrast_ratio(t.brand_text, surface));
-                        assert!(contrast_ratio(t.ring(), surface) >= 3.0, "{} focus ring: {:.2}", palette.label(), contrast_ratio(t.ring(), surface));
+                        assert!(
+                            contrast_ratio(t.brand_text, surface) >= AA,
+                            "{} brand text: {:.2}",
+                            palette.label(),
+                            contrast_ratio(t.brand_text, surface)
+                        );
+                        assert!(
+                            contrast_ratio(t.ring(), surface) >= 3.0,
+                            "{} focus ring: {:.2}",
+                            palette.label(),
+                            contrast_ratio(t.ring(), surface)
+                        );
                     }
-                    assert!(contrast_ratio(t.on_action, t.action) >= AA, "{} action text: {:.2}", palette.label(), contrast_ratio(t.on_action, t.action));
+                    assert!(
+                        contrast_ratio(t.on_action, t.action) >= AA,
+                        "{} action text: {:.2}",
+                        palette.label(),
+                        contrast_ratio(t.on_action, t.action)
+                    );
                 }
             }
         }
@@ -1203,14 +1673,33 @@ mod tests {
         for palette in Palette::ALL {
             for requested_dark in [true, false] {
                 let dark = palette.forced_dark().unwrap_or(requested_dark);
-                let t = Tokens::of(dark, Style::Classic, DEFAULT_ACCENT).with_palette(palette, DEFAULT_ACCENT);
-                let (rail, canvas, s1, s2, s3) = (luminance(t.rail), luminance(t.canvas), luminance(t.surface1), luminance(t.surface2), luminance(t.surface3));
+                let t = Tokens::of(dark, Style::Classic, DEFAULT_ACCENT)
+                    .with_palette(palette, DEFAULT_ACCENT);
+                let (rail, canvas, s1, s2, s3) = (
+                    luminance(t.rail),
+                    luminance(t.canvas),
+                    luminance(t.surface1),
+                    luminance(t.surface2),
+                    luminance(t.surface3),
+                );
                 if palette == Palette::MaterialLight {
-                    assert!(rail < s1 && s1 < canvas && s1 > s2 && s2 > s3, "{} tonal containers", palette.label());
+                    assert!(
+                        rail < s1 && s1 < canvas && s1 > s2 && s2 > s3,
+                        "{} tonal containers",
+                        palette.label()
+                    );
                 } else if dark {
-                    assert!(rail <= canvas && canvas < s1 && s1 < s2 && s2 < s3, "{} dark surfaces", palette.label());
+                    assert!(
+                        rail <= canvas && canvas < s1 && s1 < s2 && s2 < s3,
+                        "{} dark surfaces",
+                        palette.label()
+                    );
                 } else {
-                    assert!(rail < canvas && canvas < s1 && s1 > s2 && s2 > s3, "{} light surfaces", palette.label());
+                    assert!(
+                        rail < canvas && canvas < s1 && s1 > s2 && s2 > s3,
+                        "{} light surfaces",
+                        palette.label()
+                    );
                 }
             }
         }
@@ -1239,12 +1728,19 @@ mod tests {
     fn windows_accent_is_read_from_the_registry_layout() {
         // 0xAABBGGRR: the stock blue #0078D4 is stored as 0xFFD47800
         assert_eq!(accent_from_abgr(0xFFD4_7800), Some(DEFAULT_ACCENT));
-        assert_eq!(accent_from_abgr(0xFF00_00FF), Some(Color32::from_rgb(0xFF, 0, 0)));
+        assert_eq!(
+            accent_from_abgr(0xFF00_00FF),
+            Some(Color32::from_rgb(0xFF, 0, 0))
+        );
     }
 
     #[test]
     fn an_unset_or_extreme_accent_is_ignored() {
-        assert_eq!(accent_from_abgr(0), None, "0 is what a PC with no accent stores");
+        assert_eq!(
+            accent_from_abgr(0),
+            None,
+            "0 is what a PC with no accent stores"
+        );
         assert_eq!(accent_from_abgr(0xFF00_0000), None, "black");
         assert_eq!(accent_from_abgr(0xFFFF_FFFF), None, "white");
         assert_eq!(accent_from_abgr(0x00D4_7800), None, "alpha 0");
@@ -1261,16 +1757,27 @@ mod tests {
             for dark in [true, false] {
                 let t = Tokens::fluent(dark, a);
                 for bg in [t.canvas, t.surface1, t.surface2] {
-                    assert!(contrast_ratio(t.brand_text, bg) >= 4.5, "accent {a:?} dark={dark}: {:.2}", contrast_ratio(t.brand_text, bg));
+                    assert!(
+                        contrast_ratio(t.brand_text, bg) >= 4.5,
+                        "accent {a:?} dark={dark}: {:.2}",
+                        contrast_ratio(t.brand_text, bg)
+                    );
                 }
-                assert!(contrast_ratio(t.on_action, t.action) >= 4.5, "button text on accent {a:?}: {:.2}", contrast_ratio(t.on_action, t.action));
+                assert!(
+                    contrast_ratio(t.on_action, t.action) >= 4.5,
+                    "button text on accent {a:?}: {:.2}",
+                    contrast_ratio(t.on_action, t.action)
+                );
             }
         }
     }
 
     #[test]
     fn mix_and_contrast_math() {
-        assert_eq!(mix(Color32::BLACK, Color32::WHITE, 0.5), Color32::from_rgb(128, 128, 128));
+        assert_eq!(
+            mix(Color32::BLACK, Color32::WHITE, 0.5),
+            Color32::from_rgb(128, 128, 128)
+        );
         assert!((contrast_ratio(Color32::BLACK, Color32::WHITE) - 21.0).abs() < 0.01);
         assert_eq!(ease_out(0.0), 0.0);
         assert_eq!(ease_out(1.0), 1.0);

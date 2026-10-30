@@ -33,8 +33,7 @@ pub struct SoftwareUi {
 impl SoftwareUi {
     pub fn new() -> Self {
         let screenshot_mode = std::env::var_os("ORION_SHOTS").is_some();
-        let load_icons_in_screenshot = std::env::var("ORION_SHOTS_LOAD_ICONS")
-            .is_ok_and(|value| value.eq_ignore_ascii_case("true"));
+        let load_icons_in_screenshot = crate::shots::load_icons_in_screenshot();
         let (packages, catalog_error) = match winget::catalog() {
             Ok(packages) => (packages, None),
             Err(error) => (Vec::new(), Some(error)),

@@ -282,9 +282,11 @@ mod tests {
         assert!(Profile::new("Daily", ["../state".to_owned()]).is_err());
         let unsupported = br#"{"format_version":2,"name":"Future","tweak_ids":["one"]}"#;
         let future: Profile = serde_json::from_slice(unsupported).unwrap();
-        assert!(validate(&future)
-            .unwrap_err()
-            .contains("unsupported format version"));
+        assert!(
+            validate(&future)
+                .unwrap_err()
+                .contains("unsupported format version")
+        );
     }
 
     #[test]

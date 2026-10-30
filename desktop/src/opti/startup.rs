@@ -63,9 +63,21 @@ try {
 
 pub fn list(sys: &dyn System) -> Listing {
     let defs = [
-        ("Registry (user)", r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run".to_string(), format!(r"HKCU:\{APR}\Run")),
-        ("Registry (machine)", r"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run".to_string(), format!(r"HKLM:\{APR}\Run")),
-        ("Registry (32-bit)", r"HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run".to_string(), format!(r"HKLM:\{APR}\Run32")),
+        (
+            "Registry (user)",
+            r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run".to_string(),
+            format!(r"HKCU:\{APR}\Run"),
+        ),
+        (
+            "Registry (machine)",
+            r"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run".to_string(),
+            format!(r"HKLM:\{APR}\Run"),
+        ),
+        (
+            "Registry (32-bit)",
+            r"HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run".to_string(),
+            format!(r"HKLM:\{APR}\Run32"),
+        ),
     ];
     let mut out = Vec::new();
     for (scope, path, approved) in defs {
@@ -75,44 +87,111 @@ pub fn list(sys: &dyn System) -> Listing {
                 _ => String::new(),
             };
             // The unnamed default value and empty commands do not launch startup programs.
-            if name.trim().is_empty() || cmd.trim().is_empty() { continue; }
+            if name.trim().is_empty() || cmd.trim().is_empty() {
+                continue;
+            }
             let enabled = enabled_flag(sys, &approved, &name);
-            out.push(Item { name, cmd, scope, approved: approved.clone(), enabled, task_path: None });
+            out.push(Item {
+                name,
+                cmd,
+                scope,
+                approved: approved.clone(),
+                enabled,
+                task_path: None,
+            });
         }
     }
     let folders: [(&str, Option<PathBuf>, String); 2] = [
-        ("Startup folder (user)", std::env::var_os("APPDATA").map(|p| PathBuf::from(p).join(r"Microsoft\Windows\Start Menu\Programs\Startup")), format!(r"HKCU:\{APR}\StartupFolder")),
-        ("Startup folder (machine)", std::env::var_os("ProgramData").map(|p| PathBuf::from(p).join(r"Microsoft\Windows\Start Menu\Programs\StartUp")), format!(r"HKLM:\{APR}\StartupFolder")),
+        (
+            "Startup folder (user)",
+            std::env::var_os("APPDATA")
+                .map(|p| PathBuf::from(p).join(r"Microsoft\Windows\Start Menu\Programs\Startup")),
+            format!(r"HKCU:\{APR}\StartupFolder"),
+        ),
+        (
+            "Startup folder (machine)",
+            std::env::var_os("ProgramData")
+                .map(|p| PathBuf::from(p).join(r"Microsoft\Windows\Start Menu\Programs\StartUp")),
+            format!(r"HKLM:\{APR}\StartupFolder"),
+        ),
     ];
     for (scope, dir, approved) in folders {
         let Some(dir) = dir else { continue };
-        for e in std::fs::read_dir(&dir).into_iter().flatten().filter_map(Result::ok) {
+        for e in std::fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+        {
             let name = e.file_name().to_string_lossy().to_string();
             if name.eq_ignore_ascii_case("desktop.ini") || !e.path().is_file() {
                 continue;
             }
             let enabled = enabled_flag(sys, &approved, &name);
-            out.push(Item { name, cmd: e.path().to_string_lossy().to_string(), scope, approved: approved.clone(), enabled, task_path: None });
+            out.push(Item {
+                name,
+                cmd: e.path().to_string_lossy().to_string(),
+                scope,
+                approved: approved.clone(),
+                enabled,
+                task_path: None,
+            });
         }
     }
-    let result = sys.run("powershell.exe", &["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", TASK_QUERY]);
+    let result = sys.run(
+        "powershell.exe",
+        &[
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            TASK_QUERY,
+        ],
+    );
     let warning = if result.code != 0 {
-        Some(format!("Scheduled tasks could not be read: {}", result.text.trim().lines().last().unwrap_or("PowerShell query failed")))
+        Some(format!(
+            "Scheduled tasks could not be read: {}",
+            result
+                .text
+                .trim()
+                .lines()
+                .last()
+                .unwrap_or("PowerShell query failed")
+        ))
     } else {
         match serde_json::from_str::<Vec<ScheduledTask>>(&result.text) {
             Ok(tasks) => {
                 let mut seen = std::collections::HashSet::new();
                 for task in tasks {
                     let full = format!("{}\\{}", task.task_path.trim_end_matches('\\'), task.name);
-                    if task.name.trim().is_empty() || !task.task_path.starts_with('\\') || task.task_path.to_lowercase().starts_with("\\microsoft\\") || !seen.insert(full.to_lowercase()) { continue; }
-                    out.push(Item { name: task.name, cmd: task.command, scope: "Scheduled task (logon/boot)", approved: String::new(), enabled: task.enabled, task_path: Some(task.task_path) });
+                    if task.name.trim().is_empty()
+                        || !task.task_path.starts_with('\\')
+                        || task.task_path.to_lowercase().starts_with("\\microsoft\\")
+                        || !seen.insert(full.to_lowercase())
+                    {
+                        continue;
+                    }
+                    out.push(Item {
+                        name: task.name,
+                        cmd: task.command,
+                        scope: "Scheduled task (logon/boot)",
+                        approved: String::new(),
+                        enabled: task.enabled,
+                        task_path: Some(task.task_path),
+                    });
                 }
                 None
             }
-            Err(error) => Some(format!("Scheduled task results could not be parsed: {error}")),
+            Err(error) => Some(format!(
+                "Scheduled task results could not be parsed: {error}"
+            )),
         }
     };
-    Listing { items: out, warning }
+    Listing {
+        items: out,
+        warning,
+    }
 }
 
 /// The 12-byte StartupApproved value: first byte 2 = enabled, 3 = disabled, then the disable time as a FILETIME.
@@ -133,8 +212,15 @@ pub fn set_enabled(sys: &dyn System, item: &Item, enable: bool) -> Result<(), St
         let full = format!("{}\\{}", task_path.trim_end_matches('\\'), item.name);
         return sys.task_set(&full, enable);
     }
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    sys.reg_set(&item.approved, &item.name, &RegData::Bin(approved_bytes(enable, now)))
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    sys.reg_set(
+        &item.approved,
+        &item.name,
+        &RegData::Bin(approved_bytes(enable, now)),
+    )
 }
 
 #[cfg(test)]
@@ -144,10 +230,16 @@ mod tests {
 
     #[test]
     fn approved_bytes_match_task_manager_format() {
-        assert_eq!(approved_bytes(true, 0), vec![2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            approved_bytes(true, 0),
+            vec![2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
         let d = approved_bytes(false, 0);
         assert_eq!(d[0], 3);
-        assert_eq!(u64::from_le_bytes(d[4..12].try_into().unwrap()), 116_444_736_000_000_000);
+        assert_eq!(
+            u64::from_le_bytes(d[4..12].try_into().unwrap()),
+            116_444_736_000_000_000
+        );
     }
 
     #[test]
@@ -157,9 +249,22 @@ mod tests {
         let run = r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run";
         sys.put(run, "Alpha", RegData::Str(r"C:\a.exe".into()));
         sys.put(run, "Beta", RegData::Str(r"C:\b.exe".into()));
-        sys.put(&format!(r"HKCU:\{APR}\Run"), "Beta", RegData::Bin(approved_bytes(false, 1)));
-        let items: Vec<_> = list(&sys).items.into_iter().filter(|i| i.scope == "Registry (user)").collect();
-        let by = |n: &str| items.iter().find(|i| i.name.eq_ignore_ascii_case(n)).unwrap();
+        sys.put(
+            &format!(r"HKCU:\{APR}\Run"),
+            "Beta",
+            RegData::Bin(approved_bytes(false, 1)),
+        );
+        let items: Vec<_> = list(&sys)
+            .items
+            .into_iter()
+            .filter(|i| i.scope == "Registry (user)")
+            .collect();
+        let by = |n: &str| {
+            items
+                .iter()
+                .find(|i| i.name.eq_ignore_ascii_case(n))
+                .unwrap()
+        };
         assert!(by("alpha").enabled);
         assert!(!by("beta").enabled);
     }
@@ -170,12 +275,33 @@ mod tests {
         sys.answer("powershell.exe", "[]");
         let run = r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run";
         sys.put(run, "Alpha", RegData::Str(r"C:\a.exe".into()));
-        let item = list(&sys).items.into_iter().find(|i| i.scope == "Registry (user)").unwrap();
+        let item = list(&sys)
+            .items
+            .into_iter()
+            .find(|i| i.scope == "Registry (user)")
+            .unwrap();
         set_enabled(&sys, &item, false).unwrap();
-        assert!(!list(&sys).items.into_iter().find(|i| i.scope == "Registry (user)").unwrap().enabled);
-        assert!(sys.reg_get(run, "alpha").is_some(), "the Run entry itself must stay");
+        assert!(
+            !list(&sys)
+                .items
+                .into_iter()
+                .find(|i| i.scope == "Registry (user)")
+                .unwrap()
+                .enabled
+        );
+        assert!(
+            sys.reg_get(run, "alpha").is_some(),
+            "the Run entry itself must stay"
+        );
         set_enabled(&sys, &item, true).unwrap();
-        assert!(list(&sys).items.into_iter().find(|i| i.scope == "Registry (user)").unwrap().enabled);
+        assert!(
+            list(&sys)
+                .items
+                .into_iter()
+                .find(|i| i.scope == "Registry (user)")
+                .unwrap()
+                .enabled
+        );
     }
 
     #[test]
@@ -187,7 +313,12 @@ mod tests {
         sys.put(run, "Empty", RegData::Str("  ".into()));
         sys.put(run, "Number", RegData::Dword(1));
         sys.put(run, "Valid", RegData::Str(r"C:\app.exe".into()));
-        let names: Vec<_> = list(&sys).items.into_iter().filter(|item| item.scope == "Registry (user)").map(|item| item.name).collect();
+        let names: Vec<_> = list(&sys)
+            .items
+            .into_iter()
+            .filter(|item| item.scope == "Registry (user)")
+            .map(|item| item.name)
+            .collect();
         assert_eq!(names, vec!["valid"]);
     }
 
@@ -202,7 +333,11 @@ mod tests {
 
         let listing = list(&sys);
         assert_eq!(listing.warning, None);
-        let tasks: Vec<_> = listing.items.iter().filter(|item| item.scope == "Scheduled task (logon/boot)").collect();
+        let tasks: Vec<_> = listing
+            .items
+            .iter()
+            .filter(|item| item.scope == "Scheduled task (logon/boot)")
+            .collect();
         assert_eq!(tasks.len(), 1);
         let task = tasks[0];
         assert_eq!(task.name, "Agent");
