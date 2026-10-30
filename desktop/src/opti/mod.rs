@@ -8,6 +8,7 @@ pub mod diagnostics;
 pub mod engine;
 pub mod hw;
 pub mod history;
+pub mod measurements;
 pub mod gaming;
 pub mod network;
 pub mod processes;

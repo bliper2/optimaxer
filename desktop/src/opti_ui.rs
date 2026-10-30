@@ -167,6 +167,7 @@ enum Msg {
     GameProfiles(Result<Vec<GameProfile>, String>),
     GameStates(HashMap<String, Result<ProfileState, String>>),
     GameLibraries(gaming::LibraryScan),
+    Measurements(Result<Vec<crate::opti::measurements::Capture>, String>),
     Diagnostic(DiagnosticCheck, DiagnosticResult),
     Snapshots(Result<Vec<SystemSnapshot>, String>),
     Processes(Result<(Vec<ProcessInfo>, CpuTimes), String>),
@@ -274,6 +275,9 @@ pub struct OptiUi {
     game_status_loading: bool,
     game_library_scan: Option<gaming::LibraryScan>,
     game_library_scanning: bool,
+    measurement_process: String,
+    measurements: Vec<crate::opti::measurements::Capture>,
+    measurements_error: Option<String>,
     diagnostic_results: HashMap<DiagnosticCheck, DiagnosticResult>,
     snapshots: Vec<SystemSnapshot>,
     snapshots_error: Option<String>,
@@ -759,6 +763,10 @@ impl OptiUi {
             Ok(entries) => (entries, None),
             Err(error) => (Vec::new(), Some(error)),
         };
+        let (measurements, measurements_error) = match crate::opti::measurements::load() {
+            Ok(entries) => (entries, None),
+            Err(error) => (Vec::new(), Some(error)),
+        };
         Self {
             page: Page::Overview,
             cat: Arc::new(Catalog::load()),
@@ -795,6 +803,9 @@ impl OptiUi {
             game_status_loading: false,
             game_library_scan: None,
             game_library_scanning: false,
+            measurement_process: String::new(),
+            measurements,
+            measurements_error,
             diagnostic_results: HashMap::new(),
             snapshots,
             snapshots_error,
@@ -1022,6 +1033,11 @@ impl OptiUi {
                     self.game_library_scan = Some(scan);
                     self.game_library_scanning = false;
                 }
+                Msg::Measurements(Ok(captures)) => {
+                    self.measurements = captures;
+                    self.measurements_error = None;
+                }
+                Msg::Measurements(Err(error)) => self.measurements_error = Some(error),
                 Msg::Diagnostic(check, result) => {
                     self.diagnostic_results.insert(check, result);
                 }
@@ -2249,6 +2265,69 @@ impl OptiUi {
             if kit::secondary(ui, "Open Processes", true).clicked() {
                 self.set_page(ctx, Page::Processes);
             }
+        });
+        ui.add_space(S2);
+        kit::card(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new("Game frame-time comparison").font(FontId::new(T_HEADING, semibold())).color(t.text));
+            ui.label(RichText::new("PresentMon records 30 seconds. Keep the same game and scene running for both captures. First use downloads a SHA-256 verified tool.").size(T_SMALL).color(t.muted));
+            ui.label(RichText::new("These readings show an observed difference. They do not prove a tweak caused it. Rust currently measures frame times only; DPC, ISR, timer, network and boot measurements remain PowerShell-only.").size(T_CAPTION).color(t.subtle));
+            ui.add_space(S1);
+            ui.horizontal_wrapped(|ui| {
+                ui.add_sized([240.0, 32.0], egui::TextEdit::singleline(&mut self.measurement_process).hint_text("Game process, for example game.exe"));
+                let valid = crate::opti::measurements::validate_process_name(&self.measurement_process).is_ok();
+                if kit::secondary(ui, "Record before", valid && self.busy.is_none()).clicked() {
+                    let process = self.measurement_process.trim().to_string();
+                    self.start_measurement(ctx, process, "before");
+                }
+                if kit::secondary(ui, "Record after", valid && self.busy.is_none()).clicked() {
+                    let process = self.measurement_process.trim().to_string();
+                    self.start_measurement(ctx, process, "after");
+                }
+            });
+            if let Some(error) = &self.measurements_error {
+                ui.label(RichText::new(format!("Measurement history unavailable: {error}")).size(T_SMALL).color(t.warn));
+            }
+            let process = self.measurement_process.trim();
+            let before = self.measurements.iter().rev().find(|capture| capture.label == "before" && capture.process.eq_ignore_ascii_case(process));
+            let after = self.measurements.iter().rev().find(|capture| capture.label == "after" && capture.process.eq_ignore_ascii_case(process));
+            if process.is_empty() || (before.is_none() && after.is_none()) {
+                kit::empty_state(ui, "No matching captures", "Record a before capture, change settings and restart if needed, then record after using the same process name.");
+            } else if let (Some(before), Some(after)) = (before, after) {
+                egui::Grid::new("frame-measurement-comparison").num_columns(3).spacing(vec2(S4, S1)).show(ui, |ui| {
+                    ui.label(RichText::new("Metric").size(T_SMALL).color(t.muted));
+                    ui.label(RichText::new("Before").size(T_SMALL).color(t.muted));
+                    ui.label(RichText::new("After · observed").size(T_SMALL).color(t.muted));
+                    ui.end_row();
+                    for (name, first, second, unit) in [
+                        ("Average", before.average_fps, after.average_fps, "FPS"),
+                        ("1% low", before.low_1_fps, after.low_1_fps, "FPS"),
+                        ("0.1% low", before.low_01_fps, after.low_01_fps, "FPS"),
+                        ("99th percentile frame time", before.p99_frame_ms, after.p99_frame_ms, "ms"),
+                    ] {
+                        ui.label(RichText::new(name).size(T_SMALL).color(t.text));
+                        ui.label(RichText::new(format!("{first:.1} {unit}")).size(T_SMALL).color(t.text));
+                        ui.label(RichText::new(format!("{second:.1} {unit} ({:+.1})", second - first)).size(T_SMALL).color(t.text));
+                        ui.end_row();
+                    }
+                    ui.label(RichText::new("Frames / stutters").size(T_SMALL).color(t.text));
+                    ui.label(RichText::new(format!("{} / {}", before.frames, before.stutters)).size(T_SMALL).color(t.text));
+                    ui.label(RichText::new(format!("{} / {}", after.frames, after.stutters)).size(T_SMALL).color(t.text));
+                    ui.end_row();
+                });
+                ui.label(RichText::new(format!("Before {} · After {} · {} seconds each", before.time, after.time, before.seconds)).size(T_CAPTION).color(t.subtle));
+            } else {
+                ui.label(RichText::new("One capture saved. Record the other using the same process name.").size(T_SMALL).color(t.muted));
+            }
+        });
+    }
+
+    fn start_measurement(&mut self, ctx: &egui::Context, process: String, label: &'static str) {
+        self.spawn(ctx, if label == "before" { "Recording before frame times" } else { "Recording after frame times" }, move |worker| {
+            worker.log("PresentMon capture runs for 30 seconds. Keep the selected game running.");
+            let result = crate::opti::measurements::record(&process, label);
+            if let Err(error) = &result { worker.log(&format!("ERROR {error}")); }
+            worker.send(Msg::Measurements(result));
         });
     }
 
