@@ -318,7 +318,7 @@ fn tweak_matches_view(tweak: &Tweak, applied: bool, fits: bool, favorite: bool, 
         _ => true,
     };
     let view_matches = match view {
-        1 => tweak.auto_pick(),
+        1 => tweak.auto_pick() && fits,
         2 => favorite,
         _ => true,
     };
@@ -1651,21 +1651,69 @@ impl OptiUi {
         let started = self.page_started;
         kit::enter(ui, started, |ui| {
             ui.add_enabled_ui(self.pending.is_none(), |ui| {
-                egui::ScrollArea::vertical().id_salt(("optimaxer-page", self.page.label())).auto_shrink([false, false]).show(ui, |ui| match self.page {
-                    Page::Overview => self.overview_page(ui, ctx),
-                    Page::Performance => self.performance_page(ui, ctx),
-                    Page::Diagnostics => self.diagnostics_page(ui, ctx),
-                    Page::Snapshots => self.snapshots_page(ui, ctx),
-                    Page::Processes => self.processes_page(ui, ctx),
-                    Page::Gaming => self.gaming_page(ui, ctx),
-                    Page::Activity => self.activity_page(ui, ctx),
-                    Page::Tweaks => self.tweaks_page(ui, ctx, settings),
-                    Page::Services => self.services_page(ui, ctx),
-                    Page::Startup => self.startup_page(ui, ctx),
-                    Page::Cleaner => self.cleaner_page(ui, ctx),
-                    Page::Network => self.network_page(ui, ctx),
-                    Page::Tools => self.tools_page(ui, ctx, suggestions),
-                });
+                if self.page == Page::Tweaks {
+                    ui.vertical(|ui| {
+                        let action_height = if ui.available_width() < 680.0 { 104.0 } else { 68.0 };
+                        let scroll_height = (ui.available_height() - action_height).max(120.0);
+                        egui::ScrollArea::vertical().id_salt(("optimaxer-page", self.page.label())).auto_shrink([false, false])
+                            .max_height(scroll_height).show(ui, |ui| self.tweaks_page(ui, ctx, settings));
+                        self.tweak_action_bar(ui, ctx);
+                    });
+                } else {
+                    egui::ScrollArea::vertical().id_salt(("optimaxer-page", self.page.label())).auto_shrink([false, false]).show(ui, |ui| match self.page {
+                        Page::Overview => self.overview_page(ui, ctx),
+                        Page::Performance => self.performance_page(ui, ctx),
+                        Page::Diagnostics => self.diagnostics_page(ui, ctx),
+                        Page::Snapshots => self.snapshots_page(ui, ctx),
+                        Page::Processes => self.processes_page(ui, ctx),
+                        Page::Gaming => self.gaming_page(ui, ctx),
+                        Page::Activity => self.activity_page(ui, ctx),
+                        Page::Tweaks => unreachable!("Tweaks uses its pinned action bar layout"),
+                        Page::Services => self.services_page(ui, ctx),
+                        Page::Startup => self.startup_page(ui, ctx),
+                        Page::Cleaner => self.cleaner_page(ui, ctx),
+                        Page::Network => self.network_page(ui, ctx),
+                        Page::Tools => self.tools_page(ui, ctx, suggestions),
+                    });
+                }
+            });
+        });
+    }
+
+    fn tweak_action_bar(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let t = tokens(ctx);
+        let selected = self.selected.len();
+        let recommendation = self.traits.as_ref().map(|traits| {
+            self.selected.iter().filter_map(|id| self.cat.find(id))
+                .filter(|tweak| tweak.auto_pick() && hw::fits(tweak, traits)).count()
+        });
+        let undoable = self.selected.iter().filter(|id| self.status.get(*id).copied().unwrap_or(false)).count();
+        ui.add_space(S1);
+        kit::card(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                if selected == 0 {
+                    ui.label(RichText::new("Select tweaks to build a change plan.").size(T_SMALL).color(t.muted));
+                } else if let Some(recommended) = recommendation {
+                    let review = selected.saturating_sub(recommended);
+                    ui.label(RichText::new(format!("{selected} selected · {recommended} recommended · {review} require review"))
+                        .font(FontId::new(T_SMALL, semibold())).color(t.text));
+                } else {
+                    ui.label(RichText::new(format!("{selected} selected · analyzing this PC's compatibility"))
+                        .font(FontId::new(T_SMALL, semibold())).color(t.muted));
+                }
+                if kit::primary(ui, "Preview changes", self.busy.is_none() && selected > 0).clicked() {
+                    self.preview_apply(ctx);
+                }
+                if kit::secondary(ui, "Undo selected", self.busy.is_none() && undoable > 0).clicked() {
+                    self.preview_undo();
+                }
+                if kit::secondary(ui, "Save selection", self.busy.is_none() && selected > 0).clicked() {
+                    self.save_selected_profile();
+                }
+                if kit::ghost(ui, "Clear selection", selected > 0).clicked() {
+                    self.selected.clear();
+                }
             });
         });
     }
@@ -2796,22 +2844,7 @@ impl OptiUi {
             let mut q = std::mem::take(&mut self.tw_search);
             self.toolbar_search(ui, &mut q, "Search tweaks");
             self.tw_search = q;
-            let n = self.selected.len();
-            if n > 0 {
-                ui.label(RichText::new(format!("{n} selected")).size(T_SMALL).color(t.muted));
-            }
-            let idle = self.busy.is_none();
-            let label = if n > 0 { format!("Apply {n} tweak{}", if n == 1 { "" } else { "s" }) } else { "Apply tweaks".to_string() };
-            if kit::primary(ui, &label, idle && n > 0).clicked() {
-                self.preview_apply(ctx);
-            }
-            if kit::secondary(ui, "Undo selected", idle && n > 0).clicked() {
-                self.preview_undo();
-            }
-            if kit::ghost(ui, "Clear selection", n > 0).clicked() {
-                self.selected.clear();
-            }
-            if kit::ghost(ui, "Refresh", idle).clicked() {
+            if kit::ghost(ui, "Refresh", self.busy.is_none()).clicked() {
                 self.refresh_status(ctx);
             }
         });
@@ -2879,8 +2912,7 @@ impl OptiUi {
         let traits = self.traits.clone();
         let favorites: HashSet<String> = settings.opti_tweak_favorites.iter().cloned().collect();
         let mut shown = 0;
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            for c in cats {
+        for c in cats {
                 let mut rows: Vec<&Tweak> = cat.tweaks.iter().filter(|tw| {
                     // a retired tweak is listed only while it has a saved record, so it can still be undone
                     let applied = self.status.get(&tw.id).copied().unwrap_or(false);
@@ -2992,15 +3024,14 @@ impl OptiUi {
                         }
                     }
                 });
-            }
-            if shown == 0 {
-                kit::empty_state(ui, "No tweaks match", "Try a shorter search or reset the filters.");
-            }
-            if !cat.not_ported.is_empty() && q.is_empty() {
-                ui.add_space(S4);
-                ui.add(egui::Label::new(RichText::new(format!("{} tweaks exist only in the PowerShell edition of Optimaxer because they need cmdlets such as Appx or MMAgent: {}", cat.not_ported.len(), cat.not_ported.iter().map(|s| format!("{} ({})", s.name, s.id)).collect::<Vec<_>>().join(", "))).size(T_CAPTION).color(t.subtle)).wrap());
-            }
-        });
+        }
+        if shown == 0 {
+            kit::empty_state(ui, "No tweaks match", "Try a shorter search or reset the filters.");
+        }
+        if !cat.not_ported.is_empty() && q.is_empty() {
+            ui.add_space(S4);
+            ui.add(egui::Label::new(RichText::new(format!("{} tweaks exist only in the PowerShell edition of Optimaxer because they need cmdlets such as Appx or MMAgent: {}", cat.not_ported.len(), cat.not_ported.iter().map(|s| format!("{} ({})", s.name, s.id)).collect::<Vec<_>>().join(", "))).size(T_CAPTION).color(t.subtle)).wrap());
+        }
     }
 
     fn services_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
@@ -3637,6 +3668,7 @@ mod tests {
 
         assert!(tweak_matches_view(&recommended, true, true, false, 1, 1, 1));
         assert!(!tweak_matches_view(&recommended, false, true, false, 1, 1, 1));
+        assert!(!tweak_matches_view(&recommended, false, false, false, 0, 1, 0));
         assert!(!tweak_matches_view(&opt_in, false, true, false, 0, 1, 0));
         assert!(tweak_matches_view(&opt_in, false, true, true, 2, 2, 1));
         assert!(!tweak_matches_view(&opt_in, false, false, true, 2, 2, 1));
