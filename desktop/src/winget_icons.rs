@@ -149,4 +149,18 @@ mod tests {
     fn unsafe_domains_do_not_become_remote_urls() {
         assert!(candidates(&package("example.com/?token=secret", "", "")).is_empty());
     }
+
+    #[test]
+    fn every_catalog_package_has_at_least_one_icon_source() {
+        let packages = crate::winget::catalog().unwrap();
+        let missing = packages
+            .iter()
+            .filter(|package| candidates(package).is_empty())
+            .map(|package| package.id.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            missing.is_empty(),
+            "packages without icon sources: {missing:?}"
+        );
+    }
 }
