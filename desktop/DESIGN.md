@@ -55,6 +55,8 @@ States: every control has rest, hover, pressed, disabled and keyboard focus. Foc
 
 The Optimaxer sidebar can collapse to a 64 px icon rail. Its expanded destinations are grouped under Workspace, Optimization and System. Labels stay available as tooltips and accessibility names; the detected PC summary returns when expanded. The choice persists in application settings. Store navigation remains expanded because its platform and category entries use text labels and counts.
 
+Smart Optimize is a Workspace page. It shows the hardware facts and inactive recommendations produced by the existing hardware-aware plan, then lists exclusion reasons. Refresh reads current tweak state on a worker. Review selects only the plan's existing IDs in Tweaks; preview and confirmation remain the only path to apply changes.
+
 Startup rows retain their checkbox behavior for batch enable/disable. A separate Details action opens the original launch command and, only when an executable path is explicit, its location and embedded CompanyName. The panel labels this as file metadata rather than verified publisher identity; links and ambiguous launch commands are reported as unresolved.
 
 Service changes query each selected service's direct dependencies and dependents before opening the existing confirmation. The dialog identifies load-order groups and flags dependents when disabling; it shows a lookup error and offers no proceed action if Windows cannot return the information.

@@ -46,6 +46,7 @@ const LOG_LINES: usize = 600;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Page {
     Overview,
+    SmartOptimize,
     Performance,
     Diagnostics,
     Snapshots,
@@ -80,8 +81,9 @@ impl PageGroup {
 }
 
 impl Page {
-    const ALL: [Page; 13] = [
+    const ALL: [Page; 14] = [
         Page::Overview,
+        Page::SmartOptimize,
         Page::Performance,
         Page::Diagnostics,
         Page::Snapshots,
@@ -99,6 +101,7 @@ impl Page {
     fn icon(self) -> char {
         match self {
             Page::Overview => '\u{E80F}',
+            Page::SmartOptimize => '\u{E945}',
             Page::Performance => '\u{E9D2}',
             Page::Diagnostics => '\u{E72E}',
             Page::Snapshots => '\u{E8D4}',
@@ -117,6 +120,7 @@ impl Page {
     fn label(self) -> &'static str {
         match self {
             Page::Overview => "Overview",
+            Page::SmartOptimize => "Smart Optimize",
             Page::Performance => "Performance",
             Page::Diagnostics => "Diagnostics",
             Page::Snapshots => "System Snapshot",
@@ -134,9 +138,11 @@ impl Page {
 
     fn group(self) -> PageGroup {
         match self {
-            Self::Overview | Self::Performance | Self::Processes | Self::Activity => {
-                PageGroup::Workspace
-            }
+            Self::Overview
+            | Self::SmartOptimize
+            | Self::Performance
+            | Self::Processes
+            | Self::Activity => PageGroup::Workspace,
             Self::Gaming
             | Self::Tweaks
             | Self::Services
@@ -1143,6 +1149,178 @@ fn plan_lines(eng: &Engine, tweaks: &[&Tweak]) -> Vec<Line> {
     out
 }
 // endregion
+
+fn draw_smart_plan_summary(
+    ui: &mut Ui,
+    traits: &Traits,
+    plan: &hw::Plan,
+    active: usize,
+    total: usize,
+    refreshing: bool,
+    t: &theme::Tokens,
+) {
+    let planned = plan.ids.len();
+    let ram = if traits.ram_gb > 0.0 {
+        format!("{:.0} GB RAM", traits.ram_gb)
+    } else {
+        "RAM unavailable".into()
+    };
+    let threads = if traits.threads > 0 {
+        format!("{} threads", traits.threads)
+    } else {
+        "Processor count unavailable".into()
+    };
+    let graphics = if traits.gpus.is_empty() {
+        "Graphics adapter unavailable".into()
+    } else {
+        traits.gpus.join(", ")
+    };
+
+    kit::card(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal_wrapped(|ui| {
+            kit::chip(ui, &profile_summary(traits), Tone::Brand);
+            ui.label(
+                RichText::new(format!(
+                    "{active} of {total} applicable recommendations already active"
+                ))
+                .size(T_SMALL)
+                .color(t.muted),
+            );
+            if refreshing {
+                kit::chip(ui, "Refreshing current state", Tone::Neutral);
+            }
+        });
+        ui.add(
+            egui::Label::new(
+                RichText::new(format!("{ram} · {threads} · {graphics}"))
+                    .size(T_SMALL)
+                    .color(t.muted),
+            )
+            .wrap(),
+        );
+        ui.add_space(S2);
+        if planned == 0 {
+            let summary = if total == 0 {
+                "No automatic recommendations fit this PC."
+            } else if active >= total {
+                "All applicable automatic recommendations are active."
+            } else {
+                "No changes are ready to review. Check the exclusions below."
+            };
+            ui.label(
+                RichText::new(summary)
+                    .font(FontId::new(T_BODY, semibold()))
+                    .color(t.text),
+            );
+        } else {
+            ui.label(
+                RichText::new(format!(
+                    "{planned} change{} ready for review",
+                    if planned == 1 { "" } else { "s" }
+                ))
+                .font(FontId::new(T_HEADING, semibold()))
+                .color(t.text),
+            );
+            ui.add(
+                egui::Label::new(
+                    RichText::new("Opt-in and retired tweaks stay excluded. Advanced changes are never selected automatically.")
+                        .size(T_SMALL)
+                        .color(t.muted),
+                )
+                .wrap(),
+            );
+        }
+    });
+}
+
+fn draw_smart_plan_changes(ui: &mut Ui, cat: &Catalog, plan: &hw::Plan, t: &theme::Tokens) {
+    kit::group_title(ui, "Recommended changes");
+    if plan.ids.is_empty() {
+        kit::empty_state(
+            ui,
+            "No changes ready to review",
+            "This plan selects only inactive recommendations that fit the detected hardware. Open the full catalog to inspect other settings.",
+        );
+        return;
+    }
+
+    for (index, id) in plan.ids.iter().enumerate() {
+        if let Some(tweak) = cat.find(id) {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(&tweak.name)
+                        .font(FontId::new(T_BODY, semibold()))
+                        .color(t.text),
+                );
+                kit::chip(ui, &tweak.risk, risk_tone(&tweak.risk));
+                if tweak.restart {
+                    kit::chip(ui, "Restart required", Tone::Warn);
+                }
+                if tweak.partial {
+                    kit::chip(ui, "Partial support", Tone::Warn);
+                }
+            });
+            ui.add(
+                egui::Label::new(RichText::new(&tweak.desc).size(T_SMALL).color(t.muted)).wrap(),
+            );
+            ui.label(RichText::new(&tweak.cat).size(T_CAPTION).color(t.subtle));
+            if index + 1 < plan.ids.len() {
+                ui.add_space(S2);
+                ui.separator();
+                ui.add_space(S2);
+            }
+        } else {
+            ui.label(
+                RichText::new(format!("Catalog entry {id} is unavailable."))
+                    .size(T_SMALL)
+                    .color(t.bad),
+            );
+        }
+    }
+}
+
+fn draw_smart_plan_reasons(ui: &mut Ui, cat: &Catalog, plan: &hw::Plan, t: &theme::Tokens) {
+    if !plan.notes.is_empty() {
+        ui.add_space(S2);
+        egui::CollapsingHeader::new("How this hardware shaped the plan")
+            .default_open(false)
+            .show(ui, |ui| {
+                for note in &plan.notes {
+                    ui.add(
+                        egui::Label::new(RichText::new(note).size(T_SMALL).color(t.muted)).wrap(),
+                    );
+                    ui.add_space(S1);
+                }
+            });
+    }
+    if !plan.skipped.is_empty() {
+        ui.add_space(S1);
+        egui::CollapsingHeader::new(format!(
+            "Not selected automatically ({})",
+            plan.skipped.len()
+        ))
+        .default_open(false)
+        .show(ui, |ui| {
+            for (id, reason) in &plan.skipped {
+                let name = cat
+                    .find(id)
+                    .map_or(id.as_str(), |tweak| tweak.name.as_str());
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new(name)
+                            .size(T_SMALL)
+                            .font(FontId::new(T_SMALL, semibold()))
+                            .color(t.text),
+                    );
+                    ui.add(
+                        egui::Label::new(RichText::new(reason).size(T_SMALL).color(t.muted)).wrap(),
+                    );
+                });
+            }
+        });
+    }
+}
 
 impl OptiUi {
     pub fn new() -> Self {
@@ -2286,6 +2464,25 @@ impl OptiUi {
         }
     }
 
+    fn review_smart_plan(&mut self, ctx: &egui::Context) {
+        if self.busy.is_some() || !self.status_ready || self.traits.is_none() {
+            return;
+        }
+        self.select_preset("auto");
+        if self.selected.is_empty() {
+            return;
+        }
+        self.tw_search.clear();
+        self.focus_tweak_search = false;
+        self.tw_risk = 0;
+        self.tw_group = 0;
+        self.tw_state = 2;
+        self.tw_view = 1;
+        self.tw_compatibility = 1;
+        self.tw_sort = 0;
+        self.set_page(ctx, Page::Tweaks);
+    }
+
     fn save_selected_profile(&mut self) {
         if self.profiles_error.is_some() {
             self.events.push(OptiEvent::Toast("Saved profiles could not be read. Export the current selection or recover the profiles file before saving.".into()));
@@ -2852,6 +3049,7 @@ impl OptiUi {
                         .auto_shrink([false, false])
                         .show(ui, |ui| match self.page {
                             Page::Overview => self.overview_page(ui, ctx, settings),
+                            Page::SmartOptimize => self.smart_optimize_page(ui, ctx),
                             Page::Performance => self.performance_page(ui, ctx, settings),
                             Page::Diagnostics => self.diagnostics_page(ui, ctx),
                             Page::Snapshots => self.snapshots_page(ui, ctx),
@@ -3067,6 +3265,63 @@ impl OptiUi {
         self.telemetry_needs_reset = true;
     }
 
+    fn smart_optimize_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let t = tokens(ctx);
+        kit::page_header(
+            ui,
+            "Smart Optimize",
+            "Hardware-aware recommendations from this PC's current configuration. Review every change before applying it.",
+        );
+
+        let (Some(traits), true) = (self.traits.as_ref(), self.status_ready) else {
+            kit::empty_state(
+                ui,
+                "Reading this PC's configuration",
+                "Hardware details and current tweak states are collected in the background. This page does not change Windows settings.",
+            );
+            kit::skeleton(ui, 3);
+            return;
+        };
+
+        let plan = hw::smart_plan(&self.cat, traits, &self.status);
+        let (active, total) = score(&self.cat, traits, &self.status);
+        let planned = plan.ids.len();
+        let refreshing = self.busy.as_deref() == Some("Checking active tweaks");
+        draw_smart_plan_summary(ui, traits, &plan, active, total, refreshing, &t);
+        ui.add_space(S3);
+        draw_smart_plan_changes(ui, &self.cat, &plan, &t);
+        draw_smart_plan_reasons(ui, &self.cat, &plan, &t);
+        let review_label = if planned == 0 {
+            "No changes to review".to_string()
+        } else {
+            format!(
+                "Review {planned} change{}",
+                if planned == 1 { "" } else { "s" }
+            )
+        };
+        ui.add_space(S3);
+        ui.horizontal_wrapped(|ui| {
+            if kit::primary(ui, &review_label, planned > 0 && self.busy.is_none()).clicked() {
+                self.review_smart_plan(ctx);
+            }
+            if kit::secondary(ui, "Refresh current state", self.busy.is_none()).clicked() {
+                self.refresh_status(ctx);
+            }
+            if kit::ghost(ui, "Open full tweak catalog", true).clicked() {
+                self.set_page(ctx, Page::Tweaks);
+            }
+        });
+        ui.add_space(S1);
+        ui.add(
+            egui::Label::new(
+                RichText::new("Review opens the selected tweaks in the catalog. Preview changes to inspect exact updates before confirmation. Applying saves originals and verifies supported settings; no FPS gain is promised.")
+                    .size(T_SMALL)
+                    .color(t.muted),
+            )
+            .wrap(),
+        );
+    }
+
     fn overview_page(&mut self, ui: &mut Ui, ctx: &egui::Context, settings: &Settings) {
         use crate::opti::sysmon::format_uptime;
         let t = tokens(ctx);
@@ -3087,12 +3342,8 @@ impl OptiUi {
             let compact_actions = ui.available_width() < 680.0;
             ui.horizontal_wrapped(|ui| {
                 let ready = self.busy.is_none() && self.traits.is_some();
-                if kit::primary(ui, "Smart optimize", ready).on_hover_text("Reads your hardware and selects only the tweaks that fit this PC").clicked() {
-                    self.select_preset("auto");
-                    if !self.selected.is_empty() {
-                        self.set_page(ctx, Page::Tweaks);
-                        self.preview_apply(ctx);
-                    }
+                if kit::primary(ui, "Smart Optimize", ready).on_hover_text("Review hardware-aware recommendations before selecting changes").clicked() {
+                    self.set_page(ctx, Page::SmartOptimize);
                 }
                 if kit::secondary(ui, "Scan for junk", self.busy.is_none()).clicked() {
                     self.set_page(ctx, Page::Cleaner);
@@ -3143,11 +3394,8 @@ impl OptiUi {
                     if let Some(count) = inactive_recommended.filter(|count| *count > 0) {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(RichText::new(format!("{count} Smart Optimize setting{} not active on this PC.", if count == 1 { " is" } else { "s are" })).size(T_SMALL).color(t.muted));
-                            if kit::secondary(ui, "Review tweaks", self.busy.is_none()).clicked() {
-                                self.tw_state = 2;
-                                self.tw_view = 1;
-                                self.tw_compatibility = 1;
-                                self.set_page(ctx, Page::Tweaks);
+                            if kit::secondary(ui, "Review plan", self.busy.is_none()).clicked() {
+                                self.set_page(ctx, Page::SmartOptimize);
                             }
                         });
                     }
@@ -6912,8 +7160,8 @@ mod tests {
 
     #[test]
     fn every_navigation_page_belongs_to_one_visible_sidebar_group() {
-        assert_eq!(Page::ALL.len(), 13);
-        for (group, expected_count) in PageGroup::ALL.into_iter().zip([4, 6, 3]) {
+        assert_eq!(Page::ALL.len(), 14);
+        for (group, expected_count) in PageGroup::ALL.into_iter().zip([5, 6, 3]) {
             assert_eq!(
                 Page::ALL
                     .into_iter()

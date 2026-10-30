@@ -484,7 +484,7 @@ pub fn smart_plan(cat: &Catalog, tr: &Traits, applied: &HashMap<String, bool>) -
         }
     }
     let ids = resolve_conflicts(cat, ids);
-    let mut notes = vec!["Ticked: the recommended set and the performance tweaks that fit this hardware. Advanced tweaks and other Moderate ones are left for you to tick.".to_string()];
+    let mut notes = vec!["The plan includes recommended settings and performance tweaks that fit this hardware. Advanced tweaks and other Moderate settings remain unselected.".to_string()];
     notes.push(if !tr.has("desktop") && !tr.has("laptop") {
         "PC type could not be detected: desktop-only power tweaks are skipped.".into()
     } else if tr.laptop {
@@ -505,7 +505,7 @@ pub fn smart_plan(cat: &Catalog, tr: &Traits, applied: &HashMap<String, bool>) -
             tr.ram_gb
         ));
     }
-    notes.push(if tr.has("gpu-unknown") { "Graphics adapters could not be identified: GPU-specific tweaks are skipped.".into() } else if tr.has("dgpu") { "Discrete GPU: hardware-accelerated GPU scheduling, Game Mode and Game DVR capture off are ticked.".into() } else { "No discrete GPU: GPU scheduling is skipped.".into() });
+    notes.push(if tr.has("gpu-unknown") { "Graphics adapters could not be identified: GPU-specific tweaks are skipped.".into() } else if tr.has("dgpu") { "Discrete GPU: hardware-accelerated GPU scheduling, Game Mode and Game DVR capture off are included in the plan.".into() } else { "No discrete GPU: GPU scheduling is skipped.".into() });
     Plan {
         ids,
         notes,
@@ -645,7 +645,7 @@ mod tests {
         assert!(
             plan.notes
                 .iter()
-                .any(|n| n.contains("other Moderate ones are left for you to tick"))
+                .any(|n| n.contains("other Moderate settings remain unselected"))
         );
         // every other Moderate or Advanced tweak that is not opt-in says why it stayed unticked
         for t in cat.tweaks.iter().filter(|t| {
