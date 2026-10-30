@@ -1,10 +1,11 @@
 //! Live readings for Overview and Performance: CPU load, memory, system-drive capacity, uptime, process count,
 //! aggregate physical-disk throughput, adapter traffic, busiest GPU-engine utilization and dedicated GPU memory.
-//! Samples are read-only, taken once a second and kept in bounded histories for the charts.
+//! Samples are read-only, collected on a pausable worker, and kept in bounded chart histories.
 
-use super::backend::{RegData, System};
+use super::backend::{RegData, System, WinSystem};
 use super::hw;
 use std::collections::{HashMap, VecDeque};
+use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::FILETIME;
 use windows_sys::Win32::NetworkManagement::IpHelper::{
@@ -24,7 +25,52 @@ use windows_sys::Win32::System::SystemInformation::{
 };
 use windows_sys::Win32::System::Threading::GetSystemTimes;
 
-pub const HISTORY: usize = 60;
+pub const MAX_HISTORY: usize = 121;
+
+pub const SAMPLE_INTERVAL_SECONDS: [u64; 3] = [1, 2, 5];
+pub const HISTORY_WINDOW_SECONDS: [u64; 3] = [30, 60, 120];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TelemetryConfig {
+    interval_seconds: u64,
+    history_seconds: u64,
+}
+
+impl TelemetryConfig {
+    pub fn new(interval_seconds: u64, history_seconds: u64) -> Self {
+        let interval_seconds = if SAMPLE_INTERVAL_SECONDS.contains(&interval_seconds) {
+            interval_seconds
+        } else {
+            1
+        };
+        let history_seconds = if HISTORY_WINDOW_SECONDS.contains(&history_seconds) {
+            history_seconds
+        } else {
+            60
+        };
+        Self {
+            interval_seconds,
+            history_seconds,
+        }
+    }
+
+    pub fn interval(self) -> Duration {
+        Duration::from_secs(self.interval_seconds)
+    }
+
+    pub fn interval_seconds(self) -> u64 {
+        self.interval_seconds
+    }
+
+    pub fn history_seconds(self) -> u64 {
+        self.history_seconds
+    }
+
+    pub fn history_capacity(self) -> usize {
+        (self.history_seconds.div_ceil(self.interval_seconds) + 1).clamp(2, MAX_HISTORY as u64)
+            as usize
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct NetworkSample {
@@ -59,6 +105,142 @@ impl Snapshot {
     }
     pub fn disk_fraction(&self) -> f32 {
         fraction(self.disk_used, self.disk_total)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TelemetryFrame {
+    pub latest: Snapshot,
+    pub cpu_history: VecDeque<Option<f32>>,
+    pub ram_history: VecDeque<Option<f32>>,
+    pub network_history: VecDeque<Option<NetworkSample>>,
+    pub disk_history: VecDeque<Option<f32>>,
+    pub gpu_history: VecDeque<Option<f32>>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TelemetryUpdate {
+    pub info: Option<SysInfo>,
+    pub frame: TelemetryFrame,
+}
+
+enum TelemetryCommand {
+    Resume(TelemetryConfig),
+    Pause,
+    Configure(TelemetryConfig),
+}
+
+/// Owns the sampling thread. The UI only sends lifecycle/configuration changes and drains snapshots.
+pub struct TelemetryWorker {
+    commands: mpsc::Sender<TelemetryCommand>,
+    updates: Receiver<TelemetryUpdate>,
+}
+
+impl TelemetryWorker {
+    pub fn new() -> std::io::Result<Self> {
+        let (command_tx, command_rx) = mpsc::channel();
+        let (update_tx, update_rx) = mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("optimaxer-telemetry".into())
+            .spawn(move || telemetry_loop(command_rx, update_tx))?;
+        Ok(Self {
+            commands: command_tx,
+            updates: update_rx,
+        })
+    }
+
+    pub fn resume(&self, config: TelemetryConfig) -> Result<(), String> {
+        let _ = self.try_latest();
+        self.send(TelemetryCommand::Resume(config))
+    }
+
+    pub fn pause(&self) -> Result<(), String> {
+        self.send(TelemetryCommand::Pause)
+    }
+
+    pub fn configure(&self, config: TelemetryConfig) -> Result<(), String> {
+        self.send(TelemetryCommand::Configure(config))
+    }
+
+    fn send(&self, command: TelemetryCommand) -> Result<(), String> {
+        self.commands
+            .send(command)
+            .map_err(|_| "The telemetry worker stopped unexpectedly.".into())
+    }
+
+    pub fn try_latest(&self) -> Option<TelemetryUpdate> {
+        let mut latest = None;
+        loop {
+            match self.updates.try_recv() {
+                Ok(update) => latest = Some(update),
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => return latest,
+            }
+        }
+    }
+}
+
+fn telemetry_loop(commands: Receiver<TelemetryCommand>, updates: SyncSender<TelemetryUpdate>) {
+    let mut active = false;
+    let mut config = TelemetryConfig::new(1, 60);
+    let mut sampler: Option<Sampler> = None;
+    let mut info: Option<SysInfo> = None;
+
+    loop {
+        let wait = if active {
+            config.interval()
+        } else {
+            Duration::from_secs(86_400)
+        };
+        match commands.recv_timeout(wait) {
+            Ok(TelemetryCommand::Resume(next)) => {
+                config = next;
+                let sampler = sampler.get_or_insert_with(Sampler::new);
+                sampler.configure(config);
+                sampler.reset_window();
+                active = true;
+                if info.is_none() {
+                    info = Some(read_info(&WinSystem));
+                }
+                sample_and_send(sampler, &mut info, &updates);
+            }
+            Ok(TelemetryCommand::Pause) => active = false,
+            Ok(TelemetryCommand::Configure(next)) => {
+                if next != config {
+                    config = next;
+                    if let Some(sampler) = sampler.as_mut() {
+                        sampler.configure(config);
+                        if active {
+                            sampler.reset_window();
+                            sample_and_send(sampler, &mut info, &updates);
+                        }
+                    }
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) if active => {
+                if let Some(sampler) = sampler.as_mut() {
+                    sample_and_send(sampler, &mut info, &updates);
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        }
+    }
+}
+
+fn sample_and_send(
+    sampler: &mut Sampler,
+    info: &mut Option<SysInfo>,
+    updates: &SyncSender<TelemetryUpdate>,
+) {
+    sampler.tick();
+    let update = TelemetryUpdate {
+        info: info.clone(),
+        frame: sampler.frame(),
+    };
+    match updates.try_send(update) {
+        Ok(()) => *info = None,
+        Err(TrySendError::Full(_)) => {}
+        Err(TrySendError::Disconnected(_)) => {}
     }
 }
 
@@ -158,6 +340,7 @@ pub fn uptime_secs() -> u64 {
 }
 
 pub struct Sampler {
+    config: TelemetryConfig,
     last_times: Option<(u64, u64, u64)>,
     last_at: Option<Instant>,
     pub latest: Snapshot,
@@ -420,6 +603,7 @@ fn sum_dedicated_memory(samples: &[(String, f64)]) -> Option<u64> {
 impl Sampler {
     pub fn new() -> Self {
         Sampler {
+            config: TelemetryConfig::new(1, 60),
             last_times: read_times(),
             last_at: None,
             latest: Snapshot::default(),
@@ -434,11 +618,30 @@ impl Sampler {
         }
     }
 
-    /// Takes a new reading when a second has passed. Returns true when it did.
+    pub fn configure(&mut self, config: TelemetryConfig) -> bool {
+        if self.config == config {
+            return false;
+        }
+        self.config = config;
+        true
+    }
+
+    pub fn frame(&self) -> TelemetryFrame {
+        TelemetryFrame {
+            latest: self.latest,
+            cpu_history: self.cpu_history.clone(),
+            ram_history: self.ram_history.clone(),
+            network_history: self.network_history.clone(),
+            disk_history: self.disk_history.clone(),
+            gpu_history: self.gpu_history.clone(),
+        }
+    }
+
+    /// Takes a new reading when the configured interval has passed. Returns true when it did.
     pub fn tick(&mut self) -> bool {
         if self
             .last_at
-            .is_some_and(|t| t.elapsed() < Duration::from_millis(950))
+            .is_some_and(|t| t.elapsed() < self.config.interval())
         {
             return false;
         }
@@ -490,14 +693,24 @@ impl Sampler {
             gpu_busiest_engine: gpu.busiest_engine_percent,
             gpu_dedicated_memory_bytes: gpu.dedicated_memory_bytes,
         };
-        push(&mut self.cpu_history, cpu_available.then_some(cpu));
+        let history_capacity = self.config.history_capacity();
+        push(
+            &mut self.cpu_history,
+            cpu_available.then_some(cpu),
+            history_capacity,
+        );
         push(
             &mut self.ram_history,
             ram_available.then_some(self.latest.ram_fraction() * 100.0),
+            history_capacity,
         );
-        push_network(&mut self.network_history, network);
-        push(&mut self.disk_history, disk_activity);
-        push(&mut self.gpu_history, gpu.busiest_engine_percent);
+        push_network(&mut self.network_history, network, history_capacity);
+        push(&mut self.disk_history, disk_activity, history_capacity);
+        push(
+            &mut self.gpu_history,
+            gpu.busiest_engine_percent,
+            history_capacity,
+        );
         true
     }
 
@@ -528,15 +741,21 @@ impl Sampler {
     }
 }
 
-fn push(h: &mut VecDeque<Option<f32>>, v: Option<f32>) {
-    if h.len() >= HISTORY {
+fn push(h: &mut VecDeque<Option<f32>>, v: Option<f32>, capacity: usize) {
+    let capacity = capacity.clamp(1, MAX_HISTORY);
+    if h.len() >= capacity {
         h.pop_front();
     }
     h.push_back(v);
 }
 
-fn push_network(h: &mut VecDeque<Option<NetworkSample>>, value: Option<NetworkSample>) {
-    if h.len() >= HISTORY {
+fn push_network(
+    h: &mut VecDeque<Option<NetworkSample>>,
+    value: Option<NetworkSample>,
+    capacity: usize,
+) {
+    let capacity = capacity.clamp(1, MAX_HISTORY);
+    if h.len() >= capacity {
         h.pop_front();
     }
     h.push_back(value);
@@ -659,6 +878,8 @@ mod tests {
     use super::*;
     use crate::opti::backend::fake::FakeSystem;
 
+    const HISTORY: usize = 60;
+
     #[test]
     fn cpu_percent_comes_from_idle_versus_total() {
         assert_eq!(cpu_percent((0, 0, 0), (50, 100, 0)), 50.0);
@@ -671,6 +892,20 @@ mod tests {
             0.0,
             "no time passed"
         );
+    }
+
+    #[test]
+    fn telemetry_configuration_bounds_settings_and_history() {
+        let valid = TelemetryConfig::new(5, 120);
+        assert_eq!(valid.interval_seconds(), 5);
+        assert_eq!(valid.history_seconds(), 120);
+        assert_eq!(valid.history_capacity(), 25);
+
+        let fallback = TelemetryConfig::new(3, 90);
+        assert_eq!(fallback.interval_seconds(), 1);
+        assert_eq!(fallback.history_seconds(), 60);
+        assert_eq!(fallback.history_capacity(), 61);
+        assert_eq!(TelemetryConfig::new(1, 120).history_capacity(), MAX_HISTORY);
     }
 
     #[test]
@@ -687,7 +922,7 @@ mod tests {
     fn history_is_capped() {
         let mut h = VecDeque::new();
         for i in 0..(HISTORY + 20) {
-            push(&mut h, Some(i as f32));
+            push(&mut h, Some(i as f32), HISTORY);
         }
         assert_eq!(h.len(), HISTORY);
         assert_eq!(*h.front().unwrap(), Some(20.0));
@@ -720,9 +955,9 @@ mod tests {
     fn network_history_is_bounded_and_keeps_unavailable_samples() {
         let mut history = VecDeque::new();
         for _ in 0..=HISTORY {
-            push_network(&mut history, None);
+            push_network(&mut history, None, 3);
         }
-        assert_eq!(history.len(), HISTORY);
+        assert_eq!(history.len(), 3);
         assert!(history.iter().all(Option::is_none));
     }
 
@@ -730,9 +965,9 @@ mod tests {
     fn disk_history_is_bounded_and_keeps_unavailable_samples() {
         let mut history = VecDeque::new();
         for _ in 0..=HISTORY {
-            push(&mut history, None);
+            push(&mut history, None, 3);
         }
-        assert_eq!(history.len(), HISTORY);
+        assert_eq!(history.len(), 3);
         assert!(history.iter().all(Option::is_none));
     }
 
@@ -781,7 +1016,7 @@ mod tests {
     fn gpu_history_is_bounded_and_keeps_unavailable_samples() {
         let mut history = VecDeque::new();
         for _ in 0..=HISTORY {
-            push(&mut history, None);
+            push(&mut history, None, HISTORY);
         }
         assert_eq!(history.len(), HISTORY);
         assert!(history.iter().all(Option::is_none));
@@ -803,11 +1038,11 @@ mod tests {
     #[test]
     fn reset_window_discards_samples_from_hidden_time() {
         let mut sampler = Sampler::new();
-        push(&mut sampler.cpu_history, Some(42.0));
-        push(&mut sampler.ram_history, Some(37.0));
-        push_network(&mut sampler.network_history, None);
-        push(&mut sampler.disk_history, Some(12.0));
-        push(&mut sampler.gpu_history, Some(24.0));
+        push(&mut sampler.cpu_history, Some(42.0), HISTORY);
+        push(&mut sampler.ram_history, Some(37.0), HISTORY);
+        push_network(&mut sampler.network_history, None, HISTORY);
+        push(&mut sampler.disk_history, Some(12.0), HISTORY);
+        push(&mut sampler.gpu_history, Some(24.0), HISTORY);
         sampler.reset_window();
         assert!(sampler.cpu_history.is_empty());
         assert!(sampler.ram_history.is_empty());

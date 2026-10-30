@@ -2958,6 +2958,44 @@ impl OrionApp {
                 ui.add_space(S2);
                 kit::card(ui, |ui| {
                     ui.set_width(ui.available_width());
+                    ui.label(RichText::new("Performance").font(FontId::new(T_BODY, semibold())).color(t.text));
+                    ui.label(RichText::new("Sampling runs only while Overview or Performance is open. Changing either option clears the current chart window.").size(T_CAPTION).color(t.subtle));
+                    let mut interval = crate::opti::sysmon::SAMPLE_INTERVAL_SECONDS
+                        .iter()
+                        .position(|value| *value == self.settings.telemetry_config().interval_seconds())
+                        .unwrap_or(0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Sample interval").color(t.muted));
+                        if kit::segmented(ui, &mut interval, &["1s", "2s", "5s"]) {
+                            let previous = self.settings.opti_sample_interval_seconds;
+                            self.settings.opti_sample_interval_seconds =
+                                crate::opti::sysmon::SAMPLE_INTERVAL_SECONDS[interval];
+                            if let Err(error) = self.settings.save_checked() {
+                                self.settings.opti_sample_interval_seconds = previous;
+                                self.toast = Some((format!("Sample interval was not saved: {error}"), Instant::now()));
+                            }
+                        }
+                    });
+                    let mut history = crate::opti::sysmon::HISTORY_WINDOW_SECONDS
+                        .iter()
+                        .position(|value| *value == self.settings.telemetry_config().history_seconds())
+                        .unwrap_or(1);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Chart history").color(t.muted));
+                        if kit::segmented(ui, &mut history, &["30s", "60s", "120s"]) {
+                            let previous = self.settings.opti_history_seconds;
+                            self.settings.opti_history_seconds =
+                                crate::opti::sysmon::HISTORY_WINDOW_SECONDS[history];
+                            if let Err(error) = self.settings.save_checked() {
+                                self.settings.opti_history_seconds = previous;
+                                self.toast = Some((format!("Chart history was not saved: {error}"), Instant::now()));
+                            }
+                        }
+                    });
+                });
+                ui.add_space(S2);
+                kit::card(ui, |ui| {
+                    ui.set_width(ui.available_width());
                     ui.label(RichText::new("Downloads").font(FontId::new(T_BODY, semibold())).color(t.text));
                     let resp = ui.add(egui::TextEdit::singleline(&mut self.settings.download_dir).desired_width(f32::INFINITY).margin(Margin::symmetric(S3 as i8, 8)));
                     if resp.lost_focus() {
@@ -3099,8 +3137,8 @@ mod app_tests {
     #[test]
     fn update_busy_state_only_matches_running_operations() {
         let release = || Release {
-            version: (2, 15, 38),
-            tag: "v2.15.38".into(),
+            version: (2, 15, 39),
+            tag: "v2.15.39".into(),
             notes: String::new(),
             page: String::new(),
             url: String::new(),

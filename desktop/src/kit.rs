@@ -704,6 +704,7 @@ pub fn sparkline(
     ui: &mut Ui,
     size: egui::Vec2,
     data: &std::collections::VecDeque<Option<f32>>,
+    history_capacity: usize,
     color: Color32,
 ) {
     let t = tokens(ui.ctx());
@@ -727,7 +728,7 @@ pub fn sparkline(
         return;
     }
     let inner = rect.shrink2(vec2(6.0, 6.0));
-    let step = inner.width() / (crate::opti::sysmon::HISTORY as f32 - 1.0);
+    let step = inner.width() / (history_capacity.max(2) as f32 - 1.0);
     let x0 = inner.right() - step * (data.len() as f32 - 1.0);
     let points: Vec<Option<Pos2>> = data
         .iter()
@@ -766,11 +767,12 @@ pub fn sparkline(
     }
 }
 
-/// Dual-series adapter-rate chart. The scale follows the visible 60-second sample window.
+/// Dual-series adapter-rate chart. The scale follows the configured sample window.
 pub fn network_chart(
     ui: &mut Ui,
     size: egui::Vec2,
     data: &std::collections::VecDeque<Option<crate::opti::sysmon::NetworkSample>>,
+    history_capacity: usize,
     received: Color32,
     sent: Color32,
 ) {
@@ -802,7 +804,7 @@ pub fn network_chart(
         return;
     }
     let inner = rect.shrink2(vec2(6.0, 6.0));
-    let step = inner.width() / (crate::opti::sysmon::HISTORY as f32 - 1.0);
+    let step = inner.width() / (history_capacity.max(2) as f32 - 1.0);
     let x0 = inner.right() - step * (data.len() as f32 - 1.0);
     let mut previous: Option<(egui::Pos2, egui::Pos2)> = None;
     for (index, sample) in data.iter().enumerate() {
@@ -823,11 +825,12 @@ pub fn network_chart(
     }
 }
 
-/// Single-series bytes-per-second chart. The scale follows the visible 60-second sample window.
+/// Single-series bytes-per-second chart. The scale follows the configured sample window.
 pub fn rate_chart(
     ui: &mut Ui,
     size: egui::Vec2,
     data: &std::collections::VecDeque<Option<f32>>,
+    history_capacity: usize,
     color: Color32,
 ) {
     let t = tokens(ui.ctx());
@@ -858,7 +861,7 @@ pub fn rate_chart(
         return;
     }
     let inner = rect.shrink2(vec2(6.0, 6.0));
-    let step = inner.width() / (crate::opti::sysmon::HISTORY as f32 - 1.0);
+    let step = inner.width() / (history_capacity.max(2) as f32 - 1.0);
     let x0 = inner.right() - step * (data.len() as f32 - 1.0);
     let points: Vec<Option<egui::Pos2>> = data
         .iter()
