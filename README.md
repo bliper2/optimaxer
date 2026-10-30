@@ -13,10 +13,10 @@ Windows 10/11 performance, privacy, debloat and app-install toolkit. WPF GUI in 
 | | |
 |---|---|
 | ![Overview with live gauges](docs/screenshots/desktop-overview.png) | ![Overview, light theme](docs/screenshots/desktop-overview-light.png) |
-| ![The Orion app store](docs/screenshots/desktop-store.png) | ![Hardware-aware tweaks and portable profiles](docs/screenshots/desktop-tweaks.png) |
-| ![Read-only Process Explorer](docs/screenshots/desktop-processes.png) | ![Activity search](docs/screenshots/desktop-activity.png) |
-| ![Live performance charts including disk activity](docs/screenshots/desktop-performance.png) | ![Read-only Windows diagnostics](docs/screenshots/desktop-diagnostics.png) |
-| ![Local system inventory snapshots](docs/screenshots/desktop-system-snapshot.png) | |
+| ![The Orion app store](docs/screenshots/desktop-store.png) | ![Curated WinGet software management](docs/screenshots/desktop-winget.png) |
+| ![Hardware-aware tweaks and portable profiles](docs/screenshots/desktop-tweaks.png) | ![Read-only Process Explorer](docs/screenshots/desktop-processes.png) |
+| ![Activity search](docs/screenshots/desktop-activity.png) | ![Read-only Windows diagnostics](docs/screenshots/desktop-diagnostics.png) |
+| ![Live performance charts including disk activity](docs/screenshots/desktop-performance.png) | ![Local system inventory snapshots](docs/screenshots/desktop-system-snapshot.png) |
 | ![Cleaner scan](docs/screenshots/desktop-cleaner.png) | |
 
 **Optimaxer for PowerShell** (WPF, Windows 10 and 11):
@@ -36,7 +36,7 @@ irm https://raw.githubusercontent.com/bliper2/optimaxer/main/install.ps1 | iex
 Or download the zip from [Releases](https://github.com/bliper2/optimaxer/releases), extract it and double-click `Launch.bat` (asks for administrator rights).
 
 ## What it does
-- **Install**: 260+ apps in 10 categories through WinGet (the WinUtil list plus more), with real app icons, "Show installed", upgrade-all, and a verification step after every install or uninstall.
+- **Software**: PowerShell WPF manages 260+ WinGet apps with icons, installed filtering, upgrade-all and post-operation checks. Rust desktop adds the curated catalog with exact-ID install, upgrade and uninstall confirmations, plus WinGet-export status. Its Orion Store stays a separate download catalog.
 - **Tweaks**: 209 active tweaks plus 8 retired ones (performance, gaming, network, privacy, AI/Copilot/Recall removal, a safe OneDrive uninstall, browser debloat, Windows Update control, interface) with presets. Recommended is short on purpose: TRIM, last-access timestamps, startup delay, file extensions, widgets and feeds, Copilot, and the suggestion policies. Gaming is Game Mode, Game DVR capture off for your account, sticky-key popups and mouse acceleration. Tweaks that write the same setting (search box style, drive letters, taskbar grouping, All apps view, where Explorer opens) form a group, and only one per group can be ticked. The 2026 taskbar, Start, Explorer, Game Bar and Store-search modules follow [WinUtil](https://github.com/ChrisTitusTech/winutil) and [Win11Debloat](https://github.com/Raphire/Win11Debloat). The original value of everything a tweak touches is saved, so each tweak, and "Undo ALL", restores your real prior settings. Optional restore point first.
 - **Smart optimize**: detects laptop or desktop, SSD/NVMe or HDD, RAM size, GPU and Windows version, then ticks the recommended set plus the **performance set** where it fits the hardware: on a desktop, CPU power throttling off, no USB/PCIe link sleep and per-app timer requests honored; with a discrete GPU, hardware-accelerated GPU scheduling; Game Mode and Game DVR capture off everywhere (Dashboard button, the Auto-detect chip on Tweaks, or `-Preset auto` unattended). Advanced tweaks are never ticked automatically, and neither are the Ultimate plan, 100% minimum CPU state or boot-configuration changes (heat, no measured gain). The Tweaks page says on every other row why it was left unticked (its risk, or the hardware fact such as "this PC is a laptop").
 - **Retired tweaks**: 8 tweaks with no measurable effect on Windows 11, or whose keys Windows blocks even for administrators (icon cache size, NtfsMemoryUsage, svchost splitting, MFT zone, DisablePagingExecutive, the MMCSS network throttle, diagnostic tracing, Chat auto-install), are hidden and never ticked. If you applied one earlier it stays listed so you can undo it.

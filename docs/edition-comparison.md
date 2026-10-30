@@ -1,6 +1,6 @@
 # Edition comparison
 
-Snapshot of the repository at v2.15.22. This describes implemented scope, not a parity promise. The Rust desktop app is the primary target for the UI work; the PowerShell and Linux editions remain independent products.
+Snapshot of the repository at v2.15.23. This describes implemented scope, not a parity promise. The Rust desktop app is the primary target for the UI work; the PowerShell and Linux editions remain independent products.
 
 | Area | PowerShell / WPF (Windows) | Python / Tkinter (Linux) | Rust / egui (Windows) |
 | --- | --- | --- | --- |
@@ -9,7 +9,7 @@ Snapshot of the repository at v2.15.22. This describes implemented scope, not a 
 | Services | About 240, protected core rows hidden, backup and restore | systemd service list, enable/disable and restore | About 220, protected core rows hidden, JSON backup and restore |
 | Startup | Run keys, Startup folders, and third-party logon/boot tasks; Microsoft tasks excluded | User and system XDG `.desktop` entries; system entries use user-level override files | User/machine Run keys, Startup folders, and third-party logon/boot tasks; Microsoft tasks excluded |
 | Cleaner | Scan-first Windows targets, including component store and Windows.old | Package-manager caches, user caches, logs and Trash | 32 Windows targets grouped by cleanup type; scan first; optional bounded exact-path preview for one target; system-managed targets disclose path limits; links are not followed |
-| Packages | WinGet install, upgrade, remove and verify | pacman, AUR helper, dnf and Flatpak flows | Orion catalog downloads and persistent local favorites; no package-manager install/remove workflow |
+| Packages | WinGet install, upgrade, remove and verify | pacman, AUR helper, dnf and Flatpak flows | Curated WinGet exact-ID install, upgrade, uninstall and upgrade-all in a visible console; Orion catalog downloads remain separate |
 | Network | DNS/DoH, benchmark, reset and opt-in hosts block | NetworkManager DNS and active connections | DNS/DoH, benchmark and reset |
 | Tools | Windows maintenance, boot cost, game profiles, wake sources, search exclusions and PresentMon measurement | System updates, mirrors, failed units, `.pacnew`/`.rpmnew`, SMART health | Restore point, memory, TRIM, SFC/DISM repair, cache resets, registry backup, read-only undo/service backup integrity check, network and maintenance tools |
 | Diagnostics | Included with maintenance tools | SMART and failed-unit checks where supported | Read-only SFC `/verifyonly` and DISM `/ScanHealth`, with command output and exit codes |

@@ -3,6 +3,7 @@ use crate::model::{self, AppItem, Catalog, Sort, ANDROID, PC, TV};
 use crate::net::{self, DlStatus, Download, Settings};
 use crate::notifications::{self, Action as NotificationAction, Item as Notification, Kind as NotificationKind, MAX_SAVED_DISMISSALS};
 use crate::opti_ui::{OptiEvent, OptiUi};
+use crate::software_ui::SoftwareUi;
 use crate::update::{self, Release};
 use crate::theme::{self, ease_out, mix, motion, semibold, tokens, Tone, S1, S2, S3, S4, S5, T_BODY, T_CAPTION, T_DISPLAY, T_HEADING, T_SMALL};
 use egui::{Align, Color32, CornerRadius, FontId, Layout, Margin, RichText, Sense, Stroke, StrokeKind, Ui, WidgetInfo, Role, vec2};
@@ -45,11 +46,12 @@ enum PaletteCommand {
     Page(&'static str),
     Store,
     SearchStore,
+    WinGet,
     Downloads,
     Settings,
 }
 
-const PALETTE_COMMANDS: [(&str, &str, PaletteCommand); 17] = [
+const PALETTE_COMMANDS: [(&str, &str, PaletteCommand); 18] = [
     ("Overview", "Optimaxer page", PaletteCommand::Page("Overview")),
     ("Performance", "Live CPU, memory, disk and adapter traffic", PaletteCommand::Page("Performance")),
     ("Diagnostics", "Read-only Windows integrity checks", PaletteCommand::Page("Diagnostics")),
@@ -65,6 +67,7 @@ const PALETTE_COMMANDS: [(&str, &str, PaletteCommand); 17] = [
     ("Tools", "Optimaxer page", PaletteCommand::Page("Tools")),
     ("Store", "Browse apps", PaletteCommand::Store),
     ("Search apps", "Focus Store search", PaletteCommand::SearchStore),
+    ("WinGet apps", "Install, upgrade or remove Windows apps", PaletteCommand::WinGet),
     ("Downloads", "Show download activity", PaletteCommand::Downloads),
     ("Settings", "Open application settings", PaletteCommand::Settings),
 ];
@@ -146,6 +149,8 @@ pub struct OrionApp {
     loading: bool,
     note: String,
     query: String,
+    show_winget: bool,
+    software: SoftwareUi,
     category: String,
     favorites_only: bool,
     view: Vec<AppItem>,
@@ -279,6 +284,8 @@ impl OrionApp {
             loading: true,
             note: String::new(),
             query: if std::env::var_os("ORION_SHOTS").is_some() { std::env::var("ORION_SHOTS_QUERY").unwrap_or_default() } else { String::new() },
+            show_winget: false,
+            software: SoftwareUi::new(),
             category: "All".into(),
             favorites_only: false,
             view: Vec::new(),
@@ -628,6 +635,11 @@ impl OrionApp {
                         self.favorites_only = true;
                         self.dirty = true;
                     }
+                    "winget" => {
+                        self.set_section(ctx, Section::Store);
+                        self.show_winget = true;
+                        self.detail = None;
+                    }
                     "settings" => {
                         self.set_section(ctx, Section::Optimaxer);
                         self.show_settings = true;
@@ -661,6 +673,9 @@ impl OrionApp {
             }
         }
         self.section = s;
+        if s == Section::Store {
+            self.show_winget = false;
+        }
         self.settings.section = if s == Section::Optimaxer { "Optimaxer" } else { "Store" }.into();
         self.save_settings("Window section");
     }
@@ -753,6 +768,7 @@ impl eframe::App for OrionApp {
         let ctx = &ctx;
         self.poll_catalog();
         self.poll_update(ctx);
+        self.software.tick(ctx);
         self.record_completed_downloads();
         if self.shots.is_none() {
             self.follow_windows(ctx);
@@ -779,7 +795,9 @@ impl eframe::App for OrionApp {
             }
         }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
-            self.set_section(ctx, Section::Store);
+            if self.section != Section::Store {
+                self.set_section(ctx, Section::Store);
+            }
             self.detail = None;
             ctx.memory_mut(|m| m.request_focus(self.search_id));
         }
@@ -808,6 +826,8 @@ impl eframe::App for OrionApp {
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.canvas).inner_margin(Margin { left: S5 as i8, right: S5 as i8, top: S3 as i8, bottom: 0 })).show(root, |ui| {
             if self.section == Section::Optimaxer {
                 self.opti.central(ui, ctx, &self.suggestions, &mut self.settings);
+            } else if self.show_winget {
+                kit::enter(ui, self.view_started, |ui| self.software.ui(ui, ctx));
             } else {
                 kit::enter(ui, self.view_started, |ui| {
                     if self.detail.is_some() {
@@ -1115,6 +1135,11 @@ impl OrionApp {
                 self.detail = None;
                 ctx.memory_mut(|m| m.request_focus(self.search_id));
             }
+            PaletteCommand::WinGet => {
+                self.set_section(ctx, Section::Store);
+                self.show_winget = true;
+                self.detail = None;
+            }
             PaletteCommand::Downloads => self.show_downloads = true,
             PaletteCommand::Settings => self.show_settings = true,
         }
@@ -1210,7 +1235,12 @@ impl OrionApp {
                 ui.add_space(S4);
                 if self.section == Section::Store && !compact {
                     let w = (ui.available_width() - TOP_BAR_ACTIONS_WIDTH).clamp(180.0, 480.0);
-                    let resp = ui.add_sized([w, 34.0], egui::TextEdit::singleline(&mut self.query).id(self.search_id).hint_text("Search apps, authors, tags  (Ctrl+F)").margin(Margin::symmetric(S3 as i8, 8)));
+                    let (query, hint) = if self.show_winget {
+                        (&mut self.software.query, "Search WinGet apps or package IDs  (Ctrl+F)")
+                    } else {
+                        (&mut self.query, "Search apps, authors, tags  (Ctrl+F)")
+                    };
+                    let resp = ui.add_sized([w, 34.0], egui::TextEdit::singleline(query).id(self.search_id).hint_text(hint).margin(Margin::symmetric(S3 as i8, 8)));
                     if resp.changed() {
                         self.dirty = true;
                         self.detail = None;
@@ -1265,7 +1295,7 @@ impl OrionApp {
                     if dl.clicked() {
                         self.show_downloads = !self.show_downloads;
                     }
-                    if self.section == Section::Store && !compact {
+                    if self.section == Section::Store && !compact && !self.show_winget {
                         let label = if self.loading { "Refreshing" } else { "Refresh" };
                         if kit::ghost(ui, label, !self.loading).clicked() {
                             self.loading = true;
@@ -1278,13 +1308,18 @@ impl OrionApp {
                 ui.add_space(S2);
                 ui.horizontal(|ui| {
                     let width = (ui.available_width() - 105.0).max(120.0);
-                    let search = ui.add_sized([width, 34.0], egui::TextEdit::singleline(&mut self.query).id(self.search_id).hint_text("Search apps, authors, tags  (Ctrl+F)").margin(Margin::symmetric(S3 as i8, 8)));
+                    let (query, hint) = if self.show_winget {
+                        (&mut self.software.query, "Search WinGet apps or package IDs  (Ctrl+F)")
+                    } else {
+                        (&mut self.query, "Search apps, authors, tags  (Ctrl+F)")
+                    };
+                    let search = ui.add_sized([width, 34.0], egui::TextEdit::singleline(query).id(self.search_id).hint_text(hint).margin(Margin::symmetric(S3 as i8, 8)));
                     if search.changed() {
                         self.dirty = true;
                         self.detail = None;
                         self.bump(ctx);
                     }
-                    if kit::ghost(ui, if self.loading { "Refreshing" } else { "Refresh" }, !self.loading).clicked() {
+                    if !self.show_winget && kit::ghost(ui, if self.loading { "Refreshing" } else { "Refresh" }, !self.loading).clicked() {
                         self.loading = true;
                         self.rx = spawn_refresh(ctx);
                     }
@@ -1299,6 +1334,10 @@ impl OrionApp {
             ui.horizontal(|ui| {
                 if self.section == Section::Optimaxer {
                     ui.label(RichText::new(self.opti.status_text()).size(T_CAPTION).color(t.subtle));
+                    return;
+                }
+                if self.show_winget {
+                    ui.label(RichText::new(self.software.status_line()).size(T_CAPTION).color(t.subtle));
                     return;
                 }
                 ui.label(RichText::new(format!("{} apps  ·  {} shown  ·  source: {}", self.catalog.apps.len(), self.view.len(), self.catalog.source)).size(T_CAPTION).color(t.subtle));
@@ -1339,6 +1378,18 @@ impl OrionApp {
                 });
                 return;
             }
+            if self.show_winget {
+                side_title(ui, "Software");
+                if kit::nav_item(ui, false, "Orion Store", None).clicked() {
+                    self.show_winget = false;
+                    self.category = "All".into();
+                    self.favorites_only = false;
+                    self.detail = None;
+                    self.bump(ctx);
+                }
+                self.software.navigation(ui);
+                return;
+            }
             side_title(ui, "Platform");
             let mut changed = false;
             for p in PLATFORMS {
@@ -1349,6 +1400,12 @@ impl OrionApp {
                     self.category = "All".into();
                     changed = true;
                 }
+            }
+            side_title(ui, "Software");
+            if kit::nav_item(ui, false, "WinGet apps", None).clicked() {
+                self.show_winget = true;
+                self.detail = None;
+                self.bump(ctx);
             }
             side_title(ui, "Library");
             let favorite_count = self.catalog.apps.iter().filter(|app| {
@@ -2047,7 +2104,7 @@ mod app_tests {
 
     #[test]
     fn palette_lists_all_commands_for_blank_query() {
-        assert_eq!(matching_palette_commands("  ").len(), 17);
+        assert_eq!(matching_palette_commands("  ").len(), 18);
     }
 
     #[test]
