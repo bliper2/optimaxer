@@ -31,7 +31,7 @@ Unchanged from the original client. It loads `config.json`, `apps.json` and `mir
 
 ## Optimaxer pages
 
-Overview. Live gauges for processor, memory and the system drive, a 60 second history of CPU and memory, the processor, graphics, Windows edition, uptime and process count, quick actions, and the eight latest confirmed tweak batches. Expand a batch to inspect apply preview values, verification and undo availability. Undo entries identify saved-original counts; exact restored values remain in the existing undo store.
+Overview. Live gauges for processor, memory and the system drive, a 60 second history of CPU and memory, the processor, graphics, Windows edition, uptime and process count, quick actions, and the eight latest confirmed tweak batches. Recommendations use the current detected tweak state to offer review of eligible Smart Optimize settings, and flag the system drive for a cleanup scan at 90% use or higher. They never apply changes or delete files. Expand a batch to inspect apply preview values, verification and undo availability. Undo entries identify saved-original counts; exact restored values remain in the existing undo store.
 
 Activity. Searches a chronological timeline of up to 100 confirmed tweak apply/undo batches and up to 100 system-action output records. System-action records cover confirmed service, startup, cleaner, DNS, network reset, tools, installer launch, registry export and undo-all jobs. They preserve captured output only; they do not prove final system state or provide undo data. Read-only scans and benchmarks are excluded. Records live in separate, bounded `operations.json` under the app data directory.
 

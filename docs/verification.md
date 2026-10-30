@@ -39,6 +39,8 @@ The v2.15.7 fake-system tests verify apply/undo history values, status and undo 
 
 Process Explorer tests cover CPU normalization, invalid intervals, counter rollback and a read-only scan of the test process's image path and working set without elevation. Activity tests cover searches across dates, actions, names, IDs and captured details. Protected-process behavior and refresh cost still need manual checks on Windows 10 and 11.
 
+Overview recommendation tests cover storage telemetry availability and the 90% cleanup-scan threshold. The inactive Smart Optimize count uses the same tested hardware-fit score as the Tweaks page. Buttons only navigate to review or scan workflows; they do not apply tweaks or delete files.
+
 Startup tests cover third-party logon/boot task listing, Microsoft-task exclusion, exact full-path enable/disable calls, preservation of Run entries, and a visible warning when task discovery fails. Real Task Scheduler permissions and state round trips still need manual verification on Windows.
 
 ## Failure and restoration rules
