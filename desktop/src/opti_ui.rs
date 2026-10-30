@@ -171,7 +171,7 @@ enum Action {
         items: Vec<startup::Item>,
         enable: bool,
     },
-    Clean(Vec<&'static str>),
+    Clean(Vec<&'static str>, Vec<String>),
     SetDns(DnsProvider),
     RestoreDns,
     ResetNetwork,
@@ -365,6 +365,8 @@ pub struct OptiUi {
     clean_sel: HashSet<&'static str>,
     clean_preview: Option<(&'static str, cleaner::Preview)>,
     clean_preview_error: Option<(&'static str, String)>,
+    clean_exclusion_input: String,
+    clean_exclusion_error: Option<String>,
     adapters: Vec<String>,
     bench: Vec<(String, network::DnsBenchmark)>,
     events: Vec<OptiEvent>,
@@ -1019,6 +1021,8 @@ impl OptiUi {
             clean_sel: HashSet::new(),
             clean_preview: None,
             clean_preview_error: None,
+            clean_exclusion_input: String::new(),
+            clean_exclusion_error: None,
             adapters: Vec::new(),
             bench: Vec::new(),
             events: Vec::new(),
@@ -1386,11 +1390,57 @@ impl OptiUi {
         });
     }
 
-    fn scan_cleaner(&mut self, ctx: &egui::Context) {
+    fn save_cleaner_exclusions(
+        &mut self,
+        settings: &mut Settings,
+        exclusions: Vec<String>,
+    ) -> bool {
+        let previous = std::mem::replace(&mut settings.cleaner_exclusions, exclusions);
+        if let Err(error) = settings.save_checked() {
+            settings.cleaner_exclusions = previous;
+            let message = format!("Cleaner exclusions were not saved: {error}");
+            self.clean_exclusion_error = Some(message.clone());
+            self.say(&message);
+            self.events.push(OptiEvent::Toast(message));
+            return false;
+        }
+        self.clean_sizes.clear();
+        self.clean_sel.clear();
+        self.clean_preview = None;
+        self.clean_preview_error = None;
+        self.clean_exclusion_error = None;
+        true
+    }
+
+    fn add_cleaner_exclusion(&mut self, settings: &mut Settings) {
+        let path = match cleaner::normalize_exclusion(&self.clean_exclusion_input) {
+            Ok(path) => path,
+            Err(error) => {
+                self.clean_exclusion_error = Some(error);
+                return;
+            }
+        };
+        if settings
+            .cleaner_exclusions
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(&path))
+        {
+            self.clean_exclusion_error = Some("That path is already excluded.".into());
+            return;
+        }
+        let mut exclusions = settings.cleaner_exclusions.clone();
+        exclusions.push(path);
+        exclusions.sort_by_key(|path| path.to_lowercase());
+        if self.save_cleaner_exclusions(settings, exclusions) {
+            self.clean_exclusion_input.clear();
+        }
+    }
+
+    fn scan_cleaner(&mut self, ctx: &egui::Context, exclusions: Vec<String>) {
         self.spawn(ctx, "Scanning for junk", move |w| {
             let sizes: Vec<_> = cleaner::TARGETS
                 .iter()
-                .map(|t| (t.id, cleaner::scan(t)))
+                .map(|t| (t.id, cleaner::scan(t, &exclusions)))
                 .collect();
             let total: u64 = sizes.iter().filter_map(|s| s.1).sum();
             w.log(&format!(
@@ -1401,7 +1451,7 @@ impl OptiUi {
         });
     }
 
-    fn preview_cleaner(&mut self, ctx: &egui::Context, id: &'static str) {
+    fn preview_cleaner(&mut self, ctx: &egui::Context, id: &'static str, exclusions: Vec<String>) {
         let Some(target) = cleaner::TARGETS
             .iter()
             .find(|target| target.id == id)
@@ -1413,7 +1463,7 @@ impl OptiUi {
         self.clean_preview_error = None;
         self.spawn(ctx, "Listing affected paths", move |worker| {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                cleaner::preview(&target)
+                cleaner::preview(&target, &exclusions)
             }))
             .map_err(|_| "Path preview could not be completed.".to_string());
             worker.send(Msg::CleanPreview(id, result));
@@ -1601,7 +1651,7 @@ impl OptiUi {
                     },
                 );
             }
-            Action::Clean(ids) => {
+            Action::Clean(ids, exclusions) => {
                 self.spawn_recorded(ctx, "Cleaning", move |w| {
                     let sys = WinSystem;
                     let mut sum = 0u64;
@@ -1609,7 +1659,7 @@ impl OptiUi {
                         let Some(t) = cleaner::TARGETS.iter().find(|t| t.id == *id) else {
                             continue;
                         };
-                        let freed = cleaner::clean(&sys, t, &mut |l| w.log(l));
+                        let freed = cleaner::clean(&sys, t, &exclusions, &mut |l| w.log(l));
                         sum += freed;
                         w.log(&format!("  {}: freed {}", t.name, format_size(Some(freed))));
                     }
@@ -1617,7 +1667,7 @@ impl OptiUi {
                     w.send(Msg::Scan(
                         cleaner::TARGETS
                             .iter()
-                            .map(|t| (t.id, cleaner::scan(t)))
+                            .map(|t| (t.id, cleaner::scan(t, &exclusions)))
                             .collect(),
                     ));
                 });
@@ -2375,7 +2425,7 @@ impl OptiUi {
                         .id_salt(("optimaxer-page", self.page.label()))
                         .auto_shrink([false, false])
                         .show(ui, |ui| match self.page {
-                            Page::Overview => self.overview_page(ui, ctx),
+                            Page::Overview => self.overview_page(ui, ctx, settings),
                             Page::Performance => self.performance_page(ui, ctx),
                             Page::Diagnostics => self.diagnostics_page(ui, ctx),
                             Page::Snapshots => self.snapshots_page(ui, ctx),
@@ -2387,7 +2437,7 @@ impl OptiUi {
                             }
                             Page::Services => self.services_page(ui, ctx),
                             Page::Startup => self.startup_page(ui, ctx),
-                            Page::Cleaner => self.cleaner_page(ui, ctx),
+                            Page::Cleaner => self.cleaner_page(ui, ctx, settings),
                             Page::Network => self.network_page(ui, ctx),
                             Page::Tools => self.tools_page(ui, ctx, suggestions),
                         });
@@ -2554,7 +2604,7 @@ impl OptiUi {
         self.telemetry_needs_reset = true;
     }
 
-    fn overview_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+    fn overview_page(&mut self, ui: &mut Ui, ctx: &egui::Context, settings: &Settings) {
         use crate::opti::sysmon::{format_uptime, read_info};
         let t = tokens(ctx);
         self.tick_telemetry(ctx);
@@ -2585,7 +2635,7 @@ impl OptiUi {
                 }
                 if kit::secondary(ui, "Scan for junk", self.busy.is_none()).clicked() {
                     self.set_page(ctx, Page::Cleaner);
-                    self.scan_cleaner(ctx);
+                    self.scan_cleaner(ctx, settings.cleaner_exclusions.clone());
                 }
             });
             let inactive_recommended = if self.status_ready {
@@ -2619,7 +2669,7 @@ impl OptiUi {
                             ui.label(RichText::new(format!("System drive is {:.0}% full. Scan cleanup targets before choosing what to remove.", s.disk_fraction() * 100.0)).size(T_SMALL).color(t.muted));
                             if kit::secondary(ui, "Scan storage", self.busy.is_none()).clicked() && self.busy.is_none() {
                                 self.set_page(ctx, Page::Cleaner);
-                                self.scan_cleaner(ctx);
+                                self.scan_cleaner(ctx, settings.cleaner_exclusions.clone());
                             }
                         });
                     }
@@ -5333,7 +5383,7 @@ impl OptiUi {
             });
     }
 
-    fn cleaner_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+    fn cleaner_page(&mut self, ui: &mut Ui, ctx: &egui::Context, settings: &mut Settings) {
         let t = tokens(ctx);
         kit::page_header(
             ui,
@@ -5341,6 +5391,79 @@ impl OptiUi {
             "Scan first, then clean what you tick. Directory links are never followed, and deleted files do not go to the Recycle Bin.",
         );
         let idle = self.busy.is_none();
+        ui.label(
+            RichText::new("Path exclusions")
+                .font(FontId::new(T_BODY, semibold()))
+                .color(t.text),
+        );
+        ui.label(
+            RichText::new("Exact files and folders, including their contents, stay untouched by path-based cleanup.")
+                .size(T_SMALL)
+                .color(t.muted),
+        );
+        ui.label(
+            RichText::new("Event logs and Windows.old are skipped if exclusions overlap their storage. Recycle Bin and component-store cleanup cannot use path exclusions.")
+                .size(T_SMALL)
+                .color(t.muted),
+        );
+        ui.horizontal(|ui| {
+            let input_width = (ui.available_width() - 150.0).max(120.0);
+            ui.add_enabled_ui(idle, |ui| {
+                ui.add_sized(
+                    [input_width, 26.0],
+                    egui::TextEdit::singleline(&mut self.clean_exclusion_input)
+                        .hint_text(r"C:\path\to\protect"),
+                );
+            });
+            if kit::secondary(
+                ui,
+                "Add exclusion",
+                idle && !self.clean_exclusion_input.trim().is_empty(),
+            )
+            .clicked()
+            {
+                self.add_cleaner_exclusion(settings);
+            }
+        });
+        if let Some(error) = &self.clean_exclusion_error {
+            ui.label(RichText::new(error).size(T_SMALL).color(t.bad));
+        }
+        let mut remove_exclusion = None;
+        if settings.cleaner_exclusions.is_empty() {
+            ui.label(
+                RichText::new("No paths excluded.")
+                    .size(T_CAPTION)
+                    .color(t.subtle),
+            );
+        } else {
+            egui::ScrollArea::vertical()
+                .max_height(96.0)
+                .show(ui, |ui| {
+                    for (index, path) in settings.cleaner_exclusions.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(path)
+                                        .monospace()
+                                        .size(T_CAPTION)
+                                        .color(t.text),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_text(path);
+                            if kit::secondary(ui, "Remove", idle).clicked() {
+                                remove_exclusion = Some(index);
+                            }
+                        });
+                    }
+                });
+        }
+        if let Some(index) = remove_exclusion {
+            let mut exclusions = settings.cleaner_exclusions.clone();
+            exclusions.remove(index);
+            self.save_cleaner_exclusions(settings, exclusions);
+        }
+        ui.add_space(S2);
         let total: u64 = self.clean_sizes.values().flatten().sum();
         let picked: Vec<&'static str> = cleaner::TARGETS
             .iter()
@@ -5354,7 +5477,7 @@ impl OptiUi {
         };
         ui.horizontal_wrapped(|ui| {
             if kit::secondary(ui, "Scan", idle).clicked() {
-                self.scan_cleaner(ctx);
+                self.scan_cleaner(ctx, settings.cleaner_exclusions.clone());
             }
             let label = if picked.is_empty() {
                 "Clean selected".to_string()
@@ -5368,27 +5491,38 @@ impl OptiUi {
             if kit::primary(ui, &label, idle && !picked.is_empty()).clicked() && self.need_admin() {
                 let lines = picked
                     .iter()
-                    .filter_map(|id| cleaner::TARGETS.iter().find(|t| t.id == *id))
-                    .map(|t| Line {
-                        text: format!(
-                            "{}   {}",
-                            t.name,
-                            self.clean_sizes
-                                .get(t.id)
-                                .copied()
-                                .flatten()
-                                .map(|s| format_size(Some(s)))
-                                .unwrap_or_default()
-                        ),
-                        warn: t.risk != "Safe",
-                        head: false,
+                    .filter_map(|id| cleaner::TARGETS.iter().find(|target| target.id == *id))
+                    .map(|target| {
+                        let blocked = cleaner::blocked_by_exclusions(
+                            target,
+                            &settings.cleaner_exclusions,
+                        );
+                        Line {
+                            text: format!(
+                                "{}   {}{}",
+                                target.name,
+                                self.clean_sizes
+                                    .get(target.id)
+                                    .copied()
+                                    .flatten()
+                                    .map(|size| format_size(Some(size)))
+                                    .unwrap_or_default(),
+                                if blocked {
+                                    " · skipped by path exclusions"
+                                } else {
+                                    ""
+                                }
+                            ),
+                            warn: target.risk != "Safe" || blocked,
+                            head: false,
+                        }
                     })
                     .collect();
                 self.pending = Some(Pending {
                     title: "Clean".into(),
-                    intro: "Delete the selected items? This cannot be undone.".into(),
+                    intro: "Delete the selected items? This cannot be undone. Exclusions can skip Windows.old or event-log cleanup when they overlap those targets.".into(),
                     lines,
-                    action: Action::Clean(picked.clone()),
+                    action: Action::Clean(picked.clone(), settings.cleaner_exclusions.clone()),
                     restore_option: false,
                     ok_label: format!(
                         "Delete {} item{}",
@@ -5398,7 +5532,7 @@ impl OptiUi {
                 });
             }
             if kit::secondary(ui, "Preview paths", idle && preview_id.is_some()).clicked() {
-                self.preview_cleaner(ctx, preview_id.unwrap());
+                self.preview_cleaner(ctx, preview_id.unwrap(), settings.cleaner_exclusions.clone());
             }
             if total > 0 {
                 ui.label(
@@ -5426,6 +5560,9 @@ impl OptiUi {
                     );
                     if preview.truncated {
                         kit::chip(ui, "List truncated", Tone::Warn);
+                    }
+                    if preview.blocked_by_exclusions {
+                        kit::chip(ui, "Target skipped", Tone::Warn);
                     }
                 });
                 ui.add(
@@ -5519,15 +5656,22 @@ impl OptiUi {
                         );
                     });
                     for target in targets {
-                        self.cleaner_row(ui, ctx, target);
+                        self.cleaner_row(ui, ctx, target, &settings.cleaner_exclusions);
                     }
                 }
             });
     }
 
-    fn cleaner_row(&mut self, ui: &mut Ui, ctx: &egui::Context, tg: &Target) {
+    fn cleaner_row(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        tg: &Target,
+        exclusions: &[String],
+    ) {
         let t = tokens(ctx);
         let on = self.clean_sel.contains(tg.id);
+        let blocked = cleaner::blocked_by_exclusions(tg, exclusions);
         let r = kit::row(ui, ("cl", tg.id), on, |ui| {
             ui.horizontal(|ui| {
                 kit::check(ui, on);
@@ -5541,6 +5685,9 @@ impl OptiUi {
                         if tg.risk != "Safe" {
                             kit::chip(ui, tg.risk, risk_tone(tg.risk));
                         }
+                        if blocked {
+                            kit::chip(ui, "Skipped by exclusion", Tone::Warn);
+                        }
                     });
                     ui.add(
                         egui::Label::new(RichText::new(tg.desc).size(T_SMALL).color(t.muted))
@@ -5548,11 +5695,15 @@ impl OptiUi {
                     );
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let text = match self.clean_sizes.get(tg.id) {
-                        Some(Some(0)) => "Empty".to_string(),
-                        Some(Some(s)) => format_size(Some(*s)),
-                        Some(None) => "Sized when cleaned".to_string(),
-                        None => String::new(),
+                    let text = if blocked {
+                        "Skipped".to_string()
+                    } else {
+                        match self.clean_sizes.get(tg.id) {
+                            Some(Some(0)) => "Empty".to_string(),
+                            Some(Some(s)) => format_size(Some(*s)),
+                            Some(None) => "Sized when cleaned".to_string(),
+                            None => String::new(),
+                        }
                     };
                     ui.label(
                         RichText::new(text)

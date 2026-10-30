@@ -23,6 +23,7 @@ pub struct Preview {
     pub files: Vec<PreviewFile>,
     pub truncated: bool,
     pub unreadable_directories: usize,
+    pub blocked_by_exclusions: bool,
     pub summary: &'static str,
 }
 
@@ -451,6 +452,87 @@ pub fn expand_template(t: &str) -> Option<String> {
     Some(out)
 }
 
+/// Validate and normalize an exact Windows path exclusion. Wildcards and relative paths are rejected.
+pub fn normalize_exclusion(value: &str) -> Result<String, String> {
+    let value = value.trim().replace('/', "\\");
+    if value.is_empty() {
+        return Err("Enter a file or folder path.".into());
+    }
+    if value.contains('*') || value.contains('?') {
+        return Err("Exclusions must be exact paths; wildcards are not supported.".into());
+    }
+    if !Path::new(&value).is_absolute() {
+        return Err("Enter an absolute Windows path.".into());
+    }
+    if value.split('\\').any(|part| part == "." || part == "..") {
+        return Err("Paths containing . or .. segments are not accepted.".into());
+    }
+    let normalized = if value.len() == 3 && value.as_bytes()[1] == b':' {
+        value
+    } else {
+        value.trim_end_matches('\\').to_string()
+    };
+    Ok(normalized)
+}
+
+fn normalized_path(value: &str) -> String {
+    let value = value.replace('/', "\\");
+    let value = if value.len() == 3 && value.as_bytes()[1] == b':' {
+        value
+    } else {
+        value.trim_end_matches('\\').to_string()
+    };
+    value.to_lowercase()
+}
+
+fn path_is_same_or_child(path: &str, parent: &str) -> bool {
+    let path = normalized_path(path);
+    let parent = normalized_path(parent);
+    if path == parent {
+        return true;
+    }
+    if parent.ends_with('\\') {
+        return path.starts_with(&parent);
+    }
+    path.strip_prefix(&parent)
+        .is_some_and(|suffix| suffix.starts_with('\\'))
+}
+
+fn is_excluded(path: &Path, exclusions: &[String]) -> bool {
+    let path = path.to_string_lossy();
+    exclusions
+        .iter()
+        .any(|excluded| path_is_same_or_child(&path, excluded))
+}
+
+fn has_excluded_descendant(path: &Path, exclusions: &[String]) -> bool {
+    let path = path.to_string_lossy();
+    exclusions
+        .iter()
+        .any(|excluded| path_is_same_or_child(excluded, &path))
+}
+
+/// Returns true when a system-managed target cannot honor an exclusion below its storage root.
+pub fn blocked_by_exclusions(target: &Target, exclusions: &[String]) -> bool {
+    if !matches!(target.kind, Kind::WinOld | Kind::EventLogs) {
+        return false;
+    }
+    target.paths.iter().any(|pattern| {
+        let Some(path) = expand_template(pattern) else {
+            return false;
+        };
+        let root = path
+            .split('\\')
+            .take_while(|part| !part.contains('*') && !part.contains('?'))
+            .collect::<Vec<_>>()
+            .join("\\");
+        !root.is_empty()
+            && exclusions.iter().any(|excluded| {
+                path_is_same_or_child(excluded, &root) || path_is_same_or_child(&root, excluded)
+            })
+    })
+}
+
 /// `*` matches any run of characters inside one name, case-insensitive.
 pub fn wild_match(pattern: &str, name: &str) -> bool {
     let (p, n) = (pattern.to_lowercase(), name.to_lowercase());
@@ -542,6 +624,13 @@ fn deep_enough(p: &Path) -> bool {
 }
 
 pub fn dir_size(dir: &Path) -> u64 {
+    dir_size_excluding(dir, &[])
+}
+
+fn dir_size_excluding(dir: &Path, exclusions: &[String]) -> u64 {
+    if is_excluded(dir, exclusions) {
+        return 0;
+    }
     if fs::symlink_metadata(dir).is_ok_and(|m| is_reparse(&m)) {
         return 0;
     }
@@ -553,6 +642,9 @@ pub fn dir_size(dir: &Path) -> u64 {
             .flatten()
             .filter_map(Result::ok)
         {
+            if is_excluded(&e.path(), exclusions) {
+                continue;
+            }
             let Ok(m) = fs::symlink_metadata(e.path()) else {
                 continue;
             };
@@ -569,10 +661,13 @@ pub fn dir_size(dir: &Path) -> u64 {
     total
 }
 
-fn item_size(p: &Path) -> u64 {
+fn item_size_excluding(p: &Path, exclusions: &[String]) -> u64 {
+    if is_excluded(p, exclusions) {
+        return 0;
+    }
     match fs::symlink_metadata(p) {
         Ok(m) if is_reparse(&m) => 0,
-        Ok(m) if m.is_dir() => dir_size(p),
+        Ok(m) if m.is_dir() => dir_size_excluding(p, exclusions),
         Ok(m) => m.len(),
         Err(_) => 0,
     }
@@ -606,7 +701,11 @@ fn preview_concrete_paths(target: &Target) -> (Vec<PathBuf>, bool) {
     (paths, truncated)
 }
 
-fn preview_paths(paths: &[PathBuf], initially_truncated: bool) -> (Vec<PreviewFile>, bool, usize) {
+fn preview_paths(
+    paths: &[PathBuf],
+    initially_truncated: bool,
+    exclusions: &[String],
+) -> (Vec<PreviewFile>, bool, usize) {
     let mut files = Vec::new();
     let mut pending = paths.to_vec();
     let mut truncated = initially_truncated;
@@ -618,6 +717,9 @@ fn preview_paths(paths: &[PathBuf], initially_truncated: bool) -> (Vec<PreviewFi
             break;
         }
         visited += 1;
+        if is_excluded(&path, exclusions) {
+            continue;
+        }
         let Ok(metadata) = fs::symlink_metadata(&path) else {
             continue;
         };
@@ -660,7 +762,7 @@ fn preview_paths(paths: &[PathBuf], initially_truncated: bool) -> (Vec<PreviewFi
 }
 
 /// Preview file paths without mutation. System-managed operations return a scope summary.
-pub fn preview(target: &Target) -> Preview {
+pub fn preview(target: &Target, exclusions: &[String]) -> Preview {
     let (paths, summary, path_truncated) = match target.kind {
         Kind::Paths => {
             let (paths, truncated) = preview_concrete_paths(target);
@@ -697,17 +799,23 @@ pub fn preview(target: &Target) -> Preview {
             false,
         ),
     };
-    let (files, truncated, unreadable_directories) = preview_paths(&paths, path_truncated);
+    let blocked_by_exclusions = blocked_by_exclusions(target, exclusions);
+    let (files, truncated, unreadable_directories) =
+        preview_paths(&paths, path_truncated, exclusions);
     Preview {
         files,
         truncated,
         unreadable_directories,
+        blocked_by_exclusions,
         summary,
     }
 }
 
 /// Bytes that cleaning would free. `None` means the size cannot be known up front (component store).
-pub fn scan(t: &Target) -> Option<u64> {
+pub fn scan(t: &Target, exclusions: &[String]) -> Option<u64> {
+    if blocked_by_exclusions(t, exclusions) {
+        return Some(0);
+    }
     match t.kind {
         Kind::Component => None,
         Kind::Recycle => Some(recycle_size()),
@@ -715,9 +823,14 @@ pub fn scan(t: &Target) -> Option<u64> {
             expand_template(t.paths[0])
                 .map(|d| Path::new(&d).to_path_buf())
                 .filter(|d| d.exists())
-                .map_or(0, |d| dir_size(&d)),
+                .map_or(0, |d| dir_size_excluding(&d, exclusions)),
         ),
-        Kind::Paths | Kind::EventLogs => Some(concrete_paths(t).iter().map(|p| item_size(p)).sum()),
+        Kind::Paths | Kind::EventLogs => Some(
+            concrete_paths(t)
+                .iter()
+                .map(|p| item_size_excluding(p, exclusions))
+                .sum(),
+        ),
     }
 }
 
@@ -737,7 +850,10 @@ fn recycle_size() -> u64 {
 }
 
 /// Deletes what is inside a directory (or the file itself). Locked files are skipped. Returns bytes freed.
-fn clear_item(p: &Path) -> u64 {
+fn clear_item(p: &Path, exclusions: &[String]) -> u64 {
+    if is_excluded(p, exclusions) {
+        return 0;
+    }
     let Ok(m) = fs::symlink_metadata(p) else {
         return 0;
     };
@@ -749,25 +865,36 @@ fn clear_item(p: &Path) -> u64 {
         return if fs::remove_file(p).is_ok() { len } else { 0 };
     }
     let mut freed = 0;
-    for e in fs::read_dir(p).into_iter().flatten().filter_map(Result::ok) {
-        let path = e.path();
-        let Ok(em) = fs::symlink_metadata(&path) else {
-            continue;
-        };
-        if is_reparse(&em) {
-            continue;
-        }
-        if em.is_dir() {
-            let size = dir_size(&path);
-            if fs::remove_dir_all(&path).is_ok() {
-                freed += size;
-            } else {
-                freed += clear_item(&path);
+    let mut pending = vec![p.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+        {
+            let path = entry.path();
+            let Ok(metadata) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if is_reparse(&metadata) || is_excluded(&path, exclusions) {
+                continue;
             }
-        } else {
-            let len = em.len();
-            if fs::remove_file(&path).is_ok() {
-                freed += len;
+            if metadata.is_dir() {
+                if has_excluded_descendant(&path, exclusions) {
+                    pending.push(path);
+                    continue;
+                }
+                let size = dir_size(&path);
+                if fs::remove_dir_all(&path).is_ok() {
+                    freed += size;
+                } else {
+                    pending.push(path);
+                }
+            } else {
+                let len = metadata.len();
+                if fs::remove_file(&path).is_ok() {
+                    freed += len;
+                }
             }
         }
     }
@@ -776,7 +903,16 @@ fn clear_item(p: &Path) -> u64 {
 
 /// Cleans one target and returns bytes freed. Targets that are file patterns delete the matched files; directory
 /// targets are emptied but kept.
-pub fn clean(sys: &dyn System, t: &Target, log: &mut dyn FnMut(&str)) -> u64 {
+pub fn clean(
+    sys: &dyn System,
+    t: &Target,
+    exclusions: &[String],
+    log: &mut dyn FnMut(&str),
+) -> u64 {
+    if blocked_by_exclusions(t, exclusions) {
+        log("WARN Cleanup skipped because an exclusion overlaps this system-managed target.");
+        return 0;
+    }
     match t.kind {
         Kind::Recycle => {
             let before = recycle_size();
@@ -801,7 +937,7 @@ pub fn clean(sys: &dyn System, t: &Target, log: &mut dyn FnMut(&str)) -> u64 {
             0
         }
         Kind::EventLogs => {
-            let before = scan(t).unwrap_or(0);
+            let before = scan(t, exclusions).unwrap_or(0);
             let listed = sys.run("wevtutil.exe", &["el"]);
             if listed.code != 0 {
                 log(&format!(
@@ -819,7 +955,7 @@ pub fn clean(sys: &dyn System, t: &Target, log: &mut dyn FnMut(&str)) -> u64 {
                     ));
                 }
             }
-            before.saturating_sub(scan(t).unwrap_or(before))
+            before.saturating_sub(scan(t, exclusions).unwrap_or(before))
         }
         Kind::WinOld => {
             let Some(dir) = expand_template(t.paths[0]) else {
@@ -865,7 +1001,10 @@ pub fn clean(sys: &dyn System, t: &Target, log: &mut dyn FnMut(&str)) -> u64 {
             let freed = if stop_failed {
                 0
             } else {
-                concrete_paths(t).iter().map(|p| clear_item(p)).sum()
+                concrete_paths(t)
+                    .iter()
+                    .map(|p| clear_item(p, exclusions))
+                    .sum()
             };
             for s in stopped {
                 let out = sys.run("net.exe", &["start", s]);
@@ -929,7 +1068,7 @@ mod tests {
         fs::write(d.join("a.tmp"), vec![0u8; 100]).unwrap();
         fs::write(d.join("sub").join("b.tmp"), vec![0u8; 50]).unwrap();
         assert_eq!(dir_size(&d), 150);
-        assert_eq!(clear_item(&d), 150);
+        assert_eq!(clear_item(&d, &[]), 150);
         assert!(d.exists());
         assert_eq!(fs::read_dir(&d).unwrap().count(), 0);
     }
@@ -940,7 +1079,7 @@ mod tests {
         fs::create_dir_all(d.join("nested")).unwrap();
         fs::write(d.join("a.tmp"), vec![0u8; 23]).unwrap();
         fs::write(d.join("nested").join("b.tmp"), vec![0u8; 41]).unwrap();
-        let (files, truncated, unreadable) = preview_paths(std::slice::from_ref(&d), false);
+        let (files, truncated, unreadable) = preview_paths(std::slice::from_ref(&d), false, &[]);
         assert_eq!(files.len(), 2);
         assert_eq!(files.iter().map(|file| file.bytes).sum::<u64>(), 64);
         assert!(!truncated);
@@ -955,7 +1094,7 @@ mod tests {
         for index in 0..=MAX_PREVIEW_FILES {
             fs::write(d.join(format!("{index:03}.tmp")), b"x").unwrap();
         }
-        let (files, truncated, _) = preview_paths(std::slice::from_ref(&d), false);
+        let (files, truncated, _) = preview_paths(std::slice::from_ref(&d), false, &[]);
         assert_eq!(files.len(), MAX_PREVIEW_FILES);
         assert!(truncated);
     }
@@ -983,9 +1122,9 @@ mod tests {
         if !ok {
             return; // cannot create a junction here; nothing to verify
         }
-        let (preview, _, _) = preview_paths(std::slice::from_ref(&d), false);
+        let (preview, _, _) = preview_paths(std::slice::from_ref(&d), false, &[]);
         assert!(preview.is_empty(), "the preview must not follow a junction");
-        assert_eq!(clear_item(&d), 0);
+        assert_eq!(clear_item(&d, &[]), 0);
         assert!(
             victim.join("keep.txt").exists(),
             "the junction target must survive"
@@ -1031,7 +1170,7 @@ mod tests {
         let sys = FakeSystem::default();
         sys.answer("sc.exe query wuauserv", "STATE : 4 RUNNING");
         let t = TARGETS.iter().find(|t| t.id == "wu").unwrap();
-        clean(&sys, t, &mut |_| {});
+        clean(&sys, t, &[], &mut |_| {});
         assert!(sys.ran("net.exe stop wuauserv"));
         assert!(sys.ran("net.exe start wuauserv"));
         assert!(
@@ -1047,8 +1186,80 @@ mod tests {
             sys.fail.borrow_mut().insert(command.into());
             let mut lines = Vec::new();
             let target = TARGETS.iter().find(|t| t.id == id).unwrap();
-            assert_eq!(clean(&sys, target, &mut |l| lines.push(l.to_string())), 0);
+            assert_eq!(
+                clean(&sys, target, &[], &mut |l| lines.push(l.to_string())),
+                0
+            );
             assert!(lines.iter().any(|l| l.contains("WARN")), "{lines:?}");
         }
+    }
+
+    #[test]
+    fn exclusion_paths_are_exact_case_insensitive_and_component_bounded() {
+        assert!(path_is_same_or_child(
+            r"C:\Cache\nested\item.tmp",
+            r"c:\cache"
+        ));
+        assert!(path_is_same_or_child(r"C:\Cache", r"c:\cache"));
+        assert!(path_is_same_or_child(r"C:\Cache\item.tmp", r"C:\"));
+        assert!(path_is_same_or_child(r"C:\", r"c:\"));
+        assert!(!path_is_same_or_child(r"C:\Cache2\item.tmp", r"C:\Cache"));
+        assert!(!path_is_same_or_child(r"D:\Cache\item.tmp", r"C:\Cache"));
+    }
+
+    #[test]
+    fn exclusion_input_requires_an_absolute_exact_path() {
+        assert!(normalize_exclusion(r"C:\Users\Public\Cache").is_ok());
+        assert!(normalize_exclusion("relative\\Cache").is_err());
+        assert!(normalize_exclusion(r"C:\Cache\..\Documents").is_err());
+        assert!(normalize_exclusion(r"C:\Cache\*").is_err());
+    }
+
+    #[test]
+    fn scan_preview_and_cleanup_preserve_excluded_subtree() {
+        let root = temp("excluded");
+        let protected = root.join("Profiles").join("Keep");
+        fs::create_dir_all(&protected).unwrap();
+        fs::write(protected.join("saved.dat"), vec![0; 31]).unwrap();
+        fs::write(root.join("remove.tmp"), vec![0; 19]).unwrap();
+        let exclusion = normalize_exclusion(&protected.to_string_lossy()).unwrap();
+        let exclusions = [exclusion];
+
+        assert_eq!(dir_size_excluding(&root, &exclusions), 19);
+        let (files, truncated, unreadable) =
+            preview_paths(std::slice::from_ref(&root), false, &exclusions);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].bytes, 19);
+        assert!(!truncated);
+        assert_eq!(unreadable, 0);
+
+        assert_eq!(clear_item(&root, &exclusions), 19);
+        assert!(!root.join("remove.tmp").exists());
+        assert_eq!(fs::read(protected.join("saved.dat")).unwrap().len(), 31);
+    }
+
+    #[test]
+    fn overlapping_event_log_exclusion_skips_global_clear() {
+        let target = TARGETS
+            .iter()
+            .find(|target| target.id == "eventlogs")
+            .unwrap();
+        let pattern = expand_template(target.paths[0]).unwrap();
+        let root = pattern.rsplit_once('\\').unwrap().0;
+        let exclusions = [format!(r"{root}\Application.evtx")];
+        assert!(blocked_by_exclusions(target, &exclusions));
+        let sys = FakeSystem::default();
+        let mut lines = Vec::new();
+        assert_eq!(
+            clean(&sys, target, &exclusions, &mut |line| lines
+                .push(line.to_owned())),
+            0
+        );
+        assert!(sys.commands.borrow().is_empty());
+        assert!(lines.iter().any(|line| line.contains("skipped")));
+        assert!(!blocked_by_exclusions(
+            target,
+            &[r"C:\Users\Public\Cache".into()]
+        ));
     }
 }
