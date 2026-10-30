@@ -1851,7 +1851,7 @@ impl OptiUi {
     fn performance_load_chart(
         ui: &mut Ui,
         title: &str,
-        value: f32,
+        value: Option<f32>,
         data: &VecDeque<Option<f32>>,
         color: Color32,
     ) {
@@ -1862,7 +1862,8 @@ impl OptiUi {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(title).font(FontId::new(T_BODY, semibold())).color(t.text));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new(format!("{value:.0}%")).size(T_SMALL).color(t.muted));
+                    let value = value.map_or_else(|| "Unavailable".into(), |value| format!("{value:.0}%"));
+                    ui.label(RichText::new(value).size(T_SMALL).color(t.muted));
                 });
             });
             ui.add_space(S1);
@@ -1877,7 +1878,7 @@ impl OptiUi {
         kit::page_header(
             ui,
             "Performance",
-            "Live CPU, memory, physical-disk throughput and adapter traffic. GPU load is unavailable in this build.",
+            "Live CPU, memory, disk, adapter traffic and Windows GPU engine readings. GPU load is the busiest reported physical engine across adapters.",
         );
         let processor = if snapshot.cpu_available { format!("{:.0}%", snapshot.cpu) } else { "Unavailable".into() };
         let processor_detail: String = if snapshot.cpu_available { "total logical CPU capacity".into() } else { "Windows CPU counters unavailable".into() };
@@ -1887,6 +1888,11 @@ impl OptiUi {
         } else {
             "Windows memory counters unavailable".into()
         };
+        let gpu = snapshot.gpu_busiest_engine.map_or_else(|| "Unavailable".into(), |value| format!("{value:.1}%"));
+        let gpu_memory = snapshot.gpu_dedicated_memory_bytes.map_or_else(
+            || "Dedicated GPU memory unavailable".into(),
+            |bytes| format!("Dedicated GPU memory in use: {}", format_size(Some(bytes))),
+        );
         let (network, network_detail): (String, String) = if let Some(sample) = snapshot.network {
             (
                 format!("{} / {}", crate::opti::sysmon::format_bytes_per_second(sample.received_bytes_per_sec), crate::opti::sysmon::format_bytes_per_second(sample.sent_bytes_per_sec)),
@@ -1902,14 +1908,15 @@ impl OptiUi {
             ("Processor", processor.as_str(), processor_detail.as_str()),
             ("Memory", memory.as_str(), memory_detail.as_str()),
             ("Adapter receive / send", network.as_str(), network_detail.as_str()),
+            ("Busiest GPU engine", gpu.as_str(), gpu_memory.as_str()),
         ];
-        if ui.available_width() < 680.0 {
+        if ui.available_width() < 960.0 {
             for (title, value, detail) in metrics {
                 Self::performance_metric_card(ui, title, value, detail);
                 ui.add_space(S2);
             }
         } else {
-            ui.columns(3, |columns| {
+            ui.columns(4, |columns| {
                 for (column, (title, value, detail)) in columns.iter_mut().zip(metrics) {
                     Self::performance_metric_card(column, title, value, detail);
                 }
@@ -1917,16 +1924,17 @@ impl OptiUi {
         }
         ui.add_space(S2);
         let load_charts = [
-            ("Processor, last 60 seconds", &self.sampler.cpu_history, snapshot.cpu, kit::load_color(&t, snapshot.cpu)),
-            ("Memory, last 60 seconds", &self.sampler.ram_history, snapshot.ram_fraction() * 100.0, kit::load_color(&t, snapshot.ram_fraction() * 100.0)),
+            ("Processor, last 60 seconds", &self.sampler.cpu_history, snapshot.cpu_available.then_some(snapshot.cpu), kit::load_color(&t, snapshot.cpu)),
+            ("Memory, last 60 seconds", &self.sampler.ram_history, snapshot.ram_available.then_some(snapshot.ram_fraction() * 100.0), kit::load_color(&t, snapshot.ram_fraction() * 100.0)),
+            ("Busiest GPU engine, last 60 seconds", &self.sampler.gpu_history, snapshot.gpu_busiest_engine, snapshot.gpu_busiest_engine.map_or(t.muted, |value| kit::load_color(&t, value))),
         ];
-        if ui.available_width() < 680.0 {
+        if ui.available_width() < 900.0 {
             for (title, history, value, color) in load_charts {
                 Self::performance_load_chart(ui, title, value, history, color);
                 ui.add_space(S2);
             }
         } else {
-            ui.columns(2, |columns| {
+            ui.columns(3, |columns| {
                 for (column, (title, history, value, color)) in columns.iter_mut().zip(load_charts) {
                     Self::performance_load_chart(column, title, value, history, color);
                 }
