@@ -37,6 +37,7 @@
 <li>raw.githubusercontent.com (WindowsSpyBlocker list): only when you apply the optional hosts-file telemetry block.</li>
 <li>Package sources you choose to use: WinGet and the Microsoft Store on Windows; pacman mirrors, the AUR, dnf repositories and Flathub on Linux. Their own policies apply.</li>
 <li>A DNS provider, if you switch DNS in the Network tab. That provider then sees your DNS queries.</li>
+<li>When you choose “Benchmark servers,” the Rust desktop app sends five UDP A-record queries for <code>example.com</code> to each listed provider's first IPv4 DNS server. The benchmark does not change your configured DNS; those servers receive the test domain and your network address.</li>
 </ul>
 
 <h2>Privacy tweaks</h2>
