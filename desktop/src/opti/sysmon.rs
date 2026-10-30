@@ -1,10 +1,10 @@
 //! Live readings for Overview and Performance: CPU load, memory, system-drive capacity, uptime, process count,
-//! aggregate physical-disk throughput and adapter traffic. Samples are read-only, taken once a second and kept in
-//! bounded histories for the charts.
+//! aggregate physical-disk throughput, adapter traffic, busiest GPU-engine utilization and dedicated GPU memory.
+//! Samples are read-only, taken once a second and kept in bounded histories for the charts.
 
 use super::backend::{RegData, System};
 use super::hw;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::FILETIME;
 use windows_sys::Win32::NetworkManagement::IpHelper::{
@@ -14,8 +14,9 @@ use windows_sys::Win32::NetworkManagement::Ndis::NET_IF_OPER_STATUS_UP;
 use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 use windows_sys::Win32::System::ProcessStatus::EnumProcesses;
 use windows_sys::Win32::System::Performance::{
-    PDH_CSTATUS_NEW_DATA, PDH_CSTATUS_VALID_DATA, PDH_FMT_COUNTERVALUE, PDH_FMT_DOUBLE,
-    PDH_HCOUNTER, PDH_HQUERY, PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData,
+    PDH_CSTATUS_NEW_DATA, PDH_CSTATUS_VALID_DATA, PDH_FMT_COUNTERVALUE,
+    PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_HCOUNTER, PDH_HQUERY, PDH_MORE_DATA,
+    PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterArrayW,
     PdhGetFormattedCounterValue, PdhOpenQueryW,
 };
 use windows_sys::Win32::System::SystemInformation::{GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX};
@@ -46,6 +47,8 @@ pub struct Snapshot {
     pub network_available: bool,
     pub disk_activity: Option<f32>,
     pub disk_counter_available: bool,
+    pub gpu_busiest_engine: Option<f32>,
+    pub gpu_dedicated_memory_bytes: Option<u64>,
 }
 
 impl Snapshot {
@@ -131,6 +134,8 @@ pub struct Sampler {
     last_network_totals: Option<(u64, u64)>,
     disk_counter: Option<DiskCounter>,
     pub disk_history: VecDeque<Option<f32>>,
+    pub gpu_history: VecDeque<Option<f32>>,
+    gpu_counter: Option<GpuCounter>,
 }
 
 struct DiskCounter {
@@ -191,6 +196,190 @@ impl Drop for DiskCounter {
     }
 }
 
+struct GpuCounter {
+    query: PDH_HQUERY,
+    engine: Option<PDH_HCOUNTER>,
+    dedicated_memory: Option<PDH_HCOUNTER>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct GpuReading {
+    busiest_engine_percent: Option<f32>,
+    dedicated_memory_bytes: Option<u64>,
+}
+
+impl GpuCounter {
+    fn new() -> Option<Self> {
+        let mut query = std::ptr::null_mut();
+        // SAFETY: query is a valid out-pointer; a null data source opens a live local query.
+        if unsafe { PdhOpenQueryW(std::ptr::null(), 0, &mut query) } != 0 {
+            return None;
+        }
+        let add = |path: &str| {
+            let path: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+            let mut counter = std::ptr::null_mut();
+            // SAFETY: the query is open and both path and counter are valid for the call.
+            (unsafe { PdhAddEnglishCounterW(query, path.as_ptr(), 0, &mut counter) } == 0)
+                .then_some(counter)
+        };
+        let engine = add(r"\GPU Engine(*)\Utilization Percentage");
+        let dedicated_memory = add(r"\GPU Adapter Memory(*)\Dedicated Usage");
+        if engine.is_none() && dedicated_memory.is_none() {
+            // SAFETY: query was opened above and no counters retain it.
+            unsafe { PdhCloseQuery(query) };
+            return None;
+        }
+        let this = Self {
+            query,
+            engine,
+            dedicated_memory,
+        };
+        this.collect();
+        Some(this)
+    }
+
+    fn collect(&self) -> bool {
+        // SAFETY: the query remains owned until Drop and contains the registered counters.
+        unsafe { PdhCollectQueryData(self.query) == 0 }
+    }
+
+    fn sample(&self) -> GpuReading {
+        if !self.collect() {
+            return GpuReading::default();
+        }
+        let engine = self
+            .engine
+            .and_then(formatted_counter_array);
+        let memory = self
+            .dedicated_memory
+            .and_then(formatted_counter_array);
+        let busiest_engine_percent = engine.as_deref().and_then(aggregate_gpu_engines);
+        let dedicated_memory_bytes = memory.as_deref().and_then(sum_dedicated_memory);
+        GpuReading {
+            busiest_engine_percent,
+            dedicated_memory_bytes,
+        }
+    }
+}
+
+impl Drop for GpuCounter {
+    fn drop(&mut self) {
+        // SAFETY: this query was opened by new and is closed exactly once.
+        unsafe { PdhCloseQuery(self.query) };
+    }
+}
+
+fn formatted_counter_array(counter: PDH_HCOUNTER) -> Option<Vec<(String, f64)>> {
+    let mut bytes = 0u32;
+    let mut count = 0u32;
+    // SAFETY: null output requests the required buffer size; both size outputs are valid.
+    let status = unsafe {
+        PdhGetFormattedCounterArrayW(
+            counter,
+            PDH_FMT_DOUBLE,
+            &mut bytes,
+            &mut count,
+            std::ptr::null_mut(),
+        )
+    };
+    if status != PDH_MORE_DATA || bytes == 0 || count == 0 {
+        return None;
+    }
+    let item_size = std::mem::size_of::<PDH_FMT_COUNTERVALUE_ITEM_W>();
+    let item_capacity = (bytes as usize).div_ceil(item_size);
+    let mut items = vec![PDH_FMT_COUNTERVALUE_ITEM_W::default(); item_capacity];
+    let mut actual_bytes = (items.len() * item_size).min(u32::MAX as usize) as u32;
+    let mut actual_count = 0u32;
+    // SAFETY: items is aligned and provides at least the byte count requested by PDH.
+    let status = unsafe {
+        PdhGetFormattedCounterArrayW(
+            counter,
+            PDH_FMT_DOUBLE,
+            &mut actual_bytes,
+            &mut actual_count,
+            items.as_mut_ptr(),
+        )
+    };
+    if status != 0 {
+        return None;
+    }
+    if actual_count as usize > items.len() {
+        return None;
+    }
+    let mut samples = Vec::with_capacity(actual_count as usize);
+    for item in items.iter().take(actual_count as usize) {
+        if !matches!(
+            item.FmtValue.CStatus,
+            PDH_CSTATUS_VALID_DATA | PDH_CSTATUS_NEW_DATA
+        ) {
+            continue;
+        }
+        let name = unsafe { wide_counter_name(item.szName)? };
+        // SAFETY: PDH_FMT_DOUBLE requests this union member.
+        let value = unsafe { item.FmtValue.Anonymous.doubleValue };
+        if value.is_finite() && value >= 0.0 {
+            samples.push((name, value));
+        }
+    }
+    Some(samples)
+}
+
+unsafe fn wide_counter_name(pointer: *const u16) -> Option<String> {
+    if pointer.is_null() {
+        return None;
+    }
+    let len = (0..4096usize).find(|index| {
+        // SAFETY: the PDH item name is a NUL-terminated string owned by the returned array buffer.
+        unsafe { *pointer.add(*index) == 0 }
+    })?;
+    // SAFETY: the preceding scan found a terminator within the bounded counter-name length.
+    Some(String::from_utf16_lossy(unsafe {
+        std::slice::from_raw_parts(pointer, len)
+    }))
+}
+
+fn aggregate_gpu_engines(samples: &[(String, f64)]) -> Option<f32> {
+    let mut engines = HashMap::<String, f64>::new();
+    for (name, value) in samples {
+        let normalized = name.to_ascii_lowercase();
+        let Some(start) = normalized.find("luid_") else {
+            continue;
+        };
+        let Some((adapter, rest)) = normalized[start + 5..].split_once("_phys_") else {
+            continue;
+        };
+        let Some((physical, rest)) = rest.split_once("_eng_") else {
+            continue;
+        };
+        let Some((engine, engine_type)) = rest.split_once("_engtype_") else {
+            continue;
+        };
+        if adapter.is_empty() || physical.is_empty() || engine.is_empty() || engine_type.is_empty()
+        {
+            continue;
+        }
+        let key = format!("{adapter}:{physical}:{engine}:{engine_type}");
+        *engines.entry(key).or_default() += value;
+    }
+    engines
+        .into_values()
+        .map(|busy| busy.clamp(0.0, 100.0) as f32)
+        .reduce(f32::max)
+        .filter(|busy| busy.is_finite())
+}
+
+fn sum_dedicated_memory(samples: &[(String, f64)]) -> Option<u64> {
+    let mut found = false;
+    let total = samples.iter().try_fold(0u64, |total, (_, value)| {
+        if !value.is_finite() || *value < 0.0 || *value >= u64::MAX as f64 {
+            return None;
+        }
+        found = true;
+        total.checked_add(value.round() as u64)
+    })?;
+    found.then_some(total)
+}
+
 impl Sampler {
     pub fn new() -> Self {
         Sampler {
@@ -203,6 +392,8 @@ impl Sampler {
             last_network_totals: read_network_totals(),
             disk_counter: DiskCounter::new(),
             disk_history: VecDeque::new(),
+            gpu_counter: GpuCounter::new(),
+            gpu_history: VecDeque::new(),
         }
     }
 
@@ -233,12 +424,15 @@ impl Sampler {
             self.last_network_totals = Some(totals);
         }
         let disk_activity = self.disk_counter.as_ref().and_then(DiskCounter::sample);
+        let gpu = self.gpu_counter.as_ref().map(GpuCounter::sample).unwrap_or_default();
         self.latest = Snapshot {
             cpu, cpu_available, ram_used, ram_total, ram_available, disk_used, disk_total, disk_available,
             uptime: uptime_secs(), processes: process_count(),
             network, network_available: network_totals.is_some(),
             disk_activity,
             disk_counter_available: self.disk_counter.is_some(),
+            gpu_busiest_engine: gpu.busiest_engine_percent,
+            gpu_dedicated_memory_bytes: gpu.dedicated_memory_bytes,
         };
         push(&mut self.cpu_history, cpu_available.then_some(cpu));
         push(
@@ -247,6 +441,7 @@ impl Sampler {
         );
         push_network(&mut self.network_history, network);
         push(&mut self.disk_history, disk_activity);
+        push(&mut self.gpu_history, gpu.busiest_engine_percent);
         true
     }
 
@@ -260,10 +455,16 @@ impl Sampler {
         self.latest.network = None;
         self.latest.network_available = false;
         self.latest.disk_activity = None;
+        self.latest.gpu_busiest_engine = None;
+        self.latest.gpu_dedicated_memory_bytes = None;
         self.cpu_history.clear();
         self.ram_history.clear();
         self.network_history.clear();
         self.disk_history.clear();
+        self.gpu_history.clear();
+        if let Some(counter) = self.gpu_counter.as_ref() {
+            counter.collect();
+        }
         if let Some(counter) = self.disk_counter.as_ref() {
             counter.collect();
         }
@@ -454,19 +655,68 @@ mod tests {
     }
 
     #[test]
+    fn gpu_engine_usage_sums_processes_per_engine_and_caps_at_one_hundred() {
+        let samples = vec![
+            ("pid_1_luid_0x0000_0x0010_phys_0_eng_0_engtype_3d".into(), 70.0),
+            ("pid_2_luid_0x0000_0x0010_phys_0_eng_0_engtype_3d".into(), 45.0),
+            ("pid_1_luid_0x0000_0x0010_phys_0_eng_1_engtype_copy".into(), 60.0),
+            ("pid_3_luid_0x0000_0x0020_phys_0_eng_0_engtype_3d".into(), 35.0),
+            ("invalid counter instance".into(), 100.0),
+        ];
+        assert_eq!(aggregate_gpu_engines(&samples), Some(100.0));
+        assert_eq!(aggregate_gpu_engines(&[]), None);
+    }
+
+    #[test]
+    fn gpu_dedicated_memory_sum_rejects_invalid_values_and_overflow() {
+        assert_eq!(
+            sum_dedicated_memory(&[("adapter 0".into(), 1_024.0), ("adapter 1".into(), 2_048.0)]),
+            Some(3_072)
+        );
+        assert_eq!(sum_dedicated_memory(&[("adapter".into(), f64::NAN)]), None);
+        assert_eq!(
+            sum_dedicated_memory(&[("adapter 0".into(), u64::MAX as f64), ("adapter 1".into(), 1.0)]),
+            None
+        );
+    }
+
+    #[test]
+    fn gpu_history_is_bounded_and_keeps_unavailable_samples() {
+        let mut history = VecDeque::new();
+        for _ in 0..=HISTORY {
+            push(&mut history, None);
+        }
+        assert_eq!(history.len(), HISTORY);
+        assert!(history.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn gpu_counter_readings_are_valid_or_unavailable() {
+        let Some(counter) = GpuCounter::new() else {
+            return;
+        };
+        let reading = counter.sample();
+        assert!(reading.busiest_engine_percent.is_none_or(|value| (0.0..=100.0).contains(&value)));
+    }
+
+    #[test]
     fn reset_window_discards_samples_from_hidden_time() {
         let mut sampler = Sampler::new();
         push(&mut sampler.cpu_history, Some(42.0));
         push(&mut sampler.ram_history, Some(37.0));
         push_network(&mut sampler.network_history, None);
         push(&mut sampler.disk_history, Some(12.0));
+        push(&mut sampler.gpu_history, Some(24.0));
         sampler.reset_window();
         assert!(sampler.cpu_history.is_empty());
         assert!(sampler.ram_history.is_empty());
         assert!(sampler.network_history.is_empty());
         assert!(sampler.disk_history.is_empty());
+        assert!(sampler.gpu_history.is_empty());
         assert!(sampler.latest.network.is_none());
         assert!(sampler.latest.disk_activity.is_none());
+        assert!(sampler.latest.gpu_busiest_engine.is_none());
+        assert!(sampler.latest.gpu_dedicated_memory_bytes.is_none());
         assert!(sampler.last_at.is_none());
     }
 
