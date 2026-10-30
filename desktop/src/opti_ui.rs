@@ -549,6 +549,13 @@ enum ActivityEntry<'a> {
     Operation(&'a OperationEntry),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecentAction {
+    pub title: String,
+    pub hint: String,
+    pub search: String,
+}
+
 impl ActivityEntry<'_> {
     fn time(&self) -> &str {
         match self {
@@ -576,6 +583,39 @@ fn activity_entries<'a>(
         .collect();
     entries.sort_by(|left, right| right.time().cmp(left.time()));
     entries
+}
+
+fn recent_actions(
+    history: &[HistoryEntry],
+    operations: &[OperationEntry],
+    limit: usize,
+) -> Vec<RecentAction> {
+    activity_entries(history, operations, "")
+        .into_iter()
+        .take(limit)
+        .map(|entry| match entry {
+            ActivityEntry::Tweak(entry) => {
+                let action = match entry.action {
+                    HistoryAction::Apply => "Applied",
+                    HistoryAction::Undo => "Undid",
+                };
+                let count = entry.changes.len();
+                RecentAction {
+                    title: format!(
+                        "{action} {count} {}",
+                        if count == 1 { "tweak" } else { "tweaks" }
+                    ),
+                    hint: format!("Activity · {}", entry.time),
+                    search: entry.time.clone(),
+                }
+            }
+            ActivityEntry::Operation(entry) => RecentAction {
+                title: entry.title.clone(),
+                hint: format!("{} · {}", entry.status.label(), entry.time),
+                search: entry.time.clone(),
+            },
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -658,6 +698,59 @@ mod operation_history_tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].time(), "2026-10-29T12:05:00Z");
         assert_eq!(entries[1].time(), "2026-10-29T12:00:00Z");
+    }
+
+    #[test]
+    fn recent_actions_use_newest_records_and_activity_search_timestamps() {
+        let older_tweak = HistoryEntry {
+            time: "2026-10-29T12:00:00Z".into(),
+            action: HistoryAction::Apply,
+            changes: vec![HistoryChange {
+                id: "privacy.telemetry".into(),
+                name: "Disable telemetry".into(),
+                verified: true,
+                undo_available: true,
+                details: Vec::new(),
+            }],
+        };
+        let newer_operation = OperationEntry {
+            time: "2026-10-30T12:00:00Z".into(),
+            title: "Reset network stack".into(),
+            status: OperationStatus::Warnings,
+            details: Vec::new(),
+        };
+
+        let recent = recent_actions(&[older_tweak], &[newer_operation], 1);
+
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].title, "Reset network stack");
+        assert_eq!(recent[0].hint, "Warnings · 2026-10-30T12:00:00Z");
+        assert_eq!(recent[0].search, "2026-10-30T12:00:00Z");
+    }
+
+    #[test]
+    fn recent_tweak_action_label_handles_singular_and_plural() {
+        let one = HistoryEntry {
+            time: "2026-10-30T12:00:00Z".into(),
+            action: HistoryAction::Undo,
+            changes: vec![HistoryChange {
+                id: "privacy.telemetry".into(),
+                name: "Disable telemetry".into(),
+                verified: true,
+                undo_available: false,
+                details: Vec::new(),
+            }],
+        };
+        let two = HistoryEntry {
+            time: "2026-10-30T12:01:00Z".into(),
+            changes: vec![one.changes[0].clone(), one.changes[0].clone()],
+            ..one.clone()
+        };
+
+        let recent = recent_actions(&[one, two], &[], 2);
+
+        assert_eq!(recent[0].title, "Undid 2 tweaks");
+        assert_eq!(recent[1].title, "Undid 1 tweak");
     }
 }
 
@@ -1117,6 +1210,15 @@ impl OptiUi {
 
     pub fn operation_entries(&self) -> &[OperationEntry] {
         &self.operations
+    }
+
+    pub fn recent_actions(&self, limit: usize) -> Vec<RecentAction> {
+        recent_actions(&self.history, &self.operations, limit)
+    }
+
+    pub fn search_activity(&mut self, ctx: &egui::Context, query: &str) {
+        self.history_search = query.to_owned();
+        self.set_page(ctx, Page::Activity);
     }
 
     pub fn current_job(&self) -> Option<&str> {

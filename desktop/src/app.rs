@@ -5,7 +5,7 @@ use crate::notifications::{
     self, Action as NotificationAction, Item as Notification, Kind as NotificationKind,
     MAX_SAVED_DISMISSALS,
 };
-use crate::opti_ui::{OptiEvent, OptiUi};
+use crate::opti_ui::{OptiEvent, OptiUi, RecentAction};
 use crate::software_ui::SoftwareUi;
 use crate::theme::{
     self, S1, S2, S3, S4, S5, T_BODY, T_CAPTION, T_DISPLAY, T_HEADING, T_SMALL, Tone, ease_out,
@@ -29,6 +29,7 @@ const TOP_BAR_COMPACT_WIDTH: f32 = 1280.0;
 // The full text actions and native window controls share the row with Store search.
 const TOP_BAR_ACTIONS_WIDTH: f32 = 780.0;
 const PLATFORMS: [&str; 4] = [PC, ANDROID, TV, "All"];
+const PALETTE_RECENT_ACTION_LIMIT: usize = 8;
 
 enum UpdateState {
     Idle,
@@ -56,6 +57,7 @@ enum Section {
 #[derive(Clone, Copy)]
 enum PaletteCommand {
     Page(&'static str),
+    RecentActivity,
     Store,
     SearchStore,
     SearchTweaks,
@@ -73,11 +75,13 @@ struct PaletteEntry {
     command: PaletteCommand,
 }
 
+#[derive(Clone)]
 struct PaletteMatch {
     name: std::borrow::Cow<'static, str>,
     category: &'static str,
-    hint: &'static str,
+    hint: std::borrow::Cow<'static, str>,
     command: PaletteCommand,
+    activity_search: Option<String>,
 }
 
 const PALETTE_COMMANDS: [PaletteEntry; 19] = [
@@ -96,7 +100,7 @@ const PALETTE_COMMANDS: [PaletteEntry; 19] = [
     PaletteEntry {
         name: "Activity",
         category: "Workspace",
-        hint: "Search confirmed tweak changes",
+        hint: "Search recorded changes and system-operation results",
         command: PaletteCommand::Page("Activity"),
     },
     PaletteEntry {
@@ -302,14 +306,29 @@ const PALETTE_THEME_COMMANDS: [PaletteEntry; 17] = [
     },
 ];
 
+#[cfg(test)]
 fn matching_palette_commands(query: &str) -> Vec<PaletteMatch> {
+    matching_palette_commands_with_recent(query, &[])
+}
+
+fn matching_palette_commands_with_recent(
+    query: &str,
+    recent_actions: &[RecentAction],
+) -> Vec<PaletteMatch> {
     let normalized_query = search_chars(query);
     if normalized_query.is_empty() {
-        return PALETTE_COMMANDS
+        let mut matches = recent_actions
             .iter()
-            .chain(PALETTE_THEME_COMMANDS.iter())
-            .map(palette_match)
-            .collect();
+            .map(recent_palette_match)
+            .collect::<Vec<_>>();
+        matches.extend(
+            PALETTE_COMMANDS
+                .iter()
+                .chain(PALETTE_THEME_COMMANDS.iter())
+                .map(palette_match)
+                .collect::<Vec<_>>(),
+        );
+        return matches;
     }
 
     let mut matches = PALETTE_COMMANDS
@@ -322,7 +341,19 @@ fn matching_palette_commands(query: &str) -> Vec<PaletteMatch> {
                 .map(|score| (entry, (true, score)))
                 .or_else(|| hint_score.map(|score| (entry, (false, score))))
         })
+        .map(|(entry, score)| (palette_match(entry), score))
         .collect::<Vec<_>>();
+
+    matches.extend(recent_actions.iter().filter_map(|action| {
+        let name_score = fuzzy_match_score(&normalized_query, &action.title);
+        let hint_score = fuzzy_match_score(&normalized_query, &action.hint);
+        let category_score = fuzzy_match_score(&normalized_query, "Recent action");
+        name_score
+            .map(|score| (true, score))
+            .or_else(|| hint_score.map(|score| (false, score)))
+            .or_else(|| category_score.map(|score| (false, score)))
+            .map(|score| (recent_palette_match(action), score))
+    }));
     matches.sort_by(|(_, left), (_, right)| right.cmp(left));
     if matches.is_empty() {
         let display_query = query
@@ -334,22 +365,31 @@ fn matching_palette_commands(query: &str) -> Vec<PaletteMatch> {
         return vec![PaletteMatch {
             name: format!("Search tweaks for “{display_query}”").into(),
             category: "Optimization",
-            hint: "Filter the tweak catalog by this text",
+            hint: "Filter the tweak catalog by this text".into(),
             command: PaletteCommand::SearchTweaks,
+            activity_search: None,
         }];
     }
-    matches
-        .into_iter()
-        .map(|(entry, _)| palette_match(entry))
-        .collect()
+    matches.into_iter().map(|(entry, _)| entry).collect()
 }
 
 fn palette_match(entry: &PaletteEntry) -> PaletteMatch {
     PaletteMatch {
         name: entry.name.into(),
         category: entry.category,
-        hint: entry.hint,
+        hint: entry.hint.into(),
         command: entry.command,
+        activity_search: None,
+    }
+}
+
+fn recent_palette_match(action: &RecentAction) -> PaletteMatch {
+    PaletteMatch {
+        name: action.title.clone().into(),
+        category: "Recent",
+        hint: action.hint.clone().into(),
+        command: PaletteCommand::RecentActivity,
+        activity_search: Some(action.search.clone()),
     }
 }
 
@@ -1652,13 +1692,14 @@ impl OrionApp {
 
     fn command_palette(&mut self, ctx: &egui::Context) {
         let t = tokens(ctx);
-        let matches = matching_palette_commands(&self.palette_query);
+        let recent_actions = self.opti.recent_actions(PALETTE_RECENT_ACTION_LIMIT);
+        let matches = matching_palette_commands_with_recent(&self.palette_query, &recent_actions);
         if matches.is_empty() {
             self.palette_selected = 0;
         } else {
             self.palette_selected = self.palette_selected.min(matches.len() - 1);
         }
-        let mut chosen = None;
+        let mut chosen: Option<PaletteMatch> = None;
         let mut close = false;
         let modal = egui::Modal::new(egui::Id::NULL.with("command-palette"))
             .backdrop_color(Color32::from_black_alpha(if t.dark { 155 } else { 80 }))
@@ -1692,7 +1733,7 @@ impl OrionApp {
                                 ),
                             );
                             if response.clicked() {
-                                chosen = Some(command.command);
+                                chosen = Some(command.clone());
                             }
                         }
                     });
@@ -1720,9 +1761,7 @@ impl OrionApp {
                 .unwrap_or(matches.len() - 1);
         }
         if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
-            chosen = matches
-                .get(self.palette_selected)
-                .map(|command| command.command);
+            chosen = matches.get(self.palette_selected).cloned();
         }
         if let Some(command) = chosen {
             let query = self.palette_query.clone();
@@ -1732,12 +1771,20 @@ impl OrionApp {
         }
     }
 
-    fn run_palette_command(&mut self, ctx: &egui::Context, command: PaletteCommand, query: &str) {
+    fn run_palette_command(&mut self, ctx: &egui::Context, command: PaletteMatch, query: &str) {
         self.show_palette = false;
-        match command {
+        match command.command {
             PaletteCommand::Page(name) => {
                 self.set_section(ctx, Section::Optimaxer);
                 self.opti.show_page(ctx, name);
+            }
+            PaletteCommand::RecentActivity => {
+                self.set_section(ctx, Section::Optimaxer);
+                if let Some(search) = command.activity_search.as_deref() {
+                    self.opti.search_activity(ctx, search);
+                } else {
+                    self.opti.show_page(ctx, "Activity");
+                }
             }
             PaletteCommand::Store => self.set_section(ctx, Section::Store),
             PaletteCommand::SearchStore => {
@@ -3026,13 +3073,63 @@ fn resize_edges(ctx: &egui::Context) {
 #[cfg(test)]
 mod app_tests {
     use super::{
-        PaletteCommand, matching_palette_commands, palette_tweak_query, retain_store_favorites,
+        PaletteCommand, matching_palette_commands, matching_palette_commands_with_recent,
+        palette_tweak_query, retain_store_favorites,
     };
     use crate::model::AppItem;
+    use crate::opti_ui::RecentAction;
 
     #[test]
     fn palette_lists_all_commands_for_blank_query() {
         assert_eq!(matching_palette_commands("  ").len(), 36);
+    }
+
+    #[test]
+    fn palette_shows_recent_actions_before_static_commands() {
+        let recent = [RecentAction {
+            title: "Reset network stack".into(),
+            hint: "Finished · 2026-10-30T12:00:00Z".into(),
+            search: "2026-10-30T12:00:00Z".into(),
+        }];
+
+        let results = matching_palette_commands_with_recent("", &recent);
+
+        assert_eq!(results[0].name, "Reset network stack");
+        assert_eq!(results[0].category, "Recent");
+        assert_eq!(
+            results[0].activity_search.as_deref(),
+            Some("2026-10-30T12:00:00Z")
+        );
+        assert_eq!(results[1].name, "Overview");
+    }
+
+    #[test]
+    fn palette_fuzzy_search_finds_recent_actions_and_timestamps() {
+        let recent = [RecentAction {
+            title: "Reset network stack".into(),
+            hint: "Finished · 2026-10-30T12:00:00Z".into(),
+            search: "2026-10-30T12:00:00Z".into(),
+        }];
+
+        let title_match = matching_palette_commands_with_recent("reset net", &recent);
+        let title_action = title_match
+            .iter()
+            .find(|entry| entry.name == "Reset network stack")
+            .expect("recent title should match");
+        assert_eq!(
+            title_action.activity_search.as_deref(),
+            Some("2026-10-30T12:00:00Z")
+        );
+
+        let date_match = matching_palette_commands_with_recent("2026-10-30", &recent);
+        let date_action = date_match
+            .iter()
+            .find(|entry| entry.name == "Reset network stack")
+            .expect("recent timestamp should match");
+        assert_eq!(
+            date_action.activity_search.as_deref(),
+            Some("2026-10-30T12:00:00Z")
+        );
     }
 
     #[test]
