@@ -4403,7 +4403,7 @@ impl OptiUi {
         kit::page_header(
             ui,
             "Gaming",
-            "Review the existing reversible Windows gaming settings. These switches do not promise higher frame rates.",
+            "Review the existing reversible Windows gaming settings. These settings do not promise higher frame rates.",
         );
         self.refresh_game_states(ctx);
 
@@ -4442,75 +4442,149 @@ impl OptiUi {
             .collect();
         kit::card(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("Windows gaming setting status").font(FontId::new(T_BODY, semibold())).color(t.text));
-                ui.label(RichText::new("Registry configuration only; this does not measure live Game Bar or capture activity.").size(T_SMALL).color(t.muted));
-            });
+            let status_items = [
+                ("Game Mode", "game-mode"),
+                ("Game DVR capture", "game-dvr"),
+                ("DVR machine policy", "game-dvr-policy"),
+                ("Global fullscreen override", "game-fso"),
+            ];
+            let draw_status = |ui: &mut Ui, label: &str, id: &str| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(label).size(T_SMALL).color(t.text));
+                    let current = self.status.get(id).copied();
+                    let tone = match current {
+                        Some(true) => Tone::Good,
+                        Some(false) => Tone::Warn,
+                        None => Tone::Bad,
+                    };
+                    kit::chip(ui, setting_match_label(current), tone);
+                });
+            };
+            if ui.available_width() < 640.0 {
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new("Windows gaming setting status")
+                            .font(FontId::new(T_BODY, semibold()))
+                            .color(t.text),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new("Registry configuration only; this does not measure live Game Bar or capture activity.")
+                                .size(T_SMALL)
+                                .color(t.muted),
+                        )
+                        .wrap(),
+                    );
+                });
+            } else {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new("Windows gaming setting status").font(FontId::new(T_BODY, semibold())).color(t.text));
+                    ui.add(egui::Label::new(RichText::new("Registry configuration only; this does not measure live Game Bar or capture activity.").size(T_SMALL).color(t.muted)).wrap());
+                });
+            }
             ui.add_space(S1);
-            ui.horizontal_wrapped(|ui| {
-                for (label, id) in [
-                    ("Game Mode", "game-mode"),
-                    ("Game DVR capture", "game-dvr"),
-                    ("DVR machine policy", "game-dvr-policy"),
-                    ("Global fullscreen override", "game-fso"),
-                ] {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(label).size(T_SMALL).color(t.text));
-                        let current = self.status.get(id).copied();
-                        let tone = match current {
-                            Some(true) => Tone::Good,
-                            Some(false) => Tone::Warn,
-                            None => Tone::Bad,
-                        };
-                        kit::chip(ui, setting_match_label(current), tone);
-                    });
-                    ui.add_space(S2);
-                }
-            });
+            if ui.available_width() < 640.0 {
+                ui.columns(2, |columns| {
+                    let column_count = columns.len();
+                    for (index, (label, id)) in status_items.iter().enumerate() {
+                        let column = &mut columns[index % column_count];
+                        draw_status(column, label, id);
+                        column.add_space(S2);
+                    }
+                });
+            } else {
+                ui.horizontal_wrapped(|ui| {
+                    for (label, id) in status_items {
+                        draw_status(ui, label, id);
+                        ui.add_space(S2);
+                    }
+                });
+            }
         });
         ui.add_space(S2);
+        let mut requested_tweak_review: Option<(String, bool)> = None;
         kit::card(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal_wrapped(|ui| {
-                kit::chip(ui, &format!("{} settings", supported.len()), Tone::Brand);
-                ui.label(RichText::new("Current state is read from Windows. Incompatible settings stay visible with the reason they were skipped.").size(T_SMALL).color(t.muted));
-            });
+            if ui.available_width() < 640.0 {
+                ui.vertical(|ui| {
+                    kit::chip(ui, &format!("{} settings", supported.len()), Tone::Brand);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new("Current state is read from Windows. Incompatible rows show why; review one setting at a time or use the batch actions below.")
+                                .size(T_SMALL)
+                                .color(t.muted),
+                        )
+                        .wrap(),
+                    );
+                });
+            } else {
+                ui.horizontal_wrapped(|ui| {
+                    kit::chip(ui, &format!("{} settings", supported.len()), Tone::Brand);
+                    ui.add(egui::Label::new(RichText::new("Current state is read from Windows. Incompatible rows show why; review one setting at a time or use the batch actions below.").size(T_SMALL).color(t.muted)).wrap());
+                });
+            }
             ui.add_space(S2);
             for tw in &supported {
                 let applied = self.status.get(&tw.id).copied().unwrap_or(false);
                 let compatible = hw::fits(tw, traits);
+                let can_review = self.busy.is_none() && self.elevated;
                 egui::Frame::new()
                     .inner_margin(Margin::symmetric(S2 as i8, S1 as i8))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        let details_width = (ui.available_width() - 96.0).max(120.0);
-                        ui.horizontal(|ui| {
-                            ui.scope(|ui| {
-                                ui.set_max_width(details_width);
-                                ui.vertical(|ui| {
-                                    ui.label(
+                        let draw_details = |ui: &mut Ui| {
+                            ui.vertical(|ui| {
+                                ui.add(
+                                    egui::Label::new(
                                         RichText::new(&tw.name)
                                             .font(FontId::new(T_BODY, semibold()))
                                             .color(t.text),
-                                    );
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(&tw.desc).size(T_CAPTION).color(t.muted),
-                                        )
-                                        .wrap(),
-                                    );
+                                    )
+                                    .wrap(),
+                                );
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&tw.desc).size(T_CAPTION).color(t.muted),
+                                    )
+                                    .wrap(),
+                                );
+                            });
+                        };
+                        let mut draw_action = |ui: &mut Ui| {
+                            if applied {
+                                kit::chip(ui, "Applied", Tone::Good);
+                                if kit::secondary(ui, "Review undo", can_review).clicked() {
+                                    requested_tweak_review = Some((tw.id.clone(), true));
+                                }
+                            } else if !compatible {
+                                kit::chip(ui, "Not applicable", Tone::Neutral);
+                            } else {
+                                kit::chip(ui, "Available", Tone::Neutral);
+                                if kit::secondary(ui, "Review apply", can_review).clicked() {
+                                    requested_tweak_review = Some((tw.id.clone(), false));
+                                }
+                            }
+                        };
+                        let row_width = ui.available_width();
+                        if row_width < 640.0 {
+                            ui.vertical(|ui| {
+                                ui.set_width(row_width);
+                                draw_details(ui);
+                                ui.add_space(S1);
+                                ui.horizontal(|ui| draw_action(ui));
+                            });
+                        } else {
+                            let details_width = (row_width - 184.0).max(120.0);
+                            ui.horizontal(|ui| {
+                                ui.scope(|ui| {
+                                    ui.set_max_width(details_width);
+                                    draw_details(ui);
+                                });
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    draw_action(ui);
                                 });
                             });
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if applied {
-                                    kit::chip(ui, "Applied", Tone::Good);
-                                } else if !compatible {
-                                    kit::chip(ui, "Not applicable", Tone::Neutral);
-                                } else {
-                                    kit::chip(ui, "Available", Tone::Neutral);
-                                }
-                            });
-                        });
+                        }
                         if !compatible && let Some(reason) = hw::fit_reason(tw, traits) {
                             ui.label(RichText::new(reason).size(T_SMALL).color(t.subtle));
                         }
@@ -4518,6 +4592,13 @@ impl OptiUi {
                 ui.separator();
             }
         });
+        if let Some((id, undo)) = requested_tweak_review {
+            if undo {
+                self.preview_undo_ids(vec![id]);
+            } else {
+                self.preview_apply_ids(ctx, vec![id]);
+            }
+        }
         ui.add_space(S2);
         ui.horizontal_wrapped(|ui| {
             let ready = self.busy.is_none() && self.elevated;
