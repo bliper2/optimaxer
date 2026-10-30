@@ -1,9 +1,10 @@
-//! Network page: DNS provider switch (optionally with DNS-over-HTTPS), cache flush, stack reset and a latency
-//! benchmark. Adapters come from GetAdaptersAddresses; changes go through netsh.
+//! Network page: DNS provider switch (optionally with DNS-over-HTTPS), cache flush, stack reset and DNS query timing.
+//! Adapters come from GetAdaptersAddresses; changes go through netsh.
 
 use super::backend::System;
 use super::services::DnsProvider;
-use std::net::{SocketAddr, TcpStream};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::ERROR_BUFFER_OVERFLOW;
 use windows_sys::Win32::NetworkManagement::IpHelper::{GetAdaptersAddresses, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_MULTICAST, IP_ADAPTER_ADDRESSES_LH};
@@ -153,16 +154,156 @@ pub fn reset_stack(sys: &dyn System, log: &mut dyn FnMut(&str)) {
     log(if succeeded { "Network stack reset. Restart Windows to finish." } else { "Network reset incomplete. Review the failed steps and restart Windows after resolving them." });
 }
 
-/// Average TCP connect time to port 53 over `samples` tries, in milliseconds.
-pub fn latency_ms(ip: &str, samples: u32) -> Option<f64> {
-    let addr: SocketAddr = format!("{ip}:53").parse().ok()?;
-    let times: Vec<f64> = (0..samples)
-        .filter_map(|_| {
-            let t = Instant::now();
-            TcpStream::connect_timeout(&addr, Duration::from_millis(1500)).ok().map(|_| t.elapsed().as_secs_f64() * 1000.0)
-        })
-        .collect();
-    (!times.is_empty()).then(|| (times.iter().sum::<f64>() / times.len() as f64 * 10.0).round() / 10.0)
+const DNS_TIMEOUT: Duration = Duration::from_secs(1);
+const DNS_MAX_PROBES: u32 = 5;
+static NEXT_QUERY_ID: AtomicU16 = AtomicU16::new(1);
+
+#[derive(Clone, Debug, Default)]
+pub struct DnsBenchmark {
+    pub attempts: u32,
+    pub answers: u32,
+    pub average_ms: Option<f64>,
+    /// Mean absolute change between consecutive successful DNS response times.
+    pub jitter_ms: Option<f64>,
+}
+
+/// Times UDP A-record queries against a DNS server. Failed probes are not IP packet-loss data.
+pub fn benchmark_dns(ip: &str, samples: u32) -> DnsBenchmark {
+    let Ok(ip) = ip.parse::<IpAddr>() else {
+        return DnsBenchmark::default();
+    };
+    benchmark_dns_at(SocketAddr::new(ip, 53), samples, DNS_TIMEOUT)
+}
+
+fn benchmark_dns_at(server: SocketAddr, samples: u32, timeout: Duration) -> DnsBenchmark {
+    let attempts = samples.clamp(1, DNS_MAX_PROBES);
+    let mut times = Vec::with_capacity(attempts as usize);
+    for _ in 0..attempts {
+        if let Some(ms) = dns_query_ms(server, timeout) {
+            times.push(ms);
+        }
+    }
+    let average_ms = average(&times);
+    let jitter_ms = if times.len() > 1 {
+        let changes: Vec<f64> = times.windows(2).map(|pair| (pair[1] - pair[0]).abs()).collect();
+        average(&changes)
+    } else {
+        None
+    };
+    DnsBenchmark { attempts, answers: times.len() as u32, average_ms, jitter_ms }
+}
+
+fn average(values: &[f64]) -> Option<f64> {
+    (!values.is_empty()).then(|| (values.iter().sum::<f64>() / values.len() as f64 * 10.0).round() / 10.0)
+}
+
+fn dns_query_ms(server: SocketAddr, timeout: Duration) -> Option<f64> {
+    let bind_addr = if server.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" };
+    let socket = UdpSocket::bind(bind_addr).ok()?;
+    socket.set_read_timeout(Some(timeout)).ok()?;
+    let id = NEXT_QUERY_ID.fetch_add(1, Ordering::Relaxed);
+    let query = dns_query(id);
+    let started = Instant::now();
+    socket.send_to(&query, server).ok()?;
+    let mut response = [0u8; 2048];
+    let (length, source) = socket.recv_from(&mut response).ok()?;
+    if source != server || !valid_dns_answer(&response[..length], id) {
+        return None;
+    }
+    Some(started.elapsed().as_secs_f64() * 1000.0)
+}
+
+fn dns_query(id: u16) -> Vec<u8> {
+    let mut query = Vec::with_capacity(29);
+    query.extend_from_slice(&id.to_be_bytes());
+    query.extend_from_slice(&0x0100u16.to_be_bytes()); // standard query, recursion desired
+    query.extend_from_slice(&1u16.to_be_bytes());
+    query.extend_from_slice(&[0; 6]); // answer, authority, additional counts
+    for label in ["example", "com"] {
+        query.push(label.len() as u8);
+        query.extend_from_slice(label.as_bytes());
+    }
+    query.push(0);
+    query.extend_from_slice(&1u16.to_be_bytes()); // A
+    query.extend_from_slice(&1u16.to_be_bytes()); // IN
+    query
+}
+
+fn valid_dns_answer(response: &[u8], id: u16) -> bool {
+    if response.len() < 12
+        || u16::from_be_bytes([response[0], response[1]]) != id
+        || response[2] & 0x80 == 0 // response, not another query
+        || response[2] & 0x02 != 0 // not truncated
+        || response[3] & 0x0f != 0 // NOERROR
+        || u16::from_be_bytes([response[4], response[5]]) != 1
+    {
+        return false;
+    }
+
+    let answers = u16::from_be_bytes([response[6], response[7]]);
+    if answers == 0 {
+        return false;
+    }
+
+    let Some(mut offset) = skip_dns_name(response, 12).and_then(|end| end.checked_add(4)) else {
+        return false;
+    };
+    if offset > response.len() {
+        return false;
+    }
+
+    let mut found_ipv4 = false;
+    for _ in 0..answers {
+        let Some(end_name) = skip_dns_name(response, offset) else {
+            return false;
+        };
+        let Some(record_end) = end_name.checked_add(10) else {
+            return false;
+        };
+        if record_end > response.len() {
+            return false;
+        }
+        let record_type = u16::from_be_bytes([response[end_name], response[end_name + 1]]);
+        let record_class = u16::from_be_bytes([response[end_name + 2], response[end_name + 3]]);
+        let data_length = u16::from_be_bytes([response[end_name + 8], response[end_name + 9]]) as usize;
+        let Some(next_record) = record_end.checked_add(data_length) else {
+            return false;
+        };
+        if next_record > response.len() {
+            return false;
+        }
+        found_ipv4 |= record_type == 1 && record_class == 1 && data_length == 4;
+        offset = next_record;
+    }
+    found_ipv4
+}
+
+fn skip_dns_name(message: &[u8], start: usize) -> Option<usize> {
+    let mut offset = start;
+    loop {
+        let length = *message.get(offset)?;
+        match length & 0xc0 {
+            0xc0 => {
+                let pointer = message.get(offset + 1)?;
+                let target = usize::from(length & 0x3f) << 8 | usize::from(*pointer);
+                return (target < offset).then_some(offset + 2);
+            }
+            0 => {
+                offset += 1;
+                if length == 0 {
+                    return Some(offset);
+                }
+                if length > 63 {
+                    return None;
+                }
+                offset = offset.checked_add(usize::from(length))?;
+                if offset > message.len() {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -170,6 +311,7 @@ mod tests {
     use super::*;
     use crate::opti::backend::fake::FakeSystem;
     use crate::opti::services::Data;
+    use std::thread;
 
     fn provider(name: &str) -> DnsProvider {
         Data::load().dns.into_iter().find(|p| p.name == name).unwrap()
@@ -195,6 +337,77 @@ mod tests {
     fn provider_without_ipv6_clears_old_ipv6_servers() {
         let cmds = dns_commands("Wi-Fi", &provider("OpenDNS"));
         assert!(cmds.iter().any(|c| c[1] == "ipv6" && c.contains(&"source=dhcp".to_string())));
+    }
+
+    #[test]
+    fn dns_query_builds_recursive_example_com_a_lookup() {
+        let query = dns_query(0x1234);
+        assert_eq!(&query[..2], &[0x12, 0x34]);
+        assert_eq!(&query[2..4], &[0x01, 0x00]);
+        assert_eq!(&query[12..], b"\x07example\x03com\x00\x00\x01\x00\x01");
+    }
+
+    #[test]
+    fn dns_response_validation_rejects_wrong_or_incomplete_answers() {
+        let mut response = dns_query(0x1234);
+        response[2] = 0x81;
+        response[3] = 0x80;
+        response[6..8].copy_from_slice(&1u16.to_be_bytes());
+        response.extend_from_slice(&[0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01]);
+        response.extend_from_slice(&[0, 0, 0, 60, 0, 4, 93, 184, 216, 34]);
+        assert!(valid_dns_answer(&response, 0x1234));
+        assert!(!valid_dns_answer(&response, 0x4321));
+        response[2] = 0x01; // query, not response
+        assert!(!valid_dns_answer(&response, 0x1234));
+        response[2] = 0x83; // truncated response
+        assert!(!valid_dns_answer(&response, 0x1234));
+        response[2] = 0x81;
+        response[3] = 0x83; // NXDOMAIN
+        assert!(!valid_dns_answer(&response, 0x1234));
+        response[3] = 0x80;
+        response[6..8].copy_from_slice(&0u16.to_be_bytes());
+        assert!(!valid_dns_answer(&response, 0x1234));
+        response[6..8].copy_from_slice(&1u16.to_be_bytes());
+        response.truncate(12);
+        assert!(!valid_dns_answer(&response, 0x1234));
+    }
+
+    #[test]
+    fn dns_benchmark_measures_udp_answers_and_response_jitter() {
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let address = server.local_addr().unwrap();
+        let responder = thread::spawn(move || {
+            let mut query = [0u8; 512];
+            for _ in 0..3 {
+                let (length, client) = server.recv_from(&mut query).unwrap();
+                let request = &query[..length];
+                let mut answer = request.to_vec();
+                answer[2] = 0x81; // response, recursion available
+                answer[3] = 0x80;
+                answer[6..8].copy_from_slice(&1u16.to_be_bytes());
+                answer.extend_from_slice(&[0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01]);
+                answer.extend_from_slice(&[0, 0, 0, 60, 0, 4, 93, 184, 216, 34]);
+                server.send_to(&answer, client).unwrap();
+            }
+        });
+        let result = benchmark_dns_at(address, 3, Duration::from_millis(500));
+        responder.join().unwrap();
+        assert_eq!(result.attempts, 3);
+        assert_eq!(result.answers, 3);
+        assert!(result.average_ms.is_some());
+        assert!(result.jitter_ms.is_some());
+    }
+
+    #[test]
+    fn dns_benchmark_limits_probes_and_reports_no_answer() {
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let address = server.local_addr().unwrap();
+        drop(server);
+        let result = benchmark_dns_at(address, u32::MAX, Duration::from_millis(30));
+        assert_eq!(result.attempts, DNS_MAX_PROBES);
+        assert_eq!(result.answers, 0);
+        assert_eq!(result.average_ms, None);
+        assert_eq!(result.jitter_ms, None);
     }
 
     #[test]

@@ -51,7 +51,7 @@ Startup. User and machine Run keys, Startup folders, and third-party scheduled t
 
 Cleaner. 32 targets grouped by cleanup type: temporary files, Windows update, browser, shader, development and application caches, logs, Recycle Bin, and other supported targets. Scan first, then optionally preview up to 200 matched file paths for one selected target before confirming cleanup. Preview skips junctions and symlinks, is bounded, and reports when the list is truncated or folders are unreadable. Recycle Bin and component-store operations show their scope because Windows exposes no per-item paths for those APIs. Event log file listings can be incomplete because the actual cleanup uses `wevtutil`. Cleanup remains irreversible; the preview is a point-in-time listing.
 
-Network. DNS provider switch with DNS-over-HTTPS where the provider offers it, flush, stack reset, and a latency benchmark (TCP connect time to port 53).
+Network. DNS provider switch with DNS-over-HTTPS where the provider offers it, cache flush, and stack reset. The read-only benchmark sends five UDP A-record queries for `example.com` to each provider's first IPv4 server. It reports average response time, mean absolute change between consecutive successful response times, and successful answers. DNS query failures are not IP packet-loss measurements, and resolver response times do not predict latency to a game server.
 
 Tools. Restore point, Free RAM (clears process and system working sets, the file cache, the modified and standby lists, identical pages and the registry cache), TRIM, SFC, DISM, Windows Update reset, icon and Store cache reset, performance counters, registry backup, System Restore, and "Undo ALL Optimaxer tweaks".
 

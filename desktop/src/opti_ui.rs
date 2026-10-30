@@ -189,7 +189,7 @@ enum Msg {
     Scan(Vec<(&'static str, Option<u64>)>),
     CleanPreview(&'static str, Result<cleaner::Preview, String>),
     Adapters(Vec<String>),
-    Bench(Vec<(String, Option<f64>)>),
+    Bench(Vec<(String, network::DnsBenchmark)>),
     History(Result<Vec<HistoryEntry>, String>),
     OperationHistory(Result<Vec<OperationEntry>, String>),
     GameProfiles(Result<Vec<GameProfile>, String>),
@@ -329,7 +329,7 @@ pub struct OptiUi {
     clean_preview: Option<(&'static str, cleaner::Preview)>,
     clean_preview_error: Option<(&'static str, String)>,
     adapters: Vec<String>,
-    bench: Vec<(String, Option<f64>)>,
+    bench: Vec<(String, network::DnsBenchmark)>,
     events: Vec<OptiEvent>,
     /// `ctx.input(|i| i.time)` when the page last changed, for the enter transition.
     page_started: f64,
@@ -3904,7 +3904,7 @@ impl OptiUi {
 
     fn network_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let t = tokens(ctx);
-        kit::page_header(ui, "Network", "Switch DNS (with DNS-over-HTTPS where the provider offers it), flush the cache, reset the stack, or time the servers.");
+        kit::page_header(ui, "Network", "Switch DNS, compare resolver responses, flush the cache, or reset the network stack.");
         let idle = self.busy.is_none();
         ui.horizontal_wrapped(|ui| {
             if kit::secondary(ui, "Show current DNS", idle).clicked() {
@@ -3928,12 +3928,14 @@ impl OptiUi {
                 self.spawn(ctx, "Benchmarking DNS servers", move |w| {
                     let mut rows = Vec::new();
                     for p in data.dns.iter().filter(|p| !p.v4.is_empty()) {
-                        let ms = network::latency_ms(&p.v4[0], 4);
-                        w.log(&format!("  {:<12} {}", p.name, ms.map(|m| format!("{m} ms")).unwrap_or_else(|| "no reply".into())));
-                        rows.push((p.name.clone(), ms));
+                        let result = network::benchmark_dns(&p.v4[0], 5);
+                        let timing = result.average_ms.map(|ms| format!("{ms:.1} ms average")).unwrap_or_else(|| "no valid DNS answers".into());
+                        let jitter = result.jitter_ms.map(|ms| format!("{ms:.1} ms jitter")).unwrap_or_else(|| "jitter unavailable".into());
+                        w.log(&format!("  {}: {timing}, {jitter}, {}/{} answers", p.name, result.answers, result.attempts));
+                        rows.push((p.name.clone(), result));
                     }
-                    if let Some((n, m)) = rows.iter().filter_map(|(n, m)| m.map(|m| (n, m))).min_by(|a, b| a.1.total_cmp(&b.1)) {
-                        w.log(&format!("Fastest from your connection: {n} ({m} ms)"));
+                    if let Some((name, ms)) = rows.iter().filter_map(|(name, result)| result.average_ms.map(|ms| (name, ms))).min_by(|a, b| a.1.total_cmp(&b.1)) {
+                        w.log(&format!("Lowest measured DNS query average: {name} ({ms:.1} ms). This does not predict ping to game servers."));
                     }
                     w.send(Msg::Bench(rows));
                 });
@@ -3943,7 +3945,10 @@ impl OptiUi {
             }
         });
         ui.add_space(S1);
-        ui.label(RichText::new("The benchmark measures TCP connect time to port 53 of each provider's first server.").size(T_CAPTION).color(t.subtle));
+        ui.label(RichText::new("Sends five UDP A-record lookups for example.com directly to each provider's first IPv4 server; DNS settings are not changed. Jitter is mean absolute change between consecutive successful response times. Failed probes are not IP packet-loss measurements.").size(T_CAPTION).color(t.subtle));
+        if !self.bench.is_empty() {
+            ui.label(RichText::new("Resolver response time does not predict latency to a game server.").size(T_CAPTION).color(t.subtle));
+        }
         if !self.adapters.is_empty() {
             ui.label(RichText::new(format!("Active adapters: {}", self.adapters.join(", "))).size(T_CAPTION).color(t.subtle));
         }
@@ -3951,7 +3956,11 @@ impl OptiUi {
         let providers = self.data.dns.clone();
         ui.horizontal_wrapped(|ui| {
             for p in providers {
-                let ms = self.bench.iter().find(|b| b.0 == p.name).and_then(|b| b.1).map(|m| format!("{m} ms"));
+                let ms = self.bench.iter().find(|b| b.0 == p.name).map(|(_, result)| {
+                    let average = result.average_ms.map(|m| format!("{m:.1} ms avg")).unwrap_or_else(|| "No DNS answer".into());
+                    let jitter = result.jitter_ms.map(|m| format!(" · {m:.1} ms jitter")).unwrap_or_default();
+                    format!("{average}{jitter} · {}/{}", result.answers, result.attempts)
+                });
                 if kit::tile(ui, vec2(252.0, 84.0), &p.name, &p.desc, ms.as_deref(), idle, false).clicked() && self.need_admin() {
                     self.pending = Some(Pending {
                         title: format!("Use {} for DNS", p.name),
