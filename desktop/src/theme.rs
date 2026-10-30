@@ -69,6 +69,7 @@ pub struct Appearance {
     pub accent: Color32,
     pub density: Density,
     pub scale: UiScale,
+    pub corner_radius: Option<u8>,
 }
 
 impl Style {
@@ -186,7 +187,6 @@ pub const S5: f32 = 24.0;
 pub const S6: f32 = 32.0;
 
 // radius scale
-pub const R_SM: u8 = 6;
 pub const R_MD: u8 = 8;
 pub const R_LG: u8 = 12;
 pub const R_XL: u8 = 16;
@@ -236,6 +236,7 @@ pub struct Tokens {
     pub on_action: Color32,
     /// Fully rounded controls (the Material shape) instead of the default 8 px corners.
     pub pill: bool,
+    pub custom_radius: Option<u8>,
 }
 
 const fn c(r: u8, g: u8, b: u8) -> Color32 {
@@ -263,6 +264,7 @@ impl Tokens {
         action: LIME,
         on_action: ON_LIME,
         pill: false,
+        custom_radius: None,
     };
 
     pub const LIGHT: Tokens = Tokens {
@@ -285,6 +287,7 @@ impl Tokens {
         action: LIME,
         on_action: ON_LIME,
         pill: false,
+        custom_radius: None,
     };
 
     /// Material Design 3 baseline, dark scheme: tonal surface containers, the lavender primary, pill-shaped controls.
@@ -308,6 +311,7 @@ impl Tokens {
         action: c(0xD0, 0xBC, 0xFF),
         on_action: c(0x38, 0x1E, 0x72),
         pill: true,
+        custom_radius: None,
     };
 
     /// Material Design 3 baseline, light scheme.
@@ -331,6 +335,7 @@ impl Tokens {
         action: c(0x67, 0x50, 0xA4),
         on_action: c(0xFF, 0xFF, 0xFF),
         pill: true,
+        custom_radius: None,
     };
 
     pub fn of(dark: bool, style: Style, accent: Color32) -> Tokens {
@@ -389,12 +394,19 @@ impl Tokens {
 
     /// Corner radius of buttons and navigation items.
     pub fn ctl_radius(&self) -> u8 {
-        if self.pill { 17 } else if self.fluent { 4 } else { R_MD }
+        self.custom_radius.unwrap_or({
+            if self.pill { 17 } else if self.fluent { 4 } else { R_MD }
+        })
     }
 
     /// Corner radius of cards and tiles.
     pub fn card_radius(&self) -> u8 {
-        if self.fluent { 8 } else { R_LG }
+        self.custom_radius.map_or_else(|| if self.fluent { 8 } else { R_LG }, |radius| radius.saturating_add(4).min(20))
+    }
+
+    pub fn with_custom_radius(mut self, radius: Option<u8>) -> Self {
+        self.custom_radius = radius.map(|radius| radius.min(16));
+        self
     }
 
     /// Windows 11 Fluent palette. `accent` is the user's Windows accent colour; text and fill colours derived from it
@@ -427,6 +439,7 @@ impl Tokens {
             action,
             on_action,
             pill: false,
+            custom_radius: None,
         }
     }
 
@@ -652,12 +665,19 @@ fn palette_id() -> egui::Id {
     egui::Id::unique("orion-palette")
 }
 
+fn radius_id() -> egui::Id {
+    egui::Id::unique("orion-corner-radius")
+}
+
 /// Tokens for the running theme.
 pub fn tokens(ctx: &egui::Context) -> Tokens {
     let style = ctx.data(|d| d.get_temp::<Style>(style_id())).unwrap_or_default();
     let accent = ctx.data(|d| d.get_temp::<Color32>(accent_id())).unwrap_or(DEFAULT_ACCENT);
     let palette = ctx.data(|d| d.get_temp::<Palette>(palette_id())).unwrap_or_default();
-    Tokens::of(ctx.global_style().visuals.dark_mode, style, accent).with_palette(palette, accent)
+    let radius = ctx.data(|d| d.get_temp::<Option<u8>>(radius_id())).flatten();
+    Tokens::of(ctx.global_style().visuals.dark_mode, style, accent)
+        .with_palette(palette, accent)
+        .with_custom_radius(radius)
 }
 
 // region Windows settings
@@ -782,20 +802,23 @@ pub fn install_fonts(ctx: &egui::Context) {
 /// Builds the whole egui style from the tokens: tonal surfaces, quiet strokes, rounded controls, a visible
 /// focus ring, floating scroll bars and the type scale.
 pub fn apply(ctx: &egui::Context, appearance: Appearance) {
-    let Appearance { dark, reduce_motion, style, palette, accent, density, scale } = appearance;
-    let t = Tokens::of(dark, style, accent).with_palette(palette, accent);
+    let Appearance { dark, reduce_motion, style, palette, accent, density, scale, corner_radius } = appearance;
+    let t = Tokens::of(dark, style, accent)
+        .with_palette(palette, accent)
+        .with_custom_radius(corner_radius);
     ctx.data_mut(|d| {
         d.insert_temp(motion_id(), reduce_motion);
         d.insert_temp(style_id(), style);
         d.insert_temp(accent_id(), accent);
         d.insert_temp(palette_id(), palette);
+        d.insert_temp(radius_id(), corner_radius);
     });
     let mut v = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
     v.panel_fill = if t.fluent { t.rail } else { t.canvas };
     v.window_fill = t.surface1;
     v.window_stroke = Stroke::new(1.0, t.hairline);
-    v.window_corner_radius = CornerRadius::same(R_XL);
-    v.menu_corner_radius = CornerRadius::same(R_LG);
+    v.window_corner_radius = CornerRadius::same(corner_radius.unwrap_or(R_XL).min(20));
+    v.menu_corner_radius = CornerRadius::same(t.card_radius());
     // inputs: one step lighter than the bar they sit on in the light theme, one step raised in the dark theme
     v.extreme_bg_color = if dark { t.surface2 } else { t.surface1 };
     v.faint_bg_color = t.surface1;
@@ -909,6 +932,7 @@ mod tests {
                 accent: BRAND,
                 density: Density::Comfortable,
                 scale: UiScale::Default,
+                corner_radius: None,
             },
         );
         let comfortable_spacing = ctx.global_style().spacing.item_spacing;
@@ -922,6 +946,7 @@ mod tests {
                 accent: BRAND,
                 density: Density::Compact,
                 scale: UiScale::Larger,
+                corner_radius: None,
             },
         );
         let compact_spacing = ctx.global_style().spacing.item_spacing;
@@ -931,6 +956,28 @@ mod tests {
         assert_eq!(UiScale::Default.factor(), 1.0);
         assert_eq!(UiScale::Large.factor(), 1.1);
         assert_eq!(UiScale::Larger.factor(), 1.25);
+    }
+
+    #[test]
+    fn custom_radius_reaches_controls_cards_and_windows() {
+        let ctx = egui::Context::default();
+        apply(
+            &ctx,
+            Appearance {
+                dark: true,
+                reduce_motion: false,
+                style: Style::Windows,
+                palette: Palette::System,
+                accent: BRAND,
+                density: Density::Comfortable,
+                scale: UiScale::Default,
+                corner_radius: Some(3),
+            },
+        );
+        assert_eq!(tokens(&ctx).ctl_radius(), 3);
+        assert_eq!(tokens(&ctx).card_radius(), 7);
+        assert_eq!(ctx.global_style().visuals.widgets.inactive.corner_radius, CornerRadius::same(3));
+        assert_eq!(ctx.global_style().visuals.window_corner_radius, CornerRadius::same(3));
     }
 
     fn surfaces(t: &Tokens) -> [(&'static str, Color32); 5] {

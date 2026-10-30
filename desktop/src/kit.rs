@@ -2,7 +2,7 @@
 //! control, hover rows, empty and loading states, and the page-enter transition. Every state change animates
 //! through `Motion`, so reduced motion makes them instant.
 
-use crate::theme::{self, ease_out, mix, motion, semibold, tokens, Tone, R_SM, S1, S2, S3, S4, T_BODY, T_CAPTION, T_HEADING, T_SMALL, T_TITLE};
+use crate::theme::{self, ease_out, mix, motion, semibold, tokens, Tone, S1, S2, S3, S4, T_BODY, T_CAPTION, T_HEADING, T_SMALL, T_TITLE};
 use egui::{Align2, Color32, CornerRadius, FontId, Margin, Pos2, Response, RichText, Role, Sense, Shape, Stroke, StrokeKind, Ui, WidgetInfo, vec2};
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -91,8 +91,9 @@ pub fn toolbar_icon_button(ui: &mut Ui, glyph: char, fallback: &str, label: &str
 // endregion
 
 pub fn chip(ui: &mut Ui, text: &str, tone: Tone) {
-    let (bg, fg) = tokens(ui.ctx()).tone(tone);
-    egui::Frame::new().fill(bg).corner_radius(R_SM + 2).inner_margin(Margin::symmetric(8, 2)).show(ui, |ui| {
+    let t = tokens(ui.ctx());
+    let (bg, fg) = t.tone(tone);
+    egui::Frame::new().fill(bg).corner_radius(t.ctl_radius().min(8).saturating_add(2)).inner_margin(Margin::symmetric(8, 2)).show(ui, |ui| {
         ui.add(egui::Label::new(RichText::new(text).size(T_CAPTION).color(fg)).extend());
     });
 }
@@ -238,7 +239,7 @@ pub fn check(ui: &mut Ui, checked: bool) {
         return;
     }
     let p = ui.painter();
-    let r = CornerRadius::same(5);
+    let r = CornerRadius::same(t.ctl_radius().min(5));
     p.rect_filled(rect, r, mix(t.surface2, t.brand, k));
     p.rect_stroke(rect, r, Stroke::new(1.5, mix(t.subtle, t.brand, k)), StrokeKind::Inside);
     if k > 0.02 {
@@ -320,7 +321,7 @@ pub fn skeleton(ui: &mut Ui, rows: usize) {
     for i in 0..rows {
         let w = ui.available_width() * [0.92, 0.78, 0.86, 0.64][i % 4];
         let (rect, _) = ui.allocate_exact_size(vec2(w, 14.0), Sense::hover());
-        ui.painter().rect_filled(rect, CornerRadius::same(R_SM), mix(t.surface1, t.surface3, 0.25 + 0.5 * phase));
+        ui.painter().rect_filled(rect, CornerRadius::same(t.ctl_radius().min(6)), mix(t.surface1, t.surface3, 0.25 + 0.5 * phase));
         ui.add_space(S2);
     }
 }
