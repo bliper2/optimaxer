@@ -163,4 +163,17 @@ mod tests {
             "packages without icon sources: {missing:?}"
         );
     }
+
+    #[test]
+    fn firefox_esr_uses_the_firefox_brand_icon() {
+        let package = crate::winget::catalog()
+            .unwrap()
+            .into_iter()
+            .find(|package| package.id == "Mozilla.Firefox.ESR")
+            .expect("Firefox ESR must remain in the WinGet catalog");
+        assert_eq!(
+            candidates(&package)[0],
+            "https://cdn.jsdelivr.net/gh/selfhst/icons/png/firefox.png"
+        );
+    }
 }

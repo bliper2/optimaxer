@@ -5,7 +5,7 @@ Browsers|Google Chrome|Google.Chrome|google.com|https://www.google.com/chrome/|s
 Browsers|Chromium|Hibbiki.Chromium|github.com/Hibbiki|https://www.chromium.org/|sh:chromium
 Browsers|Microsoft Edge|Microsoft.Edge|microsoft.com|https://www.microsoft.com/edge|sh:microsoft-edge
 Browsers|Firefox|Mozilla.Firefox|mozilla.org|https://www.mozilla.org/en-US/firefox/new/|sh:firefox
-Browsers|Firefox ESR|Mozilla.Firefox.ESR|mozilla.org|https://www.mozilla.org/en-US/firefox/enterprise/|
+Browsers|Firefox ESR|Mozilla.Firefox.ESR|mozilla.org|https://www.mozilla.org/en-US/firefox/enterprise/|sh:firefox
 Browsers|Floorp|Ablaze.Floorp|floorp.app|https://floorp.app/|di:floorp
 Browsers|LibreWolf|LibreWolf.LibreWolf|librewolf.net|https://librewolf.net/|sh:librewolf
 Browsers|Mullvad Browser|MullvadVPN.MullvadBrowser|mullvad.net|https://mullvad.net/browser|di:mullvad-browser
