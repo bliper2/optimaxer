@@ -1,6 +1,7 @@
 use crate::kit;
 use crate::model::{self, AppItem, Catalog, Sort, ANDROID, PC, TV};
 use crate::net::{self, DlStatus, Download, Settings};
+use crate::notifications::{self, Action as NotificationAction, Item as Notification, Kind as NotificationKind, MAX_SAVED_DISMISSALS};
 use crate::opti_ui::{OptiEvent, OptiUi};
 use crate::update::{self, Release};
 use crate::theme::{self, ease_out, mix, motion, semibold, tokens, Tone, S1, S2, S3, S4, S5, T_BODY, T_CAPTION, T_DISPLAY, T_HEADING, T_SMALL};
@@ -80,6 +81,55 @@ fn suggest(apps: &[AppItem]) -> Vec<AppItem> {
 fn is_installer(path: &std::path::Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "exe" | "msi" | "msix" | "appx" | "msixbundle" | "appxbundle"))
 }
+fn update_notification(state: &UpdateState) -> Option<Notification> {
+    match state {
+        UpdateState::Idle => None,
+        UpdateState::Checking => Some(Notification {
+            id: "update-check-progress".into(),
+            kind: NotificationKind::Progress,
+            title: "Checking for updates".into(),
+            detail: "Contacting GitHub.".into(),
+            lines: Vec::new(),
+            progress: None,
+            action: None,
+            dismissible: false,
+            persistent: false,
+        }),
+        UpdateState::Available(release) => Some(Notification {
+            id: format!("update-available:{}", release.tag),
+            kind: NotificationKind::Information,
+            title: format!("Optimaxer {} is available", release.label()),
+            detail: format!("You have v{}.", update::CURRENT),
+            lines: Vec::new(),
+            progress: None,
+            action: Some(NotificationAction::StartUpdate(release.clone())),
+            dismissible: true,
+            persistent: true,
+        }),
+        UpdateState::Downloading { rel, done, total } => Some(Notification {
+            id: format!("update-progress:{}", rel.tag),
+            kind: NotificationKind::Progress,
+            title: format!("Updating to {}", rel.label()),
+            detail: notifications::byte_progress_detail(*done, *total),
+            lines: Vec::new(),
+            progress: notifications::byte_progress(*done, *total),
+            action: None,
+            dismissible: false,
+            persistent: false,
+        }),
+        UpdateState::Failed(error) => Some(Notification {
+            id: notifications::stable_id("update-failed", error),
+            kind: NotificationKind::Error,
+            title: "Update failed".into(),
+            detail: "The current app is still installed.".into(),
+            lines: vec![error.clone()],
+            progress: None,
+            action: Some(NotificationAction::CheckUpdates),
+            dismissible: true,
+            persistent: true,
+        }),
+    }
+}
 
 pub struct OrionApp {
     shots: Option<crate::shots::Shots>,
@@ -101,6 +151,8 @@ pub struct OrionApp {
     sel_variant: usize,
     downloads: Vec<Arc<Download>>,
     show_downloads: bool,
+    show_notifications: bool,
+    dismissed_session_notifications: Vec<String>,
     show_settings: bool,
     show_palette: bool,
     palette_query: String,
@@ -221,6 +273,8 @@ impl OrionApp {
             sel_variant: 0,
             downloads: Vec::new(),
             show_downloads: false,
+            show_notifications: false,
+            dismissed_session_notifications: Vec::new(),
             show_settings: false,
             show_palette: false,
             palette_query: String::new(),
@@ -632,6 +686,8 @@ impl eframe::App for OrionApp {
                 self.lightbox = None;
             } else if self.show_settings {
                 self.show_settings = false;
+            } else if self.show_notifications {
+                self.show_notifications = false;
             } else if self.detail.is_some() {
                 self.detail = None;
                 self.bump(ctx);
@@ -654,6 +710,9 @@ impl eframe::App for OrionApp {
         self.status_bar(root);
         if self.show_downloads {
             self.downloads_panel(root);
+        }
+        if self.show_notifications {
+            self.notification_center(ctx);
         }
         if self.section == Section::Optimaxer {
             self.opti.log_panel(root);
@@ -686,6 +745,167 @@ impl eframe::App for OrionApp {
 }
 
 impl OrionApp {
+    fn notifications(&self) -> Vec<Notification> {
+        let mut notifications = Vec::new();
+        if self.settings.opti_restart_required {
+            notifications.push(Notification {
+                id: format!("restart-required:{}", self.settings.opti_restart_uptime),
+                kind: NotificationKind::Warning,
+                title: "Restart required".into(),
+                detail: "A Windows restart is required to finish applying changes.".into(),
+                lines: Vec::new(),
+                progress: None,
+                action: Some(NotificationAction::ReviewActivity),
+                dismissible: true,
+                persistent: true,
+            });
+        }
+        if let Some(notification) = update_notification(&self.update) {
+            notifications.push(notification);
+        }
+        if let Some(job) = self.opti.current_job() {
+            notifications.push(Notification {
+                id: format!("operation-running:{job}"),
+                kind: NotificationKind::Progress,
+                title: job.to_owned(),
+                detail: "System operation is running. Progress is not available for this task.".into(),
+                lines: Vec::new(),
+                progress: None,
+                action: Some(NotificationAction::ReviewActivity),
+                dismissible: false,
+                persistent: false,
+            });
+        }
+        notifications.extend(
+            self.opti
+                .operation_entries()
+                .iter()
+                .rev()
+                .filter_map(notifications::operation)
+                .take(40),
+        );
+        for download in self.downloads.iter().rev().take(40) {
+            if let Some(notification) = notifications::download(download) {
+                notifications.push(notification);
+            }
+        }
+        notifications.retain(|notification| {
+            !self.settings.dismissed_notifications.contains(&notification.id)
+                && !self.dismissed_session_notifications.contains(&notification.id)
+        });
+        notifications.truncate(notifications::MAX_VISIBLE);
+        notifications
+    }
+
+    fn dismiss_notification(&mut self, notification: &Notification) {
+        if !notification.dismissible {
+            return;
+        }
+        if notification.persistent {
+            let previous = self.settings.dismissed_notifications.clone();
+            if !self.settings.dismissed_notifications.contains(&notification.id) {
+                notifications::remember_dismissal(&mut self.settings.dismissed_notifications, &notification.id);
+                if let Err(error) = self.settings.save_checked() {
+                    self.settings.dismissed_notifications = previous;
+                    self.say(format!("Could not save notification dismissal: {error}"));
+                }
+            }
+        } else if !self.dismissed_session_notifications.contains(&notification.id) {
+            self.dismissed_session_notifications.push(notification.id.clone());
+            if self.dismissed_session_notifications.len() > MAX_SAVED_DISMISSALS {
+                self.dismissed_session_notifications.remove(0);
+            }
+        }
+    }
+
+    fn notification_center(&mut self, ctx: &egui::Context) {
+        let notifications = self.notifications();
+        let mut open = self.show_notifications;
+        let mut dismissed = Vec::new();
+        let mut action = None;
+        egui::Window::new("Notifications")
+            .id(egui::Id::NULL.with("notification-center"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(420.0)
+            .max_width(520.0)
+            .max_height((ctx.content_rect().height() - 80.0).max(220.0))
+            .anchor(egui::Align2::RIGHT_TOP, vec2(-16.0, 52.0))
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    if notifications.is_empty() {
+                        ui.label(RichText::new("No current notifications.").color(tokens(ctx).muted));
+                    }
+                    for notification in &notifications {
+                        kit::card(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal_wrapped(|ui| {
+                                kit::chip(ui, notification.kind.label(), notification.kind.tone());
+                                ui.label(RichText::new(&notification.title).font(FontId::new(T_BODY, semibold())));
+                                if notification.dismissible && kit::ghost(ui, "Dismiss", true).clicked() {
+                                    dismissed.push(notification.id.clone());
+                                }
+                            });
+                            ui.add(egui::Label::new(RichText::new(&notification.detail).size(T_SMALL).color(tokens(ctx).muted)).wrap());
+                            if let Some(progress) = notification.progress {
+                                ui.add(egui::ProgressBar::new(progress).show_percentage());
+                            }
+                            if !notification.lines.is_empty() {
+                                egui::CollapsingHeader::new("Details")
+                                    .id_salt(("notification-details", &notification.id))
+                                    .show(ui, |ui| {
+                                        for line in &notification.lines {
+                                            ui.add(egui::Label::new(RichText::new(line).size(T_CAPTION).color(tokens(ctx).subtle)).wrap());
+                                        }
+                                    });
+                            }
+                            if let Some(item_action) = &notification.action {
+                                let label = match item_action {
+                                    NotificationAction::ReviewActivity => "Review activity",
+                                    NotificationAction::OpenDownloads => "Open downloads",
+                                    NotificationAction::StartUpdate(_) => "Update and restart",
+                                    NotificationAction::CheckUpdates => "Check again",
+                                    NotificationAction::RevealFile(_) => "Show in folder",
+                                };
+                                if kit::secondary(ui, label, true).clicked() {
+                                    action = Some(item_action.clone());
+                                }
+                            }
+                        });
+                        ui.add_space(S2);
+                    }
+                });
+            });
+        self.show_notifications = open;
+        for id in dismissed {
+            if let Some(notification) = notifications.iter().find(|item| item.id == id) {
+                self.dismiss_notification(notification);
+            }
+        }
+        if let Some(action) = action {
+            self.run_notification_action(ctx, action);
+        }
+    }
+
+    fn run_notification_action(&mut self, ctx: &egui::Context, action: NotificationAction) {
+        self.show_notifications = false;
+        match action {
+            NotificationAction::ReviewActivity => {
+                self.set_section(ctx, Section::Optimaxer);
+                self.opti.show_page(ctx, "Activity");
+            }
+            NotificationAction::OpenDownloads => self.show_downloads = true,
+            NotificationAction::StartUpdate(release) => self.start_install(ctx, release),
+            NotificationAction::CheckUpdates => self.start_check(ctx, true),
+            NotificationAction::RevealFile(path) => {
+                if let Err(error) = reveal(&path) {
+                    self.say(format!("Could not show the downloaded file: {error}"));
+                }
+            }
+        }
+    }
+
     fn open_command_palette(&mut self) {
         self.palette_query.clear();
         self.palette_selected = 0;
@@ -833,6 +1053,7 @@ impl OrionApp {
         let ctx = root.ctx().clone();
         let ctx = &ctx;
         let t = tokens(ctx);
+        let notification_count = self.notifications().len();
         egui::Panel::top("top").show_separator_line(false).frame(egui::Frame::new().fill(t.rail).inner_margin(Margin::symmetric(S5 as i8, S3 as i8))).show(root, |ui| {
             let compact = ui.available_width() < 1000.0;
             ui.horizontal(|ui| {
@@ -878,12 +1099,20 @@ impl OrionApp {
                         if kit::toolbar_icon_button(ui, '\u{E721}', "K", "Commands (Ctrl+K)", false).clicked() {
                             self.open_command_palette();
                         }
+                        let label = if notification_count == 0 { "Notifications".into() } else { format!("Notifications ({notification_count})") };
+                        if kit::toolbar_icon_button(ui, '\u{E7F4}', "N", &label, self.show_notifications).clicked() {
+                            self.show_notifications = !self.show_notifications;
+                        }
                         if kit::toolbar_icon_button(ui, '\u{E713}', "S", "Settings", self.show_settings).clicked() {
                             self.show_settings = !self.show_settings;
                         }
                     } else {
                         if kit::ghost(ui, "Commands  Ctrl+K", true).clicked() {
                             self.open_command_palette();
+                        }
+                        let label = if notification_count == 0 { "Notifications".into() } else { format!("Notifications ({notification_count})") };
+                        if kit::ghost(ui, &label, true).clicked() {
+                            self.show_notifications = !self.show_notifications;
                         }
                         if kit::ghost(ui, "Settings", true).clicked() {
                             self.show_settings = !self.show_settings;
@@ -1612,8 +1841,10 @@ fn resize_edges(ctx: &egui::Context) {
 }
 
 #[cfg(test)]
-mod palette_tests {
-    use super::{PaletteCommand, matching_palette_commands};
+mod app_tests {
+    use super::{
+        PaletteCommand, matching_palette_commands,
+    };
 
     #[test]
     fn palette_lists_all_commands_for_blank_query() {
