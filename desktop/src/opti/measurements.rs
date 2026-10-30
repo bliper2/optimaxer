@@ -369,7 +369,7 @@ fn parse_boot_event(xml: &str) -> Option<(u64, String)> {
     Some((boot_duration_ms, boot_event_time))
 }
 
-fn last_boot_event() -> Option<(u64, String)> {
+pub fn latest_boot_event() -> Option<(u64, String)> {
     let output = Command::new("wevtutil.exe")
         .args([
             "qe",
@@ -450,7 +450,7 @@ fn sample_system_latency() -> SystemLatencyReading {
     };
     let (dns_tcp_average_ms, dns_tcp_jitter_ms, dns_tcp_samples, dns_tcp_failures) =
         dns_tcp_samples();
-    let (boot_duration_ms, boot_event_time) = last_boot_event()
+    let (boot_duration_ms, boot_event_time) = latest_boot_event()
         .map_or((None, None), |(duration, time)| {
             (Some(duration), Some(time))
         });

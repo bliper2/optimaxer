@@ -17,6 +17,7 @@ use crate::opti::history::{
     OperationStatus,
 };
 use crate::opti::hw::{self, Traits};
+use crate::opti::measurements;
 use crate::opti::network;
 use crate::opti::processes::{self, CpuTimes, ProcessInfo};
 use crate::opti::profiles::{self, Profile};
@@ -212,6 +213,7 @@ enum Msg {
     Plan(Pending),
     Services(Vec<SvcRow>),
     Startup(startup::Listing),
+    StartupBoot(Option<(u64, String)>),
     Scan(Vec<(&'static str, Option<u64>)>),
     ScanCancelled,
     CleanPreview(&'static str, Result<cleaner::Preview, String>),
@@ -412,6 +414,8 @@ pub struct OptiUi {
     process_publisher: Option<ProcessPublisherState>,
     services_loaded: bool,
     startup_loaded: bool,
+    startup_boot_loading: bool,
+    startup_boot_record: Option<(u64, String)>,
 }
 
 // region pure logic (unit tested)
@@ -1165,6 +1169,8 @@ impl OptiUi {
             process_publisher: None,
             services_loaded: false,
             startup_loaded: false,
+            startup_boot_loading: false,
+            startup_boot_record: None,
         }
     }
 
@@ -1405,6 +1411,10 @@ impl OptiUi {
                     self.startup_warning = s.warning;
                     self.startup_loaded = true;
                 }
+                Msg::StartupBoot(record) => {
+                    self.startup_boot_record = record;
+                    self.startup_boot_loading = false;
+                }
                 Msg::Scan(v) => {
                     self.clean_scan_cancelled = false;
                     self.clean_sel.clear();
@@ -1593,6 +1603,7 @@ impl OptiUi {
     }
 
     fn refresh_startup(&mut self, ctx: &egui::Context) {
+        self.startup_boot_loading = true;
         self.spawn(ctx, "Reading startup items", move |w| {
             let listing = startup::list(&WinSystem);
             w.log(&format!("Found {} startup items.", listing.items.len()));
@@ -1600,6 +1611,7 @@ impl OptiUi {
                 w.log(&format!("WARN {warning}"));
             }
             w.send(Msg::Startup(listing));
+            w.send(Msg::StartupBoot(measurements::latest_boot_event()));
         });
     }
 
@@ -5739,6 +5751,43 @@ impl OptiUi {
             "Startup",
             "Apps and third-party tasks that start with Windows. Turning one off changes its startup state; nothing is uninstalled.",
         );
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                RichText::new("Last boot")
+                    .font(FontId::new(T_BODY, semibold()))
+                    .color(t.text),
+            );
+            if self.startup_boot_loading {
+                ui.label(
+                    RichText::new("Reading Windows startup record…")
+                        .size(T_SMALL)
+                        .color(t.subtle),
+                );
+            } else if let Some((duration_ms, event_time)) = &self.startup_boot_record {
+                ui.label(
+                    RichText::new(format!("{:.1} s", *duration_ms as f64 / 1000.0))
+                        .font(FontId::new(T_BODY, semibold()))
+                        .color(t.text),
+                );
+                ui.label(
+                    RichText::new(format!("Windows Event 100 · {event_time}"))
+                        .size(T_CAPTION)
+                        .color(t.muted),
+                );
+            } else {
+                ui.label(
+                    RichText::new("No recent Windows boot record")
+                        .size(T_SMALL)
+                        .color(t.subtle),
+                );
+            }
+        });
+        ui.label(
+            RichText::new("Per-app impact is not inferred from startup commands; Windows must measure launch CPU and disk use.")
+                .size(T_CAPTION)
+                .color(t.subtle),
+        );
+        ui.add_space(S2);
         let idle = self.busy.is_none();
         let key = |i: &startup::Item| {
             format!(
