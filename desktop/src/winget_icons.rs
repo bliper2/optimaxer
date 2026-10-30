@@ -15,7 +15,7 @@ pub fn candidates(package: &Package) -> Vec<String> {
             ));
         }
         (Some("si"), Some(name), Some(color)) if safe_slug(name) && safe_color(color) => {
-            urls.push(format!("https://cdn.simpleicons.org/{name}/{color}"));
+            urls.push(format!("https://cdn.simpleicons.org/{name}/{color}.svg"));
         }
         _ => {}
     }
@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn uses_colored_simple_icons_for_valid_slugs_and_colors() {
         let urls = candidates(&package("cmake.org", "", "si:cmake:064F8C"));
-        assert_eq!(urls[0], "https://cdn.simpleicons.org/cmake/064F8C");
+        assert_eq!(urls[0], "https://cdn.simpleicons.org/cmake/064F8C.svg");
         assert_eq!(urls.len(), 4);
 
         let unsafe_icon = candidates(&package("cmake.org", "", "si:../cmake:064F8C"));
