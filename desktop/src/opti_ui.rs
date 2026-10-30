@@ -35,7 +35,7 @@ use egui::{
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -212,6 +212,7 @@ enum Msg {
     Services(Vec<SvcRow>),
     Startup(startup::Listing),
     Scan(Vec<(&'static str, Option<u64>)>),
+    ScanCancelled,
     CleanPreview(&'static str, Result<cleaner::Preview, String>),
     Adapters(Vec<String>),
     Bench(Vec<(String, network::DnsBenchmark)>),
@@ -232,6 +233,7 @@ enum Msg {
 struct Worker {
     tx: Sender<Msg>,
     ctx: egui::Context,
+    cancel: Option<Arc<AtomicBool>>,
     operation_details: Option<Arc<Mutex<Vec<String>>>>,
     operation_status: Option<Arc<AtomicU8>>,
 }
@@ -276,6 +278,12 @@ impl Worker {
             }
         }
         self.send(Msg::Log(s.to_string()));
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancel
+            .as_ref()
+            .is_some_and(|cancel| cancel.load(Ordering::Relaxed))
     }
 }
 
@@ -324,6 +332,7 @@ pub struct OptiUi {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     busy: Option<String>,
+    cancel_current: Option<Arc<AtomicBool>>,
     log: Vec<String>,
     log_expanded: bool,
     history: Vec<HistoryEntry>,
@@ -362,6 +371,7 @@ pub struct OptiUi {
     startup_warning: Option<String>,
     st_sel: HashSet<String>,
     clean_sizes: HashMap<&'static str, Option<u64>>,
+    clean_scan_cancelled: bool,
     clean_sel: HashSet<&'static str>,
     clean_preview: Option<(&'static str, cleaner::Preview)>,
     clean_preview_error: Option<(&'static str, String)>,
@@ -980,6 +990,7 @@ impl OptiUi {
             tx,
             rx,
             busy: None,
+            cancel_current: None,
             log: Vec::new(),
             log_expanded: false,
             history,
@@ -1018,6 +1029,7 @@ impl OptiUi {
             startup_warning: None,
             st_sel: HashSet::new(),
             clean_sizes: HashMap::new(),
+            clean_scan_cancelled: false,
             clean_sel: HashSet::new(),
             clean_preview: None,
             clean_preview_error: None,
@@ -1129,6 +1141,7 @@ impl OptiUi {
         Worker {
             tx: self.tx.clone(),
             ctx: ctx.clone(),
+            cancel: None,
             operation_details: None,
             operation_status: None,
         }
@@ -1141,7 +1154,16 @@ impl OptiUi {
         title: &str,
         job: impl FnOnce(&Worker) + Send + 'static,
     ) -> bool {
-        self.spawn_inner(ctx, title, false, job)
+        self.spawn_inner(ctx, title, false, false, job)
+    }
+
+    fn spawn_cancellable(
+        &mut self,
+        ctx: &egui::Context,
+        title: &str,
+        job: impl FnOnce(&Worker) + Send + 'static,
+    ) -> bool {
+        self.spawn_inner(ctx, title, false, true, job)
     }
 
     fn spawn_recorded(
@@ -1150,7 +1172,7 @@ impl OptiUi {
         title: &str,
         job: impl FnOnce(&Worker) + Send + 'static,
     ) -> bool {
-        self.spawn_inner(ctx, title, true, job)
+        self.spawn_inner(ctx, title, true, false, job)
     }
 
     fn spawn_inner(
@@ -1158,6 +1180,7 @@ impl OptiUi {
         ctx: &egui::Context,
         title: &str,
         record: bool,
+        cancellable: bool,
         job: impl FnOnce(&Worker) + Send + 'static,
     ) -> bool {
         if self.busy.is_some() {
@@ -1168,11 +1191,14 @@ impl OptiUi {
         }
         self.busy = Some(title.to_string());
         self.say(&format!("== {title}"));
+        let cancel = cancellable.then(|| Arc::new(AtomicBool::new(false)));
+        self.cancel_current = cancel.clone();
         let operation_details = record.then(|| Arc::new(Mutex::new(Vec::new())));
         let operation_status = record.then(|| Arc::new(AtomicU8::new(0)));
         let w = Worker {
             tx: self.tx.clone(),
             ctx: ctx.clone(),
+            cancel: cancel.clone(),
             operation_details: operation_details.clone(),
             operation_status: operation_status.clone(),
         };
@@ -1229,7 +1255,10 @@ impl OptiUi {
             match m {
                 Msg::Log(s) => self.say(&s),
                 Msg::Toast(message) => self.events.push(OptiEvent::Toast(message)),
-                Msg::Idle => self.busy = None,
+                Msg::Idle => {
+                    self.busy = None;
+                    self.cancel_current = None;
+                }
                 Msg::Traits(t) => self.traits = Some(t),
                 Msg::Status(map) => {
                     self.status.extend(map);
@@ -1248,6 +1277,7 @@ impl OptiUi {
                     self.startup_loaded = true;
                 }
                 Msg::Scan(v) => {
+                    self.clean_scan_cancelled = false;
                     self.clean_sel.clear();
                     for (id, size) in v {
                         let risk_ok = cleaner::TARGETS
@@ -1259,6 +1289,12 @@ impl OptiUi {
                         }
                         self.clean_sizes.insert(id, size);
                     }
+                }
+                Msg::ScanCancelled => {
+                    self.clean_sizes.clear();
+                    self.clean_sel.clear();
+                    self.clean_preview = None;
+                    self.clean_scan_cancelled = true;
                 }
                 Msg::CleanPreview(id, Ok(preview)) => {
                     self.clean_preview = Some((id, preview));
@@ -1437,11 +1473,28 @@ impl OptiUi {
     }
 
     fn scan_cleaner(&mut self, ctx: &egui::Context, exclusions: Vec<String>) {
-        self.spawn(ctx, "Scanning for junk", move |w| {
-            let sizes: Vec<_> = cleaner::TARGETS
-                .iter()
-                .map(|t| (t.id, cleaner::scan(t, &exclusions)))
-                .collect();
+        self.clean_sizes.clear();
+        self.clean_sel.clear();
+        self.clean_preview = None;
+        self.clean_preview_error = None;
+        self.clean_scan_cancelled = false;
+        self.spawn_cancellable(ctx, "Scanning for junk", move |w| {
+            let mut sizes = Vec::with_capacity(cleaner::TARGETS.len());
+            for target in cleaner::TARGETS {
+                match cleaner::scan_cancellable(target, &exclusions, &|| w.is_cancelled()) {
+                    Ok(size) => sizes.push((target.id, size)),
+                    Err(cleaner::ScanCancelled) => {
+                        w.log("Scan cancelled. Partial results were discarded.");
+                        w.send(Msg::ScanCancelled);
+                        return;
+                    }
+                }
+            }
+            if w.is_cancelled() {
+                w.log("Scan cancelled. Partial results were discarded.");
+                w.send(Msg::ScanCancelled);
+                return;
+            }
             let total: u64 = sizes.iter().filter_map(|s| s.1).sum();
             w.log(&format!(
                 "Scan finished: {} can be reclaimed.",
@@ -2233,6 +2286,7 @@ impl OptiUi {
 
         let mut expansion_change = None;
         let mut open_activity = false;
+        let mut request_cancel = false;
         egui::Panel::show_switched(
             root,
             &mut self.log_expanded,
@@ -2257,6 +2311,22 @@ impl OptiUi {
                     }
                     if self.busy.is_some() {
                         ui.add(egui::Spinner::new().size(12.0).color(t.brand_text));
+                    }
+                    if let Some(cancel) = &self.cancel_current {
+                        let requested = cancel.load(Ordering::Relaxed);
+                        if kit::ghost(
+                            ui,
+                            if requested {
+                                "Cancelling…"
+                            } else {
+                                "Cancel scan"
+                            },
+                            !requested,
+                        )
+                        .clicked()
+                        {
+                            request_cancel = true;
+                        }
                     }
                     if is_expanded {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -2327,6 +2397,10 @@ impl OptiUi {
         );
         if let Some(expanded) = expansion_change {
             self.log_expanded = expanded;
+        }
+        if request_cancel && let Some(cancel) = &self.cancel_current {
+            cancel.store(true, Ordering::Relaxed);
+            self.say("Cancellation requested for the active read-only scan.");
         }
         if open_activity {
             self.set_page(root.ctx(), Page::Activity);
@@ -5542,7 +5616,11 @@ impl OptiUi {
                 );
             } else if self.clean_sizes.is_empty() {
                 ui.label(
-                    RichText::new("Scan to see how much each item can free.")
+                    RichText::new(if self.clean_scan_cancelled {
+                        "Scan cancelled. Partial results were discarded."
+                    } else {
+                        "Scan to see how much each item can free."
+                    })
                         .size(T_SMALL)
                         .color(t.muted),
                 );

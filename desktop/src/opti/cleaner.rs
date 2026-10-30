@@ -28,6 +28,9 @@ pub struct Preview {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScanCancelled;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Paths,
     EventLogs,
@@ -569,24 +572,42 @@ fn expand_limited(pattern: &str, limit: usize) -> (Vec<PathBuf>, bool) {
 }
 
 fn expand_inner(pattern: &str, limit: usize) -> (Vec<PathBuf>, bool) {
+    expand_inner_cancellable(pattern, limit, &|| false)
+        .expect("path expansion without a cancellation request cannot be cancelled")
+}
+
+fn expand_inner_cancellable<F: Fn() -> bool>(
+    pattern: &str,
+    limit: usize,
+    is_cancelled: &F,
+) -> Result<(Vec<PathBuf>, bool), ScanCancelled> {
+    if is_cancelled() {
+        return Err(ScanCancelled);
+    }
     let mut segs = pattern.split('\\').filter(|s| !s.is_empty());
     let Some(root) = segs.next() else {
-        return (Vec::new(), false);
+        return Ok((Vec::new(), false));
     };
     let mut current = vec![PathBuf::from(format!("{root}\\"))];
     let mut truncated = false;
     for seg in segs {
+        if is_cancelled() {
+            return Err(ScanCancelled);
+        }
         let mut next = Vec::new();
         for base in &current {
+            if is_cancelled() {
+                return Err(ScanCancelled);
+            }
             if fs::symlink_metadata(base).is_ok_and(|m| is_reparse(&m)) {
                 continue;
             }
             if seg.contains('*') {
-                for e in fs::read_dir(base)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Result::ok)
-                {
+                for entry in fs::read_dir(base).into_iter().flatten() {
+                    if is_cancelled() {
+                        return Err(ScanCancelled);
+                    }
+                    let Ok(e) = entry else { continue };
                     if wild_match(seg, &e.file_name().to_string_lossy()) {
                         if next.len() == limit {
                             truncated = true;
@@ -611,7 +632,7 @@ fn expand_inner(pattern: &str, limit: usize) -> (Vec<PathBuf>, bool) {
         }
         current = next;
     }
-    (current, truncated)
+    Ok((current, truncated))
 }
 
 fn is_reparse(m: &fs::Metadata) -> bool {
@@ -628,20 +649,35 @@ pub fn dir_size(dir: &Path) -> u64 {
 }
 
 fn dir_size_excluding(dir: &Path, exclusions: &[String]) -> u64 {
+    dir_size_excluding_cancellable(dir, exclusions, &|| false)
+        .expect("directory sizing without a cancellation request cannot be cancelled")
+}
+
+fn dir_size_excluding_cancellable<F: Fn() -> bool>(
+    dir: &Path,
+    exclusions: &[String],
+    is_cancelled: &F,
+) -> Result<u64, ScanCancelled> {
+    if is_cancelled() {
+        return Err(ScanCancelled);
+    }
     if is_excluded(dir, exclusions) {
-        return 0;
+        return Ok(0);
     }
     if fs::symlink_metadata(dir).is_ok_and(|m| is_reparse(&m)) {
-        return 0;
+        return Ok(0);
     }
     let mut total = 0u64;
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
-        for e in fs::read_dir(&d)
-            .into_iter()
-            .flatten()
-            .filter_map(Result::ok)
-        {
+        if is_cancelled() {
+            return Err(ScanCancelled);
+        }
+        for entry in fs::read_dir(&d).into_iter().flatten() {
+            if is_cancelled() {
+                return Err(ScanCancelled);
+            }
+            let Ok(e) = entry else { continue };
             if is_excluded(&e.path(), exclusions) {
                 continue;
             }
@@ -658,18 +694,28 @@ fn dir_size_excluding(dir: &Path, exclusions: &[String]) -> u64 {
             }
         }
     }
-    total
+    if is_cancelled() {
+        return Err(ScanCancelled);
+    }
+    Ok(total)
 }
 
-fn item_size_excluding(p: &Path, exclusions: &[String]) -> u64 {
+fn item_size_excluding_cancellable<F: Fn() -> bool>(
+    p: &Path,
+    exclusions: &[String],
+    is_cancelled: &F,
+) -> Result<u64, ScanCancelled> {
+    if is_cancelled() {
+        return Err(ScanCancelled);
+    }
     if is_excluded(p, exclusions) {
-        return 0;
+        return Ok(0);
     }
     match fs::symlink_metadata(p) {
-        Ok(m) if is_reparse(&m) => 0,
-        Ok(m) if m.is_dir() => dir_size_excluding(p, exclusions),
-        Ok(m) => m.len(),
-        Err(_) => 0,
+        Ok(m) if is_reparse(&m) => Ok(0),
+        Ok(m) if m.is_dir() => dir_size_excluding_cancellable(p, exclusions, is_cancelled),
+        Ok(m) => Ok(m.len()),
+        Err(_) => Ok(0),
     }
 }
 // endregion
@@ -681,6 +727,24 @@ fn concrete_paths(t: &Target) -> Vec<PathBuf> {
         .flat_map(|p| expand(&p))
         .filter(|p| deep_enough(p))
         .collect()
+}
+
+fn concrete_paths_cancellable<F: Fn() -> bool>(
+    target: &Target,
+    is_cancelled: &F,
+) -> Result<Vec<PathBuf>, ScanCancelled> {
+    let mut paths = Vec::new();
+    for template in target.paths {
+        if is_cancelled() {
+            return Err(ScanCancelled);
+        }
+        let Some(pattern) = expand_template(template) else {
+            continue;
+        };
+        let (matches, _) = expand_inner_cancellable(&pattern, usize::MAX, is_cancelled)?;
+        paths.extend(matches.into_iter().filter(|path| deep_enough(path)));
+    }
+    Ok(paths)
 }
 
 fn preview_concrete_paths(target: &Target) -> (Vec<PathBuf>, bool) {
@@ -813,25 +877,54 @@ pub fn preview(target: &Target, exclusions: &[String]) -> Preview {
 
 /// Bytes that cleaning would free. `None` means the size cannot be known up front (component store).
 pub fn scan(t: &Target, exclusions: &[String]) -> Option<u64> {
-    if blocked_by_exclusions(t, exclusions) {
-        return Some(0);
+    scan_cancellable(t, exclusions, &|| false)
+        .expect("scan without a cancellation request cannot be cancelled")
+}
+
+pub fn scan_cancellable<F: Fn() -> bool>(
+    target: &Target,
+    exclusions: &[String],
+    is_cancelled: &F,
+) -> Result<Option<u64>, ScanCancelled> {
+    if is_cancelled() {
+        return Err(ScanCancelled);
     }
-    match t.kind {
+    if blocked_by_exclusions(target, exclusions) {
+        return Ok(Some(0));
+    }
+    let size = match target.kind {
         Kind::Component => None,
         Kind::Recycle => Some(recycle_size()),
-        Kind::WinOld => Some(
-            expand_template(t.paths[0])
-                .map(|d| Path::new(&d).to_path_buf())
-                .filter(|d| d.exists())
-                .map_or(0, |d| dir_size_excluding(&d, exclusions)),
-        ),
-        Kind::Paths | Kind::EventLogs => Some(
-            concrete_paths(t)
-                .iter()
-                .map(|p| item_size_excluding(p, exclusions))
-                .sum(),
-        ),
+        Kind::WinOld => {
+            let Some(dir) = expand_template(target.paths[0]) else {
+                return Ok(Some(0));
+            };
+            if Path::new(&dir).exists() {
+                Some(dir_size_excluding_cancellable(
+                    Path::new(&dir),
+                    exclusions,
+                    is_cancelled,
+                )?)
+            } else {
+                Some(0)
+            }
+        }
+        Kind::Paths | Kind::EventLogs => {
+            let paths = concrete_paths_cancellable(target, is_cancelled)?;
+            let mut total = 0u64;
+            for path in paths {
+                if is_cancelled() {
+                    return Err(ScanCancelled);
+                }
+                total += item_size_excluding_cancellable(&path, exclusions, is_cancelled)?;
+            }
+            Some(total)
+        }
+    };
+    if is_cancelled() {
+        return Err(ScanCancelled);
     }
+    Ok(size)
 }
 
 fn recycle_size() -> u64 {
@@ -1236,6 +1329,29 @@ mod tests {
         assert_eq!(clear_item(&root, &exclusions), 19);
         assert!(!root.join("remove.tmp").exists());
         assert_eq!(fs::read(protected.join("saved.dat")).unwrap().len(), 31);
+    }
+
+    #[test]
+    fn cleaner_scan_cancellation_discards_partial_sizes() {
+        assert_eq!(
+            scan_cancellable(&TARGETS[0], &[], &|| true),
+            Err(ScanCancelled)
+        );
+
+        let root = temp("scan-cancel");
+        for index in 0..8 {
+            fs::write(root.join(format!("{index}.tmp")), b"x").unwrap();
+        }
+        let checks = std::cell::Cell::new(0);
+        let cancel_after_several_entries = || {
+            let count = checks.get() + 1;
+            checks.set(count);
+            count >= 5
+        };
+        assert_eq!(
+            dir_size_excluding_cancellable(&root, &[], &cancel_after_several_entries),
+            Err(ScanCancelled)
+        );
     }
 
     #[test]
