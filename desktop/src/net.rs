@@ -137,6 +137,9 @@ pub struct Settings {
     pub palette: crate::theme::Palette,
     /// Saved custom accent as #RRGGBB.
     pub custom_accent: String,
+    /// Accessible dark and light surface ladders for the Custom palette.
+    #[serde(default)]
+    pub custom_surfaces: crate::theme::CustomSurfaces,
     /// Look for a newer release when the app starts. Nothing is downloaded until you press the update button.
     pub auto_update: bool,
 }
@@ -144,7 +147,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let dir = dirs::download_dir().unwrap_or_else(|| PathBuf::from(".")).join("Orion");
-        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), sidebar_collapsed: false, opti_restore_point: true, opti_restart_required: false, opti_tweak_favorites: Vec::new(), dismissed_notifications: Vec::new(), opti_restart_uptime: 0, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, density: crate::theme::Density::Comfortable, ui_scale: crate::theme::UiScale::Default, corner_radius: None, palette: crate::theme::Palette::System, custom_accent: crate::theme::hex_color(crate::theme::BRAND), auto_update: true }
+        Self { theme: "system".into(), download_dir: dir.to_string_lossy().into(), sort: model::Sort::Home, platform: model::PC.into(), section: "Store".into(), sidebar_collapsed: false, opti_restore_point: true, opti_restart_required: false, opti_tweak_favorites: Vec::new(), dismissed_notifications: Vec::new(), opti_restart_uptime: 0, reduce_motion: crate::theme::system_reduces_motion(), style: crate::theme::Style::Windows, density: crate::theme::Density::Comfortable, ui_scale: crate::theme::UiScale::Default, corner_radius: None, palette: crate::theme::Palette::System, custom_accent: crate::theme::hex_color(crate::theme::BRAND), custom_surfaces: crate::theme::CustomSurfaces::default(), auto_update: true }
     }
 }
 
@@ -159,6 +162,7 @@ impl Settings {
             density: self.density,
             scale: self.ui_scale,
             corner_radius: self.corner_radius,
+            custom_surfaces: self.custom_surfaces.clone(),
         }
     }
 
@@ -440,6 +444,7 @@ mod tests {
         assert_eq!(settings.ui_scale, crate::theme::UiScale::Default);
         assert_eq!(settings.corner_radius, None);
         assert_eq!(settings.custom_accent, "#7478F8");
+        assert_eq!(settings.custom_surfaces, crate::theme::CustomSurfaces::default());
         assert!(settings.dismissed_notifications.is_empty());
         assert!(!settings.sidebar_collapsed);
         assert!(!settings.opti_restart_required);
@@ -465,6 +470,15 @@ mod tests {
         let saved = serde_json::to_string(&settings).unwrap();
         let loaded: Settings = serde_json::from_str(&saved).unwrap();
         assert_eq!(loaded.corner_radius, Some(3));
+    }
+
+    #[test]
+    fn custom_surface_colors_survive_settings_round_trip() {
+        let mut settings = Settings::default();
+        settings.custom_surfaces.active_mut(true)[0] = "#080A10".into();
+        let saved = serde_json::to_string(&settings).unwrap();
+        let loaded: Settings = serde_json::from_str(&saved).unwrap();
+        assert_eq!(loaded.custom_surfaces, settings.custom_surfaces);
     }
 
     #[test]

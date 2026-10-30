@@ -70,6 +70,77 @@ pub struct Appearance {
     pub density: Density,
     pub scale: UiScale,
     pub corner_radius: Option<u8>,
+    pub custom_surfaces: CustomSurfaces,
+}
+
+/// Surface colors used only by the Custom palette. Both modes are stored so changing
+/// light/dark appearance does not turn a carefully tuned theme into unreadable colors.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CustomSurfaces {
+    dark: [String; 6],
+    light: [String; 6],
+}
+
+impl Default for CustomSurfaces {
+    fn default() -> Self {
+        Self {
+            dark: ["#0F1015", "#0B0C10", "#171821", "#1F202B", "#2A2B3A", "#2B2C39"].map(str::to_owned),
+            light: ["#F6F5FC", "#EEEDF8", "#FFFFFF", "#F0EFF9", "#E4E3F2", "#DDDCEC"].map(str::to_owned),
+        }
+    }
+}
+
+impl CustomSurfaces {
+    pub const LABELS: [&'static str; 6] = ["Background", "Navigation", "Panel", "Control", "Hover", "Border"];
+
+    pub fn active_mut(&mut self, dark: bool) -> &mut [String; 6] {
+        if dark { &mut self.dark } else { &mut self.light }
+    }
+
+    fn colors(&self, dark: bool) -> [Color32; 6] {
+        let fallback = if dark { Tokens::DARK } else { Tokens::LIGHT };
+        let defaults = [fallback.canvas, fallback.rail, fallback.surface1, fallback.surface2, fallback.surface3, fallback.hairline];
+        let values = if dark { &self.dark } else { &self.light };
+        std::array::from_fn(|i| parse_hex_color(&values[i]).unwrap_or(defaults[i]))
+    }
+
+    pub fn reset_mode(&mut self, dark: bool) {
+        let defaults = Self::default();
+        *self.active_mut(dark) = if dark { defaults.dark } else { defaults.light };
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        for dark in [true, false] {
+            let values = if dark { &self.dark } else { &self.light };
+            if values.iter().any(|value| parse_hex_color(value).is_none()) {
+                return Err("Custom surface colors must use six-digit #RRGGBB values.".into());
+            }
+            for style in Style::ALL {
+                let custom = Tokens::of(dark, style, DEFAULT_ACCENT)
+                    .with_palette(Palette::Custom, DEFAULT_ACCENT)
+                    .with_custom_surfaces(Palette::Custom, self, dark);
+                let style_name = match style {
+                    Style::Windows => "Windows",
+                    Style::Classic => "Classic",
+                    Style::Material => "Material",
+                };
+                for (name, surface) in [
+                    ("background", custom.canvas),
+                    ("navigation", custom.rail),
+                    ("panel", custom.surface1),
+                    ("control", custom.surface2),
+                    ("hover", custom.surface3),
+                ] {
+                    let (text, muted, subtle) = (contrast_ratio(custom.text, surface), contrast_ratio(custom.muted, surface), contrast_ratio(custom.subtle, surface));
+                    if text < 7.0 || muted < 4.5 || subtle < 4.5 {
+                        return Err(format!("{} {name} color fails contrast checks for {style_name} style (text {text:.2}, muted {muted:.2}, subtle {subtle:.2}).", if dark { "Dark" } else { "Light" }));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Style {
@@ -126,7 +197,7 @@ impl Palette {
             Palette::Solarized => "Solarized",
             Palette::Porcelain => "Porcelain",
             Palette::Cyberpunk => "Cyberpunk",
-            Palette::Custom => "Custom accent",
+            Palette::Custom => "Custom theme",
         }
     }
 
@@ -374,6 +445,18 @@ impl Tokens {
         self.surface3 = colors.surface3;
         self.hairline = colors.hairline;
         recolor(self, colors.brand)
+    }
+
+    fn with_custom_surfaces(mut self, palette: Palette, surfaces: &CustomSurfaces, dark: bool) -> Self {
+        if palette == Palette::Custom {
+            [self.canvas, self.rail, self.surface1, self.surface2, self.surface3, self.hairline] = surfaces.colors(dark);
+            let backgrounds = [self.canvas, self.rail, self.surface1, self.surface2, self.surface3];
+            self.text = readable_color(self.text, &backgrounds, dark, 7.0);
+            self.muted = readable_accent(self.muted, &backgrounds, dark);
+            self.subtle = readable_accent(self.subtle, &[self.canvas, self.rail, self.surface1, self.surface2, self.surface3], dark);
+            self.brand_text = readable_accent(self.brand, &[self.canvas, self.rail, self.surface1, self.surface2], dark);
+        }
+        self
     }
 
     /// How far the primary button moves on hover: a light state layer for Material and Windows, a stronger lift for lime.
@@ -669,14 +752,20 @@ fn radius_id() -> egui::Id {
     egui::Id::unique("orion-corner-radius")
 }
 
+fn custom_surfaces_id() -> egui::Id {
+    egui::Id::unique("orion-custom-surfaces")
+}
+
 /// Tokens for the running theme.
 pub fn tokens(ctx: &egui::Context) -> Tokens {
     let style = ctx.data(|d| d.get_temp::<Style>(style_id())).unwrap_or_default();
     let accent = ctx.data(|d| d.get_temp::<Color32>(accent_id())).unwrap_or(DEFAULT_ACCENT);
     let palette = ctx.data(|d| d.get_temp::<Palette>(palette_id())).unwrap_or_default();
+    let custom_surfaces = ctx.data(|d| d.get_temp::<CustomSurfaces>(custom_surfaces_id())).unwrap_or_default();
     let radius = ctx.data(|d| d.get_temp::<Option<u8>>(radius_id())).flatten();
     Tokens::of(ctx.global_style().visuals.dark_mode, style, accent)
         .with_palette(palette, accent)
+        .with_custom_surfaces(palette, &custom_surfaces, ctx.global_style().visuals.dark_mode)
         .with_custom_radius(radius)
 }
 
@@ -802,9 +891,10 @@ pub fn install_fonts(ctx: &egui::Context) {
 /// Builds the whole egui style from the tokens: tonal surfaces, quiet strokes, rounded controls, a visible
 /// focus ring, floating scroll bars and the type scale.
 pub fn apply(ctx: &egui::Context, appearance: Appearance) {
-    let Appearance { dark, reduce_motion, style, palette, accent, density, scale, corner_radius } = appearance;
+    let Appearance { dark, reduce_motion, style, palette, accent, density, scale, corner_radius, custom_surfaces } = appearance;
     let t = Tokens::of(dark, style, accent)
         .with_palette(palette, accent)
+        .with_custom_surfaces(palette, &custom_surfaces, dark)
         .with_custom_radius(corner_radius);
     ctx.data_mut(|d| {
         d.insert_temp(motion_id(), reduce_motion);
@@ -812,6 +902,7 @@ pub fn apply(ctx: &egui::Context, appearance: Appearance) {
         d.insert_temp(accent_id(), accent);
         d.insert_temp(palette_id(), palette);
         d.insert_temp(radius_id(), corner_radius);
+        d.insert_temp(custom_surfaces_id(), custom_surfaces);
     });
     let mut v = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
     v.panel_fill = if t.fluent { t.rail } else { t.canvas };
@@ -933,6 +1024,7 @@ mod tests {
                 density: Density::Comfortable,
                 scale: UiScale::Default,
                 corner_radius: None,
+                custom_surfaces: CustomSurfaces::default(),
             },
         );
         let comfortable_spacing = ctx.global_style().spacing.item_spacing;
@@ -947,6 +1039,7 @@ mod tests {
                 density: Density::Compact,
                 scale: UiScale::Larger,
                 corner_radius: None,
+                custom_surfaces: CustomSurfaces::default(),
             },
         );
         let compact_spacing = ctx.global_style().spacing.item_spacing;
@@ -956,6 +1049,31 @@ mod tests {
         assert_eq!(UiScale::Default.factor(), 1.0);
         assert_eq!(UiScale::Large.factor(), 1.1);
         assert_eq!(UiScale::Larger.factor(), 1.25);
+    }
+
+    #[test]
+    fn custom_surfaces_validate_contrast_and_reach_custom_palette_tokens() {
+        let mut surfaces = CustomSurfaces::default();
+        surfaces.validate().unwrap();
+        surfaces.active_mut(true)[0] = "#080A10".into();
+        let ctx = egui::Context::default();
+        apply(
+            &ctx,
+            Appearance {
+                dark: true,
+                reduce_motion: false,
+                style: Style::Windows,
+                palette: Palette::Custom,
+                accent: BRAND,
+                density: Density::Comfortable,
+                scale: UiScale::Default,
+                corner_radius: None,
+                custom_surfaces: surfaces.clone(),
+            },
+        );
+        assert_eq!(tokens(&ctx).canvas, parse_hex_color("#080A10").unwrap());
+        surfaces.active_mut(false)[2] = "#111111".into();
+        assert!(surfaces.validate().unwrap_err().contains("contrast checks"));
     }
 
     #[test]
@@ -972,6 +1090,7 @@ mod tests {
                 density: Density::Comfortable,
                 scale: UiScale::Default,
                 corner_radius: Some(3),
+                custom_surfaces: CustomSurfaces::default(),
             },
         );
         assert_eq!(tokens(&ctx).ctl_radius(), 3);
