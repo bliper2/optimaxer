@@ -417,6 +417,25 @@ fn operation_entry_matches(entry: &OperationEntry, query: &str) -> bool {
         || entry.details.iter().any(|detail| detail.to_lowercase().contains(&query))
 }
 
+fn game_preference_history(entries: &[OperationEntry], executable: &str) -> Vec<OperationEntry> {
+    let mut matches: Vec<_> = entries
+        .iter()
+        .filter(|entry| {
+            matches!(
+                entry.title.as_str(),
+                "Setting per-game graphics preference" | "Restoring per-game graphics preference"
+            ) && entry.details.iter().any(|detail| {
+                detail
+                    .strip_prefix("Executable: ")
+                    .is_some_and(|path| path.eq_ignore_ascii_case(executable))
+            })
+        })
+        .cloned()
+        .collect();
+    matches.sort_by(|left, right| right.time.cmp(&left.time));
+    matches
+}
+
 enum ActivityEntry<'a> {
     Tweak(&'a HistoryEntry),
     Operation(&'a OperationEntry),
@@ -472,6 +491,30 @@ mod operation_history_tests {
         assert!(operation_entry_matches(&entry, "flushed"));
         assert!(!operation_entry_matches(&entry, "installer"));
         assert!(operation_entry_matches(&entry, "  "));
+    }
+
+    #[test]
+    fn per_game_history_matches_only_graphics_operations_for_the_exact_executable() {
+        let executable = r"C:\Games\Example\game.exe";
+        let mut older = entry();
+        older.title = "Setting per-game graphics preference".into();
+        older.time = "2026-10-28T12:30:00Z".into();
+        older.details = vec![
+            format!("Executable: {executable}"),
+            "Requested preference: High performance".into(),
+        ];
+        let mut newer = older.clone();
+        newer.title = "Restoring per-game graphics preference".into();
+        newer.time = "2026-10-29T12:30:00Z".into();
+        newer.status = OperationStatus::Warnings;
+        let mut other_game = older.clone();
+        other_game.details[0] = r"Executable: C:\Games\Other\game.exe".into();
+        let unrelated = entry();
+        let operations = [older, newer.clone(), other_game, unrelated];
+
+        let history = game_preference_history(&operations, &executable.to_uppercase());
+        assert_eq!(history, vec![newer, operations[0].clone()]);
+        assert_eq!(history[0].status, OperationStatus::Warnings);
     }
 
     #[test]
@@ -2942,6 +2985,7 @@ impl OptiUi {
                 let state_result = self.game_states.get(&profile.executable);
                 let state = state_result.and_then(|result| result.as_ref().ok()).copied();
                 let state_error = state_result.and_then(|result| result.as_ref().err()).cloned();
+                let preference_history = game_preference_history(&self.operations, &profile.executable);
                 let mut requested_action: Option<bool> = None;
                 kit::card(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -3030,6 +3074,55 @@ impl OptiUi {
                         self.preview_game_undo(ctx, profile.executable.clone());
                     }
                 }
+                egui::CollapsingHeader::new(format!(
+                    "Per-game history · {}",
+                    preference_history.len()
+                ))
+                    .id_salt(("game-history", &profile.executable))
+                    .show(ui, |ui| {
+                        if preference_history.is_empty() {
+                            ui.label(
+                                RichText::new("No graphics preference changes recorded for this executable.")
+                                    .size(T_SMALL)
+                                    .color(t.muted),
+                            );
+                        } else {
+                            for entry in preference_history.iter().take(10) {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label(
+                                        RichText::new(&entry.time)
+                                            .size(T_CAPTION)
+                                            .monospace()
+                                            .color(t.subtle),
+                                    );
+                                    ui.label(
+                                        RichText::new(&entry.title).size(T_SMALL).color(t.text),
+                                    );
+                                    let tone = match entry.status {
+                                        OperationStatus::Warnings => Tone::Warn,
+                                        OperationStatus::Error => Tone::Bad,
+                                        OperationStatus::Finished | OperationStatus::Unknown => {
+                                            Tone::Neutral
+                                        }
+                                    };
+                                    kit::chip(ui, entry.status.label(), tone);
+                                });
+                                for detail in entry
+                                    .details
+                                    .iter()
+                                    .filter(|detail| !detail.starts_with("Executable: "))
+                                {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(detail).size(T_CAPTION).color(t.muted),
+                                        )
+                                        .wrap(),
+                                    );
+                                }
+                                ui.separator();
+                            }
+                        }
+                    });
                 ui.add_space(S1);
             }
         }
