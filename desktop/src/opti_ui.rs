@@ -1808,8 +1808,15 @@ impl OptiUi {
         }
         self.confirm_window(ctx);
         if self.restore_first != settings.opti_restore_point {
+            let previous = settings.opti_restore_point;
             settings.opti_restore_point = self.restore_first;
-            settings.save();
+            if let Err(error) = settings.save_checked() {
+                settings.opti_restore_point = previous;
+                self.restore_first = previous;
+                let message = format!("Restore point preference was not saved: {error}");
+                self.say(&message);
+                self.events.push(OptiEvent::Toast(message));
+            }
         }
         if self.restart_pending && !settings.opti_restart_required {
             settings.opti_restart_required = true;

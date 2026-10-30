@@ -209,6 +209,7 @@ impl OrionApp {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         theme::install_fonts(&cc.egui_ctx);
         let mut settings = Settings::load();
+        let mut startup_toast = None;
         if std::env::var_os("ORION_SHOTS").is_some() {
             // developer screenshots: nothing below may be written to the user's settings file
             net::READ_ONLY.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -244,8 +245,10 @@ impl OrionApp {
                 _ => {}
             }
         }
-        if settings.clear_restart_after_reboot(crate::opti::sysmon::uptime_secs()) {
-            settings.save();
+        if settings.clear_restart_after_reboot(crate::opti::sysmon::uptime_secs())
+            && let Err(error) = settings.save_checked()
+        {
+            startup_toast = Some((format!("Restart reminder could not be cleared on disk: {error}"), Instant::now()));
         }
         theme::apply(&cc.egui_ctx, settings.appearance());
         let catalog = net::load_cache().unwrap_or_else(net::embedded);
@@ -282,7 +285,7 @@ impl OrionApp {
             palette_query: String::new(),
             palette_selected: 0,
             lightbox: None,
-            toast: None,
+            toast: startup_toast,
             search_id: egui::Id::unique("orion-search"),
             view_started: 0.0,
             update: UpdateState::Idle,
@@ -584,7 +587,7 @@ impl OrionApp {
         }
         self.section = s;
         self.settings.section = if s == Section::Optimaxer { "Optimaxer" } else { "Store" }.into();
-        self.settings.save();
+        self.save_settings("Window section");
     }
 
     fn handle_opti_events(&mut self, ctx: &egui::Context) {
@@ -599,7 +602,7 @@ impl OrionApp {
                     self.query.clear();
                     self.detail = None;
                     self.dirty = true;
-                    self.settings.save();
+                    self.save_settings("Store platform");
                 }
                 OptiEvent::OpenApp(id) => {
                     if let Some(a) = self.catalog.apps.iter().find(|a| a.id == id).cloned() {
@@ -751,6 +754,12 @@ impl eframe::App for OrionApp {
 }
 
 impl OrionApp {
+    fn save_settings(&mut self, label: &str) {
+        if let Err(error) = self.settings.save_checked() {
+            self.toast = Some((format!("{label} was not saved: {error}"), Instant::now()));
+        }
+    }
+
     fn persist_appearance(&mut self, ctx: &egui::Context, previous: net::Settings, label: &str) {
         if let Err(error) = self.settings.save_checked() {
             self.settings = previous;
@@ -1248,7 +1257,7 @@ impl OrionApp {
                     });
                     if toggle_clicked {
                         self.settings.sidebar_collapsed = !self.settings.sidebar_collapsed;
-                        self.settings.save();
+                        self.save_settings("Navigation preference");
                     }
                     self.opti.side_panel(ui, ctx, self.settings.sidebar_collapsed);
                 });
@@ -1281,7 +1290,7 @@ impl OrionApp {
                 self.dirty = true;
                 self.detail = None;
                 self.bump(ctx);
-                self.settings.save();
+                self.save_settings("Store filters");
             }
         });
     }
@@ -1301,7 +1310,7 @@ impl OrionApp {
                 });
                 if before != self.settings.sort {
                     self.dirty = true;
-                    self.settings.save();
+                    self.save_settings("Store sort order");
                 }
                 ui.label(RichText::new("Sort").size(T_SMALL).color(t.muted));
             });
@@ -1769,7 +1778,7 @@ impl OrionApp {
                     let mut auto = self.settings.auto_update;
                     if ui.checkbox(&mut auto, "Check for updates when the app starts").on_hover_text("Only checks. Nothing is downloaded until you press Update and restart.").changed() {
                         self.settings.auto_update = auto;
-                        self.settings.save();
+                        self.save_settings("Update preference");
                     }
                     ui.horizontal(|ui| {
                         let busy = matches!(self.update, UpdateState::Checking | UpdateState::Downloading { .. });
@@ -1786,7 +1795,7 @@ impl OrionApp {
                     ui.label(RichText::new("Downloads").font(FontId::new(T_BODY, semibold())).color(t.text));
                     let resp = ui.add(egui::TextEdit::singleline(&mut self.settings.download_dir).desired_width(f32::INFINITY).margin(Margin::symmetric(S3 as i8, 8)));
                     if resp.lost_focus() {
-                        self.settings.save();
+                        self.save_settings("Download folder");
                     }
                     ui.horizontal(|ui| {
                         if kit::secondary(ui, "Open folder", true).clicked() {
@@ -1795,7 +1804,7 @@ impl OrionApp {
                         }
                         if kit::ghost(ui, "Reset", true).clicked() {
                             self.settings.download_dir = Settings::default().download_dir;
-                            self.settings.save();
+                            self.save_settings("Download folder");
                         }
                     });
                 });
@@ -1805,8 +1814,12 @@ impl OrionApp {
                     ui.label(RichText::new("Optimaxer").font(FontId::new(T_BODY, semibold())).color(t.text));
                     let mut rp = self.settings.opti_restore_point;
                     if ui.checkbox(&mut rp, "Offer a System Restore point before applying tweaks").changed() {
+                        let previous = self.settings.opti_restore_point;
                         self.settings.opti_restore_point = rp;
-                        self.settings.save();
+                        if let Err(error) = self.settings.save_checked() {
+                            self.settings.opti_restore_point = previous;
+                            self.toast = Some((format!("Restore point preference was not saved: {error}"), Instant::now()));
+                        }
                     }
                 });
                 ui.add_space(S3);

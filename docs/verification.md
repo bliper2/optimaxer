@@ -29,6 +29,8 @@ The v2.15.16 sidebar grouping is covered by a test that accounts for every desti
 
 The v2.15.17 palette gallery reuses the tested token generation for all built-in palettes. Palette changes use checked settings persistence and restore the prior live theme on write failure. The screenshot walk now includes Settings so gallery layout is rendered with the rest of the shell. Full interactive selection across all 17 choices and settings-file failure still need manual UI verification.
 
+The v2.15.19 settings pass removes the error-swallowing `Settings::save()` method. UI preferences use checked writes and report failures; appearance and restore-point preference changes roll back, while other preferences stay active for the session and display an unsaved warning. A forced write failure has not been exercised through the live settings UI.
+
 The v2.15.5 Windows release build was also opened interactively at 1180 × 760: Commands opened the palette, searching `Tweaks` returned one result, and Enter navigated to the Tweaks page. This is a focused smoke check, not full keyboard-only or accessibility testing.
 
 The v2.15.6 Windows release build was opened at 1180 × 760. Settings content scrolled to the lower sections, the Arctic palette changed the live interface, and the selected palette remained after restarting the app. The original settings file was restored after the check. This does not cover every palette or display scale.
