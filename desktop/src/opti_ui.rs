@@ -157,7 +157,7 @@ enum Msg {
     Status(HashMap<String, bool>),
     Plan(Pending),
     Services(Vec<SvcRow>),
-    Startup(Vec<startup::Item>),
+    Startup(startup::Listing),
     Scan(Vec<(&'static str, Option<u64>)>),
     Adapters(Vec<String>),
     Bench(Vec<(String, Option<f64>)>),
@@ -266,6 +266,7 @@ pub struct OptiUi {
     svc_sel: HashSet<String>,
     svc_search: String,
     startup: Vec<startup::Item>,
+    startup_warning: Option<String>,
     st_sel: HashSet<String>,
     clean_sizes: HashMap<&'static str, Option<u64>>,
     clean_sel: HashSet<&'static str>,
@@ -721,6 +722,7 @@ impl OptiUi {
             svc_sel: HashSet::new(),
             svc_search: String::new(),
             startup: Vec::new(),
+            startup_warning: None,
             st_sel: HashSet::new(),
             clean_sizes: HashMap::new(),
             clean_sel: HashSet::new(),
@@ -872,7 +874,8 @@ impl OptiUi {
                 }
                 Msg::Startup(s) => {
                     self.st_sel.clear();
-                    self.startup = s;
+                    self.startup = s.items;
+                    self.startup_warning = s.warning;
                     self.startup_loaded = true;
                 }
                 Msg::Scan(v) => {
@@ -985,9 +988,10 @@ impl OptiUi {
 
     fn refresh_startup(&mut self, ctx: &egui::Context) {
         self.spawn(ctx, "Reading startup items", move |w| {
-            let items = startup::list(&WinSystem);
-            w.log(&format!("Found {} startup items.", items.len()));
-            w.send(Msg::Startup(items));
+            let listing = startup::list(&WinSystem);
+            w.log(&format!("Found {} startup items.", listing.items.len()));
+            if let Some(warning) = &listing.warning { w.log(&format!("WARN {warning}")); }
+            w.send(Msg::Startup(listing));
         });
     }
 
@@ -3189,9 +3193,9 @@ impl OptiUi {
         if !self.startup_loaded && self.busy.is_none() {
             self.refresh_startup(ctx);
         }
-        kit::page_header(ui, "Startup", "Apps that start with Windows. Turning one off uses the same switch as Task Manager, and nothing is uninstalled.");
+        kit::page_header(ui, "Startup", "Apps and third-party tasks that start with Windows. Turning one off changes its startup state; nothing is uninstalled.");
         let idle = self.busy.is_none();
-        let key = |i: &startup::Item| format!("{}|{}", i.scope, i.name);
+        let key = |i: &startup::Item| format!("{}|{}|{}", i.scope, i.task_path.as_deref().unwrap_or(""), i.name);
         let picked: Vec<startup::Item> = self.startup.iter().filter(|i| self.st_sel.contains(&key(i))).cloned().collect();
         ui.horizontal_wrapped(|ui| {
             for (label, enable) in [("Turn off selected", false), ("Turn on selected", true)] {
@@ -3215,11 +3219,15 @@ impl OptiUi {
             }
         });
         ui.add_space(S2);
+        if let Some(warning) = &self.startup_warning {
+            ui.label(RichText::new(warning).size(T_SMALL).color(t.warn));
+            ui.add_space(S2);
+        }
         if self.startup.is_empty() {
             if self.busy.is_some() {
                 kit::skeleton(ui, 5);
             } else {
-                kit::empty_state(ui, "No startup items found", "Nothing in the Run keys or Startup folders. Press Refresh to look again.");
+                kit::empty_state(ui, "No startup items found", "Nothing in Run keys, Startup folders, or third-party logon and boot tasks. Press Refresh to look again.");
             }
             return;
         }

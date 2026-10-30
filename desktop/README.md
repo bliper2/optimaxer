@@ -89,7 +89,7 @@ Nothing is downloaded or installed automatically, and Optimaxer never installs d
 
 11 tweaks remain PowerShell-only because they require Appx package control, external downloads, ACL operations, or Windows APIs outside the Rust engine: uninstalling OneDrive, folder type detection, removing the Copilot and AI app packages, uninstalling Edge, blocking Razer and Logitech installers, Opera startup tasks, adapter power settings, telemetry hosts, Loudness Equalization and Store search permissions. "Turn off Recall" applies its registry part and skips the DISM step. Hiding the Settings AI page is supported with exact visibility-policy restoration.
 
-Not in this build at all: Appx debloat, Windows optional features, WinGet app installs (the Orion catalog covers downloads), the hourly auto clean task, and scheduled-task startup entries.
+Not in this build at all: Appx debloat, Windows optional features, WinGet app installs (the Orion catalog covers downloads), and the hourly auto clean task. Startup lists and toggles third-party scheduled tasks with logon or boot triggers; Microsoft tasks are excluded.
 
 ## Data tables
 
