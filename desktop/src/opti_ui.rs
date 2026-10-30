@@ -204,6 +204,64 @@ struct Pending {
     ok_label: String,
 }
 
+fn service_dependency_lines(
+    targets: &[(String, String)],
+    dependencies: &[services::DependencyInfo],
+    disabling: bool,
+) -> Result<Vec<Line>, String> {
+    if targets.len() != dependencies.len()
+        || targets
+            .iter()
+            .zip(dependencies)
+            .any(|((name, _), dependency)| !name.eq_ignore_ascii_case(&dependency.service))
+    {
+        return Err("Service dependency results did not match the selected services.".into());
+    }
+    let mut lines = Vec::new();
+    for ((name, display), dependency) in targets.iter().zip(dependencies) {
+        lines.push(Line {
+            text: if display.is_empty() || display.eq_ignore_ascii_case(name) {
+                name.clone()
+            } else {
+                format!("{display} ({name})")
+            },
+            warn: false,
+            head: true,
+        });
+        let requires = if dependency.requires.is_empty() {
+            "none".to_string()
+        } else {
+            dependency
+                .requires
+                .iter()
+                .map(|required| {
+                    required
+                        .strip_prefix('+')
+                        .map(|group| format!("load-order group {group}"))
+                        .unwrap_or_else(|| required.clone())
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        lines.push(Line {
+            text: format!("Requires: {requires}"),
+            warn: false,
+            head: false,
+        });
+        let required_by = if dependency.required_by.is_empty() {
+            "none".to_string()
+        } else {
+            dependency.required_by.join(", ")
+        };
+        lines.push(Line {
+            text: format!("Required by: {required_by}"),
+            warn: disabling && !dependency.required_by.is_empty(),
+            head: false,
+        });
+    }
+    Ok(lines)
+}
+
 enum Msg {
     Log(String),
     Toast(String),
@@ -5687,14 +5745,55 @@ impl OptiUi {
             let any = idle && !names.is_empty();
             for (label, start) in [("Set to Manual", 3u32), ("Disable", 4), ("Set to Automatic", 2)] {
                 if kit::secondary(ui, label, any).clicked() && self.need_admin() {
-                    let n = names.len();
-                    self.pending = Some(Pending {
-                        title: label.to_string(),
-                        intro: format!("Change the start type of {n} service{}? Their current start types are saved first, so you can restore them.", if n == 1 { "" } else { "s" }),
-                        lines: names.iter().map(|nm| Line { text: nm.clone(), warn: start == 4, head: false }).collect(),
-                        action: Action::SetServices { names: names.clone(), start },
-                        restore_option: false,
-                        ok_label: format!("{label} ({n})"),
+                    let mut selected = names.clone();
+                    selected.sort_by_key(|name| name.to_lowercase());
+                    let targets: Vec<(String, String)> = selected
+                        .iter()
+                        .map(|name| {
+                            let display = self
+                                .services
+                                .iter()
+                                .find(|service| service.name.eq_ignore_ascii_case(name))
+                                .map(|service| service.display.clone())
+                                .unwrap_or_default();
+                            (name.clone(), display)
+                        })
+                        .collect();
+                    let count = selected.len();
+                    let title = label.to_string();
+                    let ok_label = format!("{label} ({count})");
+                    self.spawn(ctx, "Reviewing service dependencies", move |worker| {
+                        match services::dependency_info(&selected).and_then(|dependencies| {
+                            service_dependency_lines(
+                                    &targets,
+                                    &dependencies,
+                                    start == 4,
+                                )
+                        }) {
+                            Ok(lines) => {
+                                worker.send(Msg::Plan(Pending {
+                                    title,
+                                    intro: format!(
+                                        "Review direct dependencies before changing {count} service{}. Disabling a service may prevent its dependents from starting; this changes future start behavior and does not stop running services. Current start types are backed up before the change.",
+                                        if count == 1 { "" } else { "s" }
+                                    ),
+                                    lines,
+                                    action: Action::SetServices {
+                                        names: selected,
+                                        start,
+                                    },
+                                    restore_option: false,
+                                    ok_label,
+                                }));
+                            }
+                            Err(error) => {
+                                let message = format!(
+                                    "Service dependency review failed; no services were changed: {error}"
+                                );
+                                worker.log(&format!("WARN {message}"));
+                                worker.send(Msg::Toast(message));
+                            }
+                        }
                     });
                 }
             }
@@ -6674,6 +6773,45 @@ mod tests {
     use super::*;
     use crate::opti::backend::RegData;
     use crate::opti::backend::fake::FakeSystem;
+
+    #[test]
+    fn service_change_review_lists_direct_dependencies_and_warns_on_dependents() {
+        let targets = vec![("spooler".into(), "Print Spooler".into())];
+        let dependencies = vec![services::DependencyInfo {
+            service: "Spooler".into(),
+            requires: vec!["RPCSS".into(), "+PrintProvider".into()],
+            required_by: vec!["Example service (ExampleSvc)".into()],
+        }];
+
+        let disabling = service_dependency_lines(&targets, &dependencies, true).unwrap();
+        assert_eq!(disabling.len(), 3);
+        assert_eq!(disabling[0].text, "Print Spooler (spooler)");
+        assert_eq!(
+            disabling[1].text,
+            "Requires: RPCSS, load-order group PrintProvider"
+        );
+        assert_eq!(
+            disabling[2].text,
+            "Required by: Example service (ExampleSvc)"
+        );
+        assert!(disabling[2].warn);
+
+        let manual = service_dependency_lines(&targets, &dependencies, false).unwrap();
+        assert!(!manual[2].warn);
+    }
+
+    #[test]
+    fn service_change_review_rejects_mismatched_dependency_results() {
+        let targets = vec![("spooler".into(), "Print Spooler".into())];
+        let dependencies = vec![services::DependencyInfo {
+            service: "other".into(),
+            requires: Vec::new(),
+            required_by: Vec::new(),
+        }];
+
+        assert!(service_dependency_lines(&targets, &dependencies, true).is_err());
+        assert!(service_dependency_lines(&targets, &[], true).is_err());
+    }
 
     fn tr(laptop: bool) -> Traits {
         let gpus = vec!["NVIDIA GeForce RTX 3090".to_string()];
