@@ -1688,24 +1688,28 @@ impl OrionApp {
             });
             if !previous_downloads.is_empty() {
                 ui.add_space(S2);
-                ui.label(RichText::new("Recent downloads").font(FontId::new(T_SMALL, semibold())).color(t.muted));
-                egui::ScrollArea::vertical().max_height(112.0).auto_shrink([false, false]).show(ui, |ui| {
-                    for recent in previous_downloads {
-                        kit::row(ui, ("recent-dl", &recent.path), false, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.add_sized([210.0, 20.0], egui::Label::new(RichText::new(&recent.file).font(FontId::new(T_BODY, semibold())).color(t.text)).truncate());
-                                kit::chip(ui, "Downloaded", Tone::Neutral);
-                                if kit::secondary(ui, "Open", true).clicked() && open::that(&recent.path).is_err() {
-                                    note = Some("Could not open the downloaded file. It may have been moved or removed.".into());
-                                }
-                                if kit::ghost(ui, "Show in folder", true).clicked()
-                                    && let Err(error) = reveal(&recent.path) {
-                                    note = Some(format!("Could not show the downloaded file: {error}"));
-                                }
-                            });
+                egui::CollapsingHeader::new(RichText::new(format!("Recent downloads ({})", previous_downloads.len())).font(FontId::new(T_SMALL, semibold())).color(t.muted))
+                    .id_salt("recent-downloads")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical().max_height(112.0).auto_shrink([false, false]).show(ui, |ui| {
+                            for recent in previous_downloads {
+                                kit::row(ui, ("recent-dl", &recent.path), false, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.add_sized([210.0, 20.0], egui::Label::new(RichText::new(&recent.file).font(FontId::new(T_BODY, semibold())).color(t.text)).truncate());
+                                        kit::chip(ui, "Downloaded", Tone::Neutral);
+                                        if kit::secondary(ui, "Open", true).clicked() && open::that(&recent.path).is_err() {
+                                            note = Some("Could not open the downloaded file. It may have been moved or removed.".into());
+                                        }
+                                        if kit::ghost(ui, "Show in folder", true).clicked()
+                                            && let Err(error) = reveal(&recent.path) {
+                                            note = Some(format!("Could not show the downloaded file: {error}"));
+                                        }
+                                    });
+                                });
+                            }
                         });
-                    }
-                });
+                    });
             }
         });
         if let Some(i) = remove {
