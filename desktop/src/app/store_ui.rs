@@ -5,6 +5,7 @@ use super::*;
 impl OrionApp {
     pub(super) fn store_view(&mut self, ctx: &egui::Context, ui: &mut Ui) {
         let t = tokens(ctx);
+        theme::paint_glow(ui);
         ui.horizontal(|ui| {
             let title = if !self.query.trim().is_empty() {
                 format!("Results for \"{}\"", self.query.trim())

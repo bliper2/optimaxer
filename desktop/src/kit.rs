@@ -173,12 +173,152 @@ pub fn chip(ui: &mut Ui, text: &str, tone: Tone) {
 /// A raised group of content: surface fill, quiet border, no shadow at rest.
 pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
     let t = tokens(ui.ctx());
-    egui::Frame::new()
+    let glass = theme::current_style(ui.ctx()) == theme::Style::Glass;
+    let shown = egui::Frame::new()
         .fill(t.surface1)
         .stroke(Stroke::new(1.0, t.hairline))
         .corner_radius(t.card_radius())
         .inner_margin(S4 as i8)
-        .show(ui, add)
+        .show(ui, add);
+    if glass {
+        // A lit top edge, the way light catches the rim of a glass panel.
+        let rect = shown.response.rect;
+        let inset = f32::from(t.card_radius()).max(6.0);
+        let lit = if t.dark {
+            Color32::from_white_alpha(34)
+        } else {
+            Color32::from_white_alpha(200)
+        };
+        ui.painter().line_segment(
+            [
+                egui::pos2(rect.left() + inset, rect.top() + 1.0),
+                egui::pos2(rect.right() - inset, rect.top() + 1.0),
+            ],
+            Stroke::new(1.0, lit),
+        );
+    }
+    shown
+}
+
+/// A miniature of the app wearing `sample`: rail, navigation, a headline, two cards with a progress bar and a primary
+/// button, with the theme's name underneath. Selection is marked by a ring in the live accent.
+pub fn theme_preview(
+    ui: &mut Ui,
+    sample: &theme::Tokens,
+    name: &str,
+    selected: bool,
+    width: f32,
+) -> Response {
+    let live = tokens(ui.ctx());
+    let preview_h = (width * 0.62).round();
+    let (rect, response) = ui.allocate_exact_size(vec2(width, preview_h + 22.0), Sense::click());
+    let preview = egui::Rect::from_min_size(rect.min, vec2(width, preview_h));
+    let radius = CornerRadius::same(sample.card_radius().min(10));
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(preview, radius, sample.canvas);
+    let rail = egui::Rect::from_min_size(preview.min, vec2(width * 0.26, preview_h));
+    painter.rect_filled(
+        rail,
+        CornerRadius {
+            nw: radius.nw,
+            sw: radius.sw,
+            ne: 0,
+            se: 0,
+        },
+        sample.rail,
+    );
+    for i in 0..4 {
+        let y = rail.top() + 10.0 + i as f32 * 9.0;
+        let bar = egui::Rect::from_min_size(
+            egui::pos2(rail.left() + 6.0, y),
+            vec2(rail.width() - 12.0, 5.0),
+        );
+        let fill = if i == 0 {
+            sample.brand
+        } else {
+            sample.surface3
+        };
+        painter.rect_filled(bar, CornerRadius::same(2), fill);
+    }
+    let content = egui::Rect::from_min_max(
+        egui::pos2(rail.right() + 8.0, preview.top() + 8.0),
+        egui::pos2(preview.right() - 8.0, preview.bottom() - 8.0),
+    );
+    painter.rect_filled(
+        egui::Rect::from_min_size(content.min, vec2(content.width() * 0.45, 5.0)),
+        CornerRadius::same(2),
+        sample.text,
+    );
+    let card_w = (content.width() - 6.0) / 2.0;
+    let card_h = content.height() * 0.5;
+    for k in 0..2 {
+        let card = egui::Rect::from_min_size(
+            egui::pos2(
+                content.left() + k as f32 * (card_w + 6.0),
+                content.top() + 11.0,
+            ),
+            vec2(card_w, card_h),
+        );
+        painter.rect(
+            card,
+            CornerRadius::same(sample.card_radius().min(6)),
+            sample.surface1,
+            Stroke::new(1.0, sample.hairline),
+            StrokeKind::Inside,
+        );
+        let track = egui::Rect::from_min_size(
+            egui::pos2(card.left() + 5.0, card.bottom() - 9.0),
+            vec2(card.width() - 10.0, 4.0),
+        );
+        painter.rect_filled(track, CornerRadius::same(2), sample.surface3);
+        let share = if k == 0 { 0.7 } else { 0.4 };
+        painter.rect_filled(
+            egui::Rect::from_min_size(track.min, vec2(track.width() * share, 4.0)),
+            CornerRadius::same(2),
+            sample.brand,
+        );
+        painter.rect_filled(
+            egui::Rect::from_min_size(
+                egui::pos2(card.left() + 5.0, card.top() + 6.0),
+                vec2(card.width() * 0.4, 4.0),
+            ),
+            CornerRadius::same(2),
+            sample.muted,
+        );
+    }
+    let button = egui::Rect::from_min_size(
+        egui::pos2(content.right() - 28.0, content.bottom() - 9.0),
+        vec2(28.0, 9.0),
+    );
+    painter.rect_filled(button, CornerRadius::same(4), sample.action);
+    painter.rect_stroke(
+        preview,
+        radius,
+        if selected {
+            Stroke::new(2.0, live.ring())
+        } else if response.hovered() {
+            Stroke::new(1.0, live.muted)
+        } else {
+            Stroke::new(1.0, sample.hairline)
+        },
+        StrokeKind::Inside,
+    );
+    painter.text(
+        egui::pos2(rect.left() + 2.0, preview.bottom() + 4.0),
+        egui::Align2::LEFT_TOP,
+        name,
+        FontId::new(
+            T_SMALL,
+            if selected {
+                semibold()
+            } else {
+                FontId::proportional(T_SMALL).family
+            },
+        ),
+        if selected { live.text } else { live.muted },
+    );
+    response.widget_info(|| WidgetInfo::selected(Role::RadioButton, true, selected, name));
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 // region navigation

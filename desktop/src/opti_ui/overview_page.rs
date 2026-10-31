@@ -176,6 +176,10 @@ impl OptiUi {
             let width = ui.available_width();
             let compact = width < 720.0;
             let w3 = ((width - 2.0 * gap) / 3.0 - 1.0).floor();
+            match settings.palette.overview_layout() {
+                theme::OverviewLayout::Dashboard => self.overview_dashboard(ui, ctx, &s, &info),
+                theme::OverviewLayout::List => self.overview_list(ui, ctx, &s, &info),
+                theme::OverviewLayout::Cards => {
             ui.horizontal_top(|ui| {
                 let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
                 let cards = [
@@ -209,6 +213,8 @@ impl OptiUi {
                     });
                 }
             });
+                }
+            }
             if overview_shows(settings, "activity") {
                 self.overview_activity(ui, settings, &s);
             }

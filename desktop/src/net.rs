@@ -200,6 +200,8 @@ pub struct Settings {
     pub sidebar_collapsed: bool,
     /// Optimaxer: offer a System Restore point before applying tweaks.
     pub opti_restore_point: bool,
+    /// Restart File Explorer after a tweak or Smart Optimize run changed something, so interface changes show at once.
+    pub opti_restart_explorer: bool,
     /// A confirmed tweak changed system state that needs a Windows restart.
     pub opti_restart_required: bool,
     /// Tweak IDs pinned by the user on the Tweaks page.
@@ -261,6 +263,7 @@ impl Default for Settings {
             section: "Store".into(),
             sidebar_collapsed: false,
             opti_restore_point: true,
+            opti_restart_explorer: true,
             opti_restart_required: false,
             opti_tweak_favorites: Vec::new(),
             store_favorites: Vec::new(),

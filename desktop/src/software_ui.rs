@@ -3,7 +3,9 @@ use crate::theme::{self, Tone, semibold, tokens};
 use crate::winget::{self, Action, InstalledPackage, Package};
 use crate::winget_icons;
 use egui::{Align, FontId, Layout, RichText, Ui};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
@@ -12,7 +14,27 @@ struct PendingAction {
     package: Option<Package>,
 }
 
+/// Several packages for one action, run one after another, each in its own visible WinGet console.
+struct PendingBatch {
+    action: Action,
+    packages: Vec<Package>,
+}
+
+enum BatchMsg {
+    Started {
+        index: usize,
+        total: usize,
+        name: String,
+    },
+    Finished(Vec<(String, Result<i32, String>)>),
+}
+
 pub struct SoftwareUi {
+    selected: BTreeSet<String>,
+    pending_batch: Option<PendingBatch>,
+    batch_rx: Option<Receiver<BatchMsg>>,
+    batch_cancel: Arc<AtomicBool>,
+    batch_progress: Option<(usize, usize, String)>,
     packages: Vec<Package>,
     catalog_error: Option<String>,
     pub query: String,
@@ -39,6 +61,11 @@ impl SoftwareUi {
             Err(error) => (Vec::new(), Some(error)),
         };
         Self {
+            selected: BTreeSet::new(),
+            pending_batch: None,
+            batch_rx: None,
+            batch_cancel: Arc::new(AtomicBool::new(false)),
+            batch_progress: None,
             packages,
             catalog_error,
             query: String::new(),
@@ -66,6 +93,13 @@ impl SoftwareUi {
     }
 
     pub fn status_line(&self) -> String {
+        if let Some((index, total, name)) = &self.batch_progress {
+            return if *index == 0 {
+                format!("WinGet: starting {total} app(s)")
+            } else {
+                format!("WinGet: {index} of {total}, {name}")
+            };
+        }
         if let Some(operation) = &self.busy {
             return format!("WinGet: {operation}");
         }
@@ -90,6 +124,7 @@ impl SoftwareUi {
     }
 
     pub fn tick(&mut self, ctx: &egui::Context) {
+        self.poll_batch(ctx);
         if let Some(rx) = &self.refresh_rx {
             match rx.try_recv() {
                 Ok(result) => {
@@ -158,7 +193,7 @@ impl SoftwareUi {
     }
 
     pub fn refresh(&mut self, ctx: &egui::Context) {
-        if self.refresh_rx.is_some() || self.operation_rx.is_some() {
+        if self.refresh_rx.is_some() || self.operation_rx.is_some() || self.batch_rx.is_some() {
             return;
         }
         let (tx, rx) = channel();
@@ -179,7 +214,90 @@ impl SoftwareUi {
     }
 
     fn can_run_action(&self) -> bool {
-        self.refresh_rx.is_none() && self.operation_rx.is_none()
+        self.refresh_rx.is_none() && self.operation_rx.is_none() && self.batch_rx.is_none()
+    }
+
+    fn start_batch(&mut self, ctx: &egui::Context, batch: PendingBatch) {
+        let (tx, rx) = channel();
+        let repaint = ctx.clone();
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.batch_cancel = cancel.clone();
+        let PendingBatch { action, packages } = batch;
+        let total = packages.len();
+        std::thread::spawn(move || {
+            let mut results = Vec::new();
+            for (index, package) in packages.iter().enumerate() {
+                if cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                let _ = tx.send(BatchMsg::Started {
+                    index: index + 1,
+                    total,
+                    name: package.name.clone(),
+                });
+                repaint.request_repaint();
+                results.push((
+                    package.name.clone(),
+                    winget::run_visible(action, Some(&package.id)),
+                ));
+            }
+            let _ = tx.send(BatchMsg::Finished(results));
+            repaint.request_repaint();
+        });
+        self.batch_progress = Some((0, total, String::new()));
+        self.batch_rx = Some(rx);
+        self.message = Some((true, "WinGet opens one console per app, one after another. Review each prompt there; Optimaxer does not accept package agreements or suppress installer UI.".into()));
+    }
+
+    fn poll_batch(&mut self, ctx: &egui::Context) {
+        let Some(rx) = &self.batch_rx else { return };
+        let finished;
+        loop {
+            match rx.try_recv() {
+                Ok(BatchMsg::Started { index, total, name }) => {
+                    self.batch_progress = Some((index, total, name));
+                }
+                Ok(BatchMsg::Finished(results)) => {
+                    finished = Some(results);
+                    break;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(Duration::from_millis(150));
+                    return;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    finished = Some(Vec::new());
+                    break;
+                }
+            }
+        }
+        if let Some(results) = finished {
+            self.batch_rx = None;
+            self.batch_progress = None;
+            let ok = results.iter().filter(|(_, r)| matches!(r, Ok(0))).count();
+            let failed: Vec<String> = results
+                .iter()
+                .filter_map(|(name, r)| match r {
+                    Ok(0) => None,
+                    Ok(code) => Some(format!("{name} (exit code {code})")),
+                    Err(error) => Some(format!("{name} ({error})")),
+                })
+                .collect();
+            let summary = if failed.is_empty() {
+                format!("{ok} of {} finished with exit code 0.", results.len())
+            } else {
+                format!(
+                    "{ok} finished; did not finish cleanly: {}. Review the WinGet consoles for details.",
+                    failed.join(", ")
+                )
+            };
+            self.message = Some((
+                failed.is_empty(),
+                format!("{summary} Checking installed status…"),
+            ));
+            self.selected.clear();
+            self.refresh(ctx);
+        }
     }
 
     fn package_icon(&mut self, ui: &mut Ui, package: &Package) {
@@ -364,6 +482,27 @@ impl SoftwareUi {
             );
             ui.add_space(theme::S1);
         }
+        if let Some((index, total, name)) = self.batch_progress.clone() {
+            ui.horizontal(|ui| {
+                ui.add(egui::Spinner::new().size(14.0));
+                let line = if index == 0 {
+                    format!("Starting {total} app(s)…")
+                } else {
+                    format!("{index} of {total}: {name}")
+                };
+                ui.label(RichText::new(line).color(t.text));
+                if kit::secondary(
+                    ui,
+                    "Stop after this one",
+                    !self.batch_cancel.load(Ordering::Relaxed),
+                )
+                .clicked()
+                {
+                    self.batch_cancel.store(true, Ordering::Relaxed);
+                }
+            });
+            ui.add_space(theme::S1);
+        }
         if let Some(operation) = &self.busy {
             ui.horizontal(|ui| {
                 ui.add(egui::Spinner::new().size(14.0));
@@ -446,6 +585,76 @@ impl SoftwareUi {
             kit::empty_state(ui, title, detail);
             return;
         }
+        let is_installed =
+            |ui_self: &Self, id: &str| ui_self.installed.contains_key(&id.to_ascii_lowercase());
+        let picked: Vec<Package> = self
+            .packages
+            .iter()
+            .filter(|p| self.selected.contains(&p.id))
+            .cloned()
+            .collect();
+        let to_install: Vec<Package> = picked
+            .iter()
+            .filter(|p| !is_installed(self, &p.id))
+            .cloned()
+            .collect();
+        let to_upgrade: Vec<Package> = picked
+            .iter()
+            .filter(|p| is_installed(self, &p.id))
+            .cloned()
+            .collect();
+        let shown_not_installed: Vec<String> = visible
+            .iter()
+            .filter(|p| !is_installed(self, &p.id))
+            .map(|p| p.id.clone())
+            .collect();
+        let mut batch_request: Option<PendingBatch> = None;
+        ui.horizontal_wrapped(|ui| {
+            if !picked.is_empty() {
+                kit::chip(ui, &format!("{} selected", picked.len()), Tone::Brand);
+            }
+            if kit::primary(
+                ui,
+                &format!("Install selected ({})", to_install.len()),
+                self.can_run_action() && !to_install.is_empty(),
+            )
+            .clicked()
+            {
+                batch_request = Some(PendingBatch {
+                    action: Action::Install,
+                    packages: to_install.clone(),
+                });
+            }
+            if !to_upgrade.is_empty()
+                && kit::secondary(
+                    ui,
+                    &format!("Upgrade selected ({})", to_upgrade.len()),
+                    self.can_run_action(),
+                )
+                .clicked()
+            {
+                batch_request = Some(PendingBatch {
+                    action: Action::Upgrade,
+                    packages: to_upgrade.clone(),
+                });
+            }
+            if kit::ghost(
+                ui,
+                &format!(
+                    "Select all shown not installed ({})",
+                    shown_not_installed.len()
+                ),
+                !shown_not_installed.is_empty(),
+            )
+            .clicked()
+            {
+                self.selected.extend(shown_not_installed.iter().cloned());
+            }
+            if kit::ghost(ui, "Clear selection", !self.selected.is_empty()).clicked() {
+                self.selected.clear();
+            }
+        });
+        ui.add_space(theme::S1);
         let mut requested = None;
         let mut open_error = None;
         egui::ScrollArea::vertical()
@@ -456,8 +665,29 @@ impl SoftwareUi {
                         .installed
                         .get(&package.id.to_ascii_lowercase())
                         .cloned();
-                    kit::row(ui, ("winget-package", &package.id), false, |ui| {
+                    let chosen = self.selected.contains(&package.id);
+                    kit::row(ui, ("winget-package", &package.id), chosen, |ui| {
                         ui.horizontal_wrapped(|ui| {
+                            let mut on = chosen;
+                            let tick = ui.add_enabled(
+                                self.can_run_action(),
+                                egui::Checkbox::without_text(&mut on),
+                            );
+                            tick.widget_info(|| {
+                                egui::WidgetInfo::selected(
+                                    egui::Role::CheckBox,
+                                    true,
+                                    on,
+                                    format!("Select {}", package.name),
+                                )
+                            });
+                            if tick.changed() {
+                                if on {
+                                    self.selected.insert(package.id.clone());
+                                } else {
+                                    self.selected.remove(&package.id);
+                                }
+                            }
                             self.package_icon(ui, package);
                             ui.add_space(theme::S2);
                             ui.vertical(|ui| {
@@ -518,10 +748,74 @@ impl SoftwareUi {
         if let Some((action, package)) = requested {
             self.request(action, Some(&package));
         }
+        if let Some(batch) = batch_request {
+            self.pending_batch = Some(batch);
+        }
         if let Some(error) = open_error {
             self.message = Some((false, error));
         }
         self.confirm_action(ctx);
+        self.confirm_batch(ctx);
+    }
+
+    fn confirm_batch(&mut self, ctx: &egui::Context) {
+        let Some(batch) = &self.pending_batch else {
+            return;
+        };
+        let action = batch.action;
+        let commands: Vec<Result<String, String>> = batch
+            .packages
+            .iter()
+            .map(|p| {
+                winget::command_args(action, Some(&p.id))
+                    .map(|args| format!("winget.exe {}", args.join(" ")))
+            })
+            .collect();
+        let count = batch.packages.len();
+        let all_valid = commands.iter().all(Result::is_ok);
+        let mut run = false;
+        let mut cancel = false;
+        egui::Modal::new(egui::Id::NULL.with("winget-batch-confirm")).show(ctx, |ui| {
+            let t = tokens(ctx);
+            ui.set_width(520.0);
+            ui.label(
+                RichText::new(format!("{} {count} app{}?", action.label(), if count == 1 { "" } else { "s" }))
+                    .font(FontId::new(theme::T_TITLE, semibold()))
+                    .color(t.text),
+            );
+            ui.add_space(theme::S2);
+            ui.add(
+                egui::Label::new(
+                    RichText::new("WinGet opens a separate console for each app, one after another. Each installer may ask for administrator approval, show agreements to read, or need a restart. You can stop after the current app.")
+                        .color(t.muted),
+                )
+                .wrap(),
+            );
+            ui.add_space(theme::S2);
+            egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                for command in &commands {
+                    match command {
+                        Ok(command) => ui.label(RichText::new(command).monospace().size(theme::T_CAPTION).color(t.text)),
+                        Err(error) => ui.label(RichText::new(error).color(t.bad)),
+                    };
+                }
+            });
+            ui.add_space(theme::S3);
+            ui.horizontal(|ui| {
+                if kit::primary(ui, &format!("Start {count}"), all_valid && self.can_run_action()).clicked() {
+                    run = true;
+                }
+                if kit::secondary(ui, "Cancel", true).clicked() {
+                    cancel = true;
+                }
+            });
+        });
+        if cancel {
+            self.pending_batch = None;
+        }
+        if run && let Some(batch) = self.pending_batch.take() {
+            self.start_batch(ctx, batch);
+        }
     }
 
     fn confirm_action(&mut self, ctx: &egui::Context) {

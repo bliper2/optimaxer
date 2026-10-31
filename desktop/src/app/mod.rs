@@ -256,9 +256,16 @@ impl OrionApp {
                 Ok("125") => settings.ui_scale = theme::UiScale::Larger,
                 _ => {}
             }
+            if let Some(palette) = std::env::var("ORION_SHOTS_PALETTE")
+                .ok()
+                .and_then(|key| theme::Palette::from_key(&key))
+            {
+                settings.palette = palette;
+            }
             match std::env::var("ORION_SHOTS_STYLE").as_deref() {
                 Ok("classic") => settings.style = theme::Style::Classic,
                 Ok("material") => settings.style = theme::Style::Material,
+                Ok("glass") => settings.style = theme::Style::Glass,
                 Ok("windows") => settings.style = theme::Style::Windows,
                 _ => {}
             }
@@ -1119,7 +1126,7 @@ mod app_tests {
 
     #[test]
     fn palette_lists_all_commands_for_blank_query() {
-        assert_eq!(matching_palette_commands("  ").len(), 46);
+        assert_eq!(matching_palette_commands("  ").len(), 51);
     }
 
     #[test]
