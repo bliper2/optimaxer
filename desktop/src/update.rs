@@ -5,20 +5,22 @@
 //! takes its place, and the old file is removed on the next start.
 
 use crate::net;
+use crate::proc::NoWindow;
 use serde_json::Value;
 use std::fs;
 use std::io::{Read, Write};
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
 const REPO: &str = "bliper2/optimaxer";
+/// In-app updating swaps the running `.exe`, so it exists on Windows only; other platforms get new builds from the
+/// releases page.
+pub const IN_APP: bool = cfg!(windows);
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 const ASSET_PREFIX: &str = "OrionStore-Optimaxer-desktop-v";
 const ASSET_SUFFIX: &str = "-win-x64.zip";
 const EXE_NAME: &str = "orion-store-desktop.exe";
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Release {
@@ -197,7 +199,7 @@ pub fn verify(zip: &Path, digest: &str) -> Result<(), String> {
         .args(["-hashfile"])
         .arg(zip)
         .arg("SHA256")
-        .creation_flags(CREATE_NO_WINDOW)
+        .no_window()
         .output()
         .map_err(|e| format!("could not run certutil ({e})"))?;
     if !out.status.success() {
@@ -226,7 +228,7 @@ pub fn extract(zip: &Path, dest: &Path) -> Result<PathBuf, String> {
         .arg(zip)
         .arg("-C")
         .arg(dest)
-        .creation_flags(CREATE_NO_WINDOW)
+        .no_window()
         .output()
         .map_err(|e| format!("could not run tar ({e})"))?;
     if !out.status.success() {
@@ -335,6 +337,13 @@ pub fn install(
     progress: &dyn Fn(u64, u64),
     cancel: &dyn Fn() -> bool,
 ) -> Result<(), String> {
+    if cfg!(not(windows)) {
+        return Err(format!(
+            "In-app updates only replace the Windows build. Download v{} from {} instead.",
+            rel.label(),
+            rel.page
+        ));
+    }
     let current = std::env::current_exe().map_err(|e| e.to_string())?;
     install_to(rel, &current, progress, cancel)?;
     restart(&current)
@@ -517,7 +526,7 @@ mod tests {
             .arg("-C")
             .arg(&src)
             .arg(EXE_NAME)
-            .creation_flags(CREATE_NO_WINDOW)
+            .no_window()
             .status();
         if !made.map(|s| s.success()).unwrap_or(false) {
             return; // no tar on this machine: nothing to verify here
@@ -526,7 +535,7 @@ mod tests {
             .arg("-hashfile")
             .arg(&zip)
             .arg("SHA256")
-            .creation_flags(CREATE_NO_WINDOW)
+            .no_window()
             .output()
             .unwrap();
         let hash =

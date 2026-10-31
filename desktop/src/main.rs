@@ -3,11 +3,17 @@
 mod app;
 mod appearance;
 mod kit;
+mod linux;
 mod model;
 mod net;
 mod notifications;
 mod opti;
+#[cfg(windows)]
 mod opti_ui;
+#[cfg(unix)]
+#[path = "linux_ui/mod.rs"]
+mod opti_ui;
+mod proc;
 mod shots;
 mod software_ui;
 mod theme;

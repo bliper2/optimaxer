@@ -337,7 +337,7 @@ impl OrionApp {
                                         && let Err(error) = reveal(&path) {
                                         note = Some(format!("Could not show the downloaded file: {error}"));
                                     }
-                                    if is_installer(&path) && kit::ghost(ui, "Restore point, then open", true).on_hover_text("Optimaxer creates a System Restore point, then opens the installer").clicked() {
+                                    if cfg!(windows) && is_installer(&path) && kit::ghost(ui, "Restore point, then open", true).on_hover_text("Optimaxer creates a System Restore point, then opens the installer").clicked() {
                                         run_installer = Some(path.clone());
                                     }
                                     if kit::ghost(ui, "Remove", true).clicked() {

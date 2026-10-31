@@ -455,6 +455,7 @@ pub fn check(ui: &mut Ui, checked: bool) {
     }
 }
 
+#[cfg_attr(unix, allow(dead_code))]
 /// A clickable tile with a title, a wrapped description and an optional right-aligned note.
 pub fn tile(
     ui: &mut Ui,
@@ -825,6 +826,7 @@ pub fn network_chart(
     }
 }
 
+#[cfg_attr(unix, allow(dead_code))]
 /// Single-series bytes-per-second chart. The scale follows the configured sample window.
 pub fn rate_chart(
     ui: &mut Ui,

@@ -342,7 +342,7 @@ impl OrionApp {
             sys_look: (theme::system_dark(), theme::system_accent()),
             sys_checked: Instant::now(),
         };
-        if auto_check {
+        if auto_check && update::IN_APP {
             app.start_check(&cc.egui_ctx, false);
         }
         if std::env::var_os("ORION_SHOTS_FAKE_UPDATE").is_some() {
@@ -381,7 +381,7 @@ impl OrionApp {
     }
 
     fn start_check(&mut self, ctx: &egui::Context, manual: bool) {
-        if self.update.is_busy() {
+        if self.update.is_busy() || !update::IN_APP {
             return;
         }
         self.update = UpdateState::Checking;
@@ -818,11 +818,18 @@ impl OrionApp {
     }
 }
 
+#[cfg(windows)]
 fn reveal(path: &std::path::Path) -> Result<(), std::io::Error> {
     std::process::Command::new("explorer")
         .arg(format!("/select,{}", path.display()))
         .spawn()
         .map(|_| ())
+}
+
+/// File managers on Linux have no portable "select this file"; open the folder that holds it.
+#[cfg(unix)]
+fn reveal(path: &std::path::Path) -> Result<(), std::io::Error> {
+    open::that(path.parent().unwrap_or(path)).map_err(std::io::Error::other)
 }
 
 fn icon(ui: &mut Ui, app: &AppItem, size: f32) {

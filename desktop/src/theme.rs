@@ -1198,6 +1198,7 @@ pub fn tokens(ctx: &egui::Context) -> Tokens {
 
 // region Windows settings
 /// True when Windows is set to dark mode for apps.
+#[cfg(windows)]
 pub fn system_dark() -> bool {
     use winreg::enums::HKEY_CURRENT_USER;
     winreg::RegKey::predef(HKEY_CURRENT_USER)
@@ -1210,6 +1211,7 @@ pub fn system_dark() -> bool {
 /// The accent colour from Windows personalization, or the stock blue when the registry has none that is usable.
 /// Some PCs store 0 here (accent never set, or stripped by a debloat tool); that falls back to the personalization
 /// palette and then to the stock blue.
+#[cfg(windows)]
 pub fn system_accent() -> Color32 {
     use winreg::enums::HKEY_CURRENT_USER;
     let root = winreg::RegKey::predef(HKEY_CURRENT_USER);
@@ -1230,6 +1232,7 @@ pub fn system_accent() -> Color32 {
 
 /// The registry stores the accent as 0xAABBGGRR. A zero alpha, or a colour that is nearly black or white, means
 /// "not set" and gives `None`.
+#[cfg_attr(unix, allow(dead_code))]
 pub fn accent_from_abgr(v: u32) -> Option<Color32> {
     let col = Color32::from_rgb(
         (v & 0xFF) as u8,
@@ -1240,11 +1243,13 @@ pub fn accent_from_abgr(v: u32) -> Option<Color32> {
 }
 
 /// AccentPalette is eight RGBA colours; the fourth (index 3) is the base accent.
+#[cfg_attr(unix, allow(dead_code))]
 pub fn accent_from_palette(bytes: &[u8]) -> Option<Color32> {
     let e = bytes.get(12..16)?;
     usable_accent(Color32::from_rgb(e[0], e[1], e[2]), e[3])
 }
 
+#[cfg_attr(unix, allow(dead_code))]
 fn usable_accent(col: Color32, alpha: u8) -> Option<Color32> {
     let l = luminance(col);
     (alpha != 0 && (0.02..0.85).contains(&l)).then_some(col)
@@ -1292,6 +1297,7 @@ pub fn ease_out(t: f32) -> f32 {
 }
 
 /// True when Windows is set to play no animations (Settings > Accessibility > Visual effects).
+#[cfg(windows)]
 pub fn system_reduces_motion() -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         SPI_GETCLIENTAREAANIMATION, SystemParametersInfoW,
@@ -1307,6 +1313,69 @@ pub fn system_reduces_motion() -> bool {
         )
     };
     ok != 0 && on == 0
+}
+
+/// Linux desktops publish these through GSettings. The answer is cached for a few seconds because the app asks on a
+/// timer and a process start per frame would be wasteful.
+#[cfg(unix)]
+fn gsetting(key: &str) -> Option<String> {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    type Cache = Vec<(String, Instant, Option<String>)>;
+    static CACHE: Mutex<Cache> = Mutex::new(Vec::new());
+    let mut cache = CACHE.lock().ok()?;
+    if let Some((_, at, value)) = cache.iter().find(|(k, _, _)| k == key)
+        && at.elapsed() < Duration::from_secs(5)
+    {
+        return value.clone();
+    }
+    let value = std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", key])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .trim()
+                .trim_matches('\'')
+                .to_string()
+        });
+    cache.retain(|(k, _, _)| k != key);
+    cache.push((key.to_string(), Instant::now(), value.clone()));
+    value
+}
+
+/// True unless the desktop asks for a light scheme; with no GSettings the app defaults to dark like on Windows.
+#[cfg(unix)]
+pub fn system_dark() -> bool {
+    match gsetting("color-scheme").as_deref() {
+        Some("prefer-dark") => true,
+        Some("prefer-light") => false,
+        _ => gsetting("gtk-theme").is_none_or(|theme| theme.to_lowercase().contains("dark")),
+    }
+}
+
+/// GNOME 47 and later expose an accent name; other desktops keep the stock blue.
+#[cfg(unix)]
+pub fn system_accent() -> Color32 {
+    match gsetting("accent-color").as_deref() {
+        Some("teal") => Color32::from_rgb(0x21, 0x90, 0xA4),
+        Some("green") => Color32::from_rgb(0x3A, 0x94, 0x4A),
+        Some("yellow") => Color32::from_rgb(0xC8, 0x88, 0x00),
+        Some("orange") => Color32::from_rgb(0xED, 0x5B, 0x00),
+        Some("red") => Color32::from_rgb(0xE6, 0x2D, 0x42),
+        Some("pink") => Color32::from_rgb(0xD5, 0x61, 0x99),
+        Some("purple") => Color32::from_rgb(0x91, 0x41, 0xAC),
+        Some("slate") => Color32::from_rgb(0x6F, 0x83, 0x96),
+        _ => DEFAULT_ACCENT,
+    }
+}
+
+/// True when GNOME's animations switch is off.
+#[cfg(unix)]
+pub fn system_reduces_motion() -> bool {
+    gsetting("enable-animations").as_deref() == Some("false")
 }
 // endregion
 
