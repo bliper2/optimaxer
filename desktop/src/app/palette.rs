@@ -15,6 +15,8 @@ pub(super) enum PaletteCommand {
     Downloads,
     Settings,
     Palette(theme::Palette),
+    /// A palette together with the Glass control style, so one choice gives the whole look.
+    GlassTheme(theme::Palette),
 }
 
 #[derive(Clone, Copy)]
@@ -193,7 +195,7 @@ pub(super) const PALETTE_COMMANDS: [PaletteEntry; 22] = [
     },
 ];
 
-pub(super) const PALETTE_THEME_COMMANDS: [PaletteEntry; 24] = [
+pub(super) const PALETTE_THEME_COMMANDS: [PaletteEntry; 29] = [
     PaletteEntry {
         name: "System palette",
         category: "Appearance",
@@ -331,6 +333,36 @@ pub(super) const PALETTE_THEME_COMMANDS: [PaletteEntry; 24] = [
         category: "Appearance",
         hint: "Set the Retro Terminal palette",
         command: PaletteCommand::Palette(theme::Palette::RetroTerminal),
+    },
+    PaletteEntry {
+        name: "Noir Glass glass theme",
+        category: "Appearance",
+        hint: "Glass style with the Noir Glass palette",
+        command: PaletteCommand::GlassTheme(theme::Palette::NoirGlass),
+    },
+    PaletteEntry {
+        name: "Cobalt glass theme",
+        category: "Appearance",
+        hint: "Glass style with the Cobalt palette",
+        command: PaletteCommand::GlassTheme(theme::Palette::Cobalt),
+    },
+    PaletteEntry {
+        name: "Onyx glass theme",
+        category: "Appearance",
+        hint: "Glass style with the Onyx palette",
+        command: PaletteCommand::GlassTheme(theme::Palette::Onyx),
+    },
+    PaletteEntry {
+        name: "Slate glass theme",
+        category: "Appearance",
+        hint: "Glass style with the Slate palette",
+        command: PaletteCommand::GlassTheme(theme::Palette::Slate),
+    },
+    PaletteEntry {
+        name: "Mica glass theme",
+        category: "Appearance",
+        hint: "Glass style with the Mica palette",
+        command: PaletteCommand::GlassTheme(theme::Palette::Mica),
     },
     PaletteEntry {
         name: "Custom palette",
@@ -618,6 +650,13 @@ impl OrionApp {
                 self.settings.palette = palette;
                 self.reapply_theme(ctx);
                 self.persist_appearance(ctx, previous, "Palette");
+            }
+            PaletteCommand::GlassTheme(palette) => {
+                let previous = self.settings.clone();
+                self.settings.palette = palette;
+                self.settings.style = theme::Style::Glass;
+                self.reapply_theme(ctx);
+                self.persist_appearance(ctx, previous, "Glass theme");
             }
         }
     }

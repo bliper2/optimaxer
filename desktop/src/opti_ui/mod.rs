@@ -49,6 +49,7 @@ mod detective_page;
 mod diagnostics_page;
 mod gaming_page;
 mod network_page;
+mod overview_layouts;
 mod overview_page;
 mod performance_page;
 mod processes_page;
@@ -519,6 +520,8 @@ pub struct OptiUi {
     restart_pending: bool,
     pending: Option<Pending>,
     restore_first: bool,
+    /// Mirrors the setting; the confirmation window edits this copy and `tick` saves it.
+    restart_explorer: bool,
     elevated: bool,
     started: bool,
     services: Vec<SvcRow>,
@@ -1154,6 +1157,8 @@ struct Batch {
     ok: usize,
     restart: bool,
     explorer: bool,
+    /// At least one tweak really changed state and verified, whether or not it asks for an Explorer restart.
+    changed_any: bool,
     now: HashMap<String, bool>,
     changes: Vec<HistoryChange>,
 }
@@ -1174,6 +1179,7 @@ fn run_batch(
         ok: 0,
         restart: false,
         explorer: false,
+        changed_any: false,
         now: HashMap::new(),
         changes: Vec::new(),
     };
@@ -1202,6 +1208,7 @@ fn run_batch(
         let changed_state = planned_before != eng.plan(t);
         b.restart |= t.restart && changed_state;
         b.explorer |= t.explorer && verified && changed_state;
+        b.changed_any |= verified && changed_state;
         if verified {
             b.ok += 1;
         }
@@ -1506,6 +1513,7 @@ impl OptiUi {
             restart_pending: false,
             pending: None,
             restore_first: true,
+            restart_explorer: true,
             elevated: hw::is_elevated(),
             started: false,
             services: Vec::new(),
@@ -2482,6 +2490,7 @@ impl OptiUi {
         restore_point: bool,
     ) {
         let cat = self.cat.clone();
+        let restart_explorer = self.restart_explorer;
         let title = format!(
             "{} {} tweak(s)",
             if apply { "Apply" } else { "Undo" },
@@ -2503,7 +2512,8 @@ impl OptiUi {
                 }));
                 return;
             }
-            let (ok, restart, explorer, now, changes) = (b.ok, b.restart, b.explorer, b.now, b.changes);
+            let explorer = b.explorer || (restart_explorer && b.changed_any);
+            let (ok, restart, now, changes) = (b.ok, b.restart, b.now, b.changes);
             if !changes.is_empty() {
                 let entry = HistoryEntry {
                     time: format!("{}Z", crate::opti::now_iso()),
@@ -3070,6 +3080,7 @@ impl OptiUi {
         self.poll();
         self.tick_blackbox(settings);
         self.restore_first = settings.opti_restore_point;
+        self.restart_explorer = settings.opti_restart_explorer;
         if self.busy.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
@@ -3081,6 +3092,17 @@ impl OptiUi {
                 settings.opti_restore_point = previous;
                 self.restore_first = previous;
                 let message = format!("Restore point preference was not saved: {error}");
+                self.say(&message);
+                self.events.push(OptiEvent::Toast(message));
+            }
+        }
+        if self.restart_explorer != settings.opti_restart_explorer {
+            let previous = settings.opti_restart_explorer;
+            settings.opti_restart_explorer = self.restart_explorer;
+            if let Err(error) = settings.save_checked() {
+                settings.opti_restart_explorer = previous;
+                self.restart_explorer = previous;
+                let message = format!("Explorer restart preference was not saved: {error}");
                 self.say(&message);
                 self.events.push(OptiEvent::Toast(message));
             }
@@ -3108,6 +3130,7 @@ impl OptiUi {
             self.load_first_time(ctx);
         }
         let t = tokens(ctx);
+        theme::paint_glow(ui);
         if !self.elevated {
             egui::Frame::new().fill(mix(t.canvas, t.warn, 0.14)).corner_radius(t.card_radius()).inner_margin(Margin::symmetric(S4 as i8, S3 as i8)).show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -3234,6 +3257,7 @@ impl OptiUi {
         let t = tokens(ctx);
         let mut decision: Option<bool> = None;
         let mut restore = self.restore_first;
+        let mut explorer_after = self.restart_explorer;
         let resp = egui::Modal::new(egui::Id::unique("opti-confirm"))
             .backdrop_color(Color32::from_black_alpha(if t.dark { 150 } else { 70 }))
             .show(ctx, |ui| {
@@ -3278,6 +3302,8 @@ impl OptiUi {
                 if p.restore_option {
                     ui.add_space(S3);
                     ui.checkbox(&mut restore, "Create a System Restore point first");
+                    ui.checkbox(&mut explorer_after, "Restart File Explorer afterwards so changes show at once");
+                    ui.label(RichText::new("Open File Explorer windows close and reopen. Unsaved work in other programs is not affected.").size(T_CAPTION).color(t.subtle));
                 }
                 ui.add_space(S4);
                 ui.horizontal(|ui| {
@@ -3310,6 +3336,7 @@ impl OptiUi {
             decision = Some(false);
         }
         self.restore_first = restore;
+        self.restart_explorer = explorer_after;
         if let Some(ok) = decision
             && let Some(p) = self.pending.take()
             && ok
@@ -3626,6 +3653,48 @@ mod tests {
         assert!(undone.changes[0].verified && !undone.changes[0].undo_available);
         assert!(undone.changes[0].details[0].contains("Saved originals: 1 registry values"));
         assert_eq!(sys.reg_get(path, "Choice"), Some(RegData::Dword(2)));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn any_verified_state_change_is_flagged_for_the_optional_explorer_restart() {
+        use crate::opti::catalog::{RegItem, RegVal};
+        let path = r"HKCU:\Software\OptimaxerExplorerTest";
+        let tweak = Tweak {
+            id: "plain-test".into(),
+            name: "Plain test".into(),
+            reg: vec![RegItem {
+                p: path.into(),
+                n: "Enabled".into(),
+                v: RegVal::Num(1),
+                t: "DWord".into(),
+            }],
+            ..Default::default()
+        };
+        let cat = Catalog {
+            tweaks: vec![tweak],
+            ..Default::default()
+        };
+        let sys = FakeSystem::default();
+        sys.put(path, "Enabled", RegData::Dword(0));
+        let dir = std::env::temp_dir().join(format!("opti-explorer-flag-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut state = State::load_from(dir.join("state.json"), None);
+        let engine = Engine::new(&sys, PathBuf::new());
+        let ids = ["plain-test".to_string()];
+
+        let applied = run_batch(&engine, &cat, &ids, true, false, &mut state, &mut |_| {});
+        assert!(applied.changed_any, "a real change is flagged");
+        assert!(
+            !applied.explorer,
+            "the tweak itself does not need Explorer restarted"
+        );
+
+        let again = run_batch(&engine, &cat, &ids, true, false, &mut state, &mut |_| {});
+        assert!(
+            !again.changed_any,
+            "reapplying an active tweak changes nothing, so Explorer is left alone"
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 

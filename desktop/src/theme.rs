@@ -15,6 +15,8 @@ pub enum Style {
     Windows,
     Classic,
     Material,
+    /// Near-black glass: large radii, a lit top edge on cards and a soft glow behind the content.
+    Glass,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -148,6 +150,7 @@ impl CustomSurfaces {
                     Style::Windows => "Windows",
                     Style::Classic => "Classic",
                     Style::Material => "Material",
+                    Style::Glass => "Glass",
                 };
                 for (name, surface) in [
                     ("background", custom.canvas),
@@ -175,7 +178,23 @@ impl CustomSurfaces {
 }
 
 impl Style {
-    pub const ALL: [Style; 3] = [Style::Windows, Style::Classic, Style::Material];
+    pub const ALL: [Style; 4] = [
+        Style::Windows,
+        Style::Classic,
+        Style::Material,
+        Style::Glass,
+    ];
+}
+
+/// How the Overview page is arranged. The glass palettes bring their own arrangement, modelled on the reference
+/// dashboards; every other palette keeps the standard cards.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OverviewLayout {
+    Cards,
+    /// Large ring gauges and quick-action tiles.
+    Dashboard,
+    /// Grouped rows with thin bars, like a settings list.
+    List,
 }
 
 /// Colour palette is independent of control shape, so users can combine it with any style.
@@ -199,6 +218,11 @@ pub enum Palette {
     Solarized,
     Porcelain,
     Cyberpunk,
+    NoirGlass,
+    Cobalt,
+    Onyx,
+    Slate,
+    Mica,
     Obsidian,
     Spectra,
     Ember,
@@ -210,7 +234,7 @@ pub enum Palette {
 }
 
 impl Palette {
-    pub const ALL: [Palette; 24] = [
+    pub const ALL: [Palette; 29] = [
         Palette::System,
         Palette::Midnight,
         Palette::Oled,
@@ -227,6 +251,11 @@ impl Palette {
         Palette::Solarized,
         Palette::Porcelain,
         Palette::Cyberpunk,
+        Palette::NoirGlass,
+        Palette::Cobalt,
+        Palette::Onyx,
+        Palette::Slate,
+        Palette::Mica,
         Palette::Obsidian,
         Palette::Spectra,
         Palette::Ember,
@@ -255,6 +284,11 @@ impl Palette {
             Palette::Solarized => "Solarized",
             Palette::Porcelain => "Porcelain",
             Palette::Cyberpunk => "Cyberpunk",
+            Palette::NoirGlass => "Noir Glass",
+            Palette::Cobalt => "Cobalt",
+            Palette::Onyx => "Onyx",
+            Palette::Slate => "Slate",
+            Palette::Mica => "Mica",
             Palette::Obsidian => "Obsidian",
             Palette::Spectra => "Spectra",
             Palette::Ember => "Ember",
@@ -284,6 +318,11 @@ impl Palette {
             "solarized" => Some(Palette::Solarized),
             "porcelain" => Some(Palette::Porcelain),
             "cyberpunk" => Some(Palette::Cyberpunk),
+            "noir_glass" => Some(Palette::NoirGlass),
+            "cobalt" => Some(Palette::Cobalt),
+            "onyx" => Some(Palette::Onyx),
+            "slate" => Some(Palette::Slate),
+            "mica" => Some(Palette::Mica),
             "obsidian" => Some(Palette::Obsidian),
             "spectra" => Some(Palette::Spectra),
             "ember" => Some(Palette::Ember),
@@ -293,6 +332,14 @@ impl Palette {
             "retro_terminal" => Some(Palette::RetroTerminal),
             "custom" => Some(Palette::Custom),
             _ => None,
+        }
+    }
+
+    pub fn overview_layout(self) -> OverviewLayout {
+        match self {
+            Palette::NoirGlass | Palette::Cobalt | Palette::Mica => OverviewLayout::Dashboard,
+            Palette::Onyx | Palette::Slate => OverviewLayout::List,
+            _ => OverviewLayout::Cards,
         }
     }
 
@@ -488,6 +535,8 @@ impl Tokens {
             (Style::Classic, false) => Tokens::LIGHT,
             (Style::Material, true) => Tokens::MATERIAL_DARK,
             (Style::Material, false) => Tokens::MATERIAL_LIGHT,
+            (Style::Glass, true) => Tokens::DARK.with_custom_radius(Some(GLASS_RADIUS)),
+            (Style::Glass, false) => Tokens::LIGHT.with_custom_radius(Some(GLASS_RADIUS)),
         }
     }
 
@@ -604,8 +653,9 @@ impl Tokens {
         )
     }
 
+    /// A user radius replaces the style's own; `None` keeps whatever the style set.
     pub fn with_custom_radius(mut self, radius: Option<u8>) -> Self {
-        self.custom_radius = radius.map(|radius| radius.min(16));
+        self.custom_radius = radius.map(|radius| radius.min(16)).or(self.custom_radius);
         self
     }
 
@@ -1066,6 +1116,96 @@ fn palette_color_set(palette: Palette, dark: bool) -> PaletteColors {
             c(0xC9, 0xD3, 0xB8),
             c(0x2F, 0x6B, 0x1F),
         ),
+        (P::NoirGlass, true) => palette_colors(
+            c(0x0A, 0x0B, 0x0D),
+            c(0x07, 0x08, 0x0A),
+            c(0x12, 0x13, 0x16),
+            c(0x1A, 0x1B, 0x1F),
+            c(0x24, 0x26, 0x2B),
+            c(0x2C, 0x2E, 0x34),
+            c(0x34, 0xD3, 0x99),
+        ),
+        (P::NoirGlass, false) => palette_colors(
+            c(0xF3, 0xF6, 0xF5),
+            c(0xE7, 0xED, 0xEB),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xEE, 0xF3, 0xF1),
+            c(0xE0, 0xE8, 0xE5),
+            c(0xCB, 0xD7, 0xD3),
+            c(0x0B, 0x7A, 0x5A),
+        ),
+        (P::Cobalt, true) => palette_colors(
+            c(0x05, 0x07, 0x0F),
+            c(0x03, 0x05, 0x0B),
+            c(0x0B, 0x0F, 0x1C),
+            c(0x12, 0x18, 0x29),
+            c(0x1B, 0x24, 0x40),
+            c(0x23, 0x30, 0x5A),
+            c(0x6C, 0x9B, 0xFF),
+        ),
+        (P::Cobalt, false) => palette_colors(
+            c(0xF1, 0xF4, 0xFC),
+            c(0xE4, 0xEA, 0xF7),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xEB, 0xF0, 0xFA),
+            c(0xDD, 0xE5, 0xF4),
+            c(0xC5, 0xD1, 0xE8),
+            c(0x1E, 0x4F, 0xD8),
+        ),
+        (P::Onyx, true) => palette_colors(
+            c(0x0F, 0x0F, 0x10),
+            c(0x0A, 0x0A, 0x0B),
+            c(0x1A, 0x1A, 0x1C),
+            c(0x23, 0x23, 0x25),
+            c(0x2E, 0x2E, 0x31),
+            c(0x3A, 0x3A, 0x3E),
+            c(0x5A, 0xA9, 0xFF),
+        ),
+        (P::Onyx, false) => palette_colors(
+            c(0xF5, 0xF5, 0xF6),
+            c(0xEA, 0xEA, 0xEC),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xF0, 0xF0, 0xF2),
+            c(0xE3, 0xE3, 0xE6),
+            c(0xD0, 0xD0, 0xD4),
+            c(0x0A, 0x62, 0xC9),
+        ),
+        (P::Slate, true) => palette_colors(
+            c(0x14, 0x15, 0x1B),
+            c(0x10, 0x11, 0x17),
+            c(0x1B, 0x1C, 0x24),
+            c(0x23, 0x24, 0x2E),
+            c(0x2D, 0x2F, 0x3B),
+            c(0x3A, 0x3C, 0x4A),
+            c(0xA5, 0xA8, 0xFF),
+        ),
+        (P::Slate, false) => palette_colors(
+            c(0xF4, 0xF4, 0xF9),
+            c(0xE9, 0xE9, 0xF2),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xEF, 0xEF, 0xF6),
+            c(0xE2, 0xE2, 0xEE),
+            c(0xCF, 0xCF, 0xE0),
+            c(0x4A, 0x4F, 0xD0),
+        ),
+        (P::Mica, true) => palette_colors(
+            c(0x0E, 0x14, 0x1C),
+            c(0x0A, 0x0F, 0x16),
+            c(0x16, 0x20, 0x2B),
+            c(0x1E, 0x2A, 0x38),
+            c(0x29, 0x38, 0x47),
+            c(0x35, 0x47, 0x59),
+            c(0x5F, 0xC4, 0xDD),
+        ),
+        (P::Mica, false) => palette_colors(
+            c(0xE8, 0xEE, 0xF7),
+            c(0xDC, 0xE5, 0xF1),
+            c(0xF8, 0xFA, 0xFE),
+            c(0xED, 0xF2, 0xF9),
+            c(0xDF, 0xE7, 0xF2),
+            c(0xC8, 0xD5, 0xE6),
+            c(0x0C, 0x73, 0x91),
+        ),
         _ => unreachable!("palette has no variable color set"),
     }
 }
@@ -1147,6 +1287,47 @@ pub fn action_colors(accent: Color32) -> (Color32, Color32) {
             .unwrap_or(Color32::BLACK);
         (fill, Color32::WHITE)
     }
+}
+
+/// Corner radius the Glass style gives controls; cards get four more.
+const GLASS_RADIUS: u8 = 14;
+
+/// The control style the running theme uses.
+pub fn current_style(ctx: &egui::Context) -> Style {
+    ctx.data(|d| d.get_temp::<Style>(style_id()))
+        .unwrap_or_default()
+}
+
+/// Soft glow along the bottom of a content area, like the lit floor behind the gauges in the Glass references.
+/// Static, so it costs nothing at rest and honours reduced motion.
+pub fn paint_glow(ui: &egui::Ui) {
+    if current_style(ui.ctx()) != Style::Glass {
+        return;
+    }
+    let t = tokens(ui.ctx());
+    let rect = ui.max_rect();
+    let glow = rect.with_min_y(rect.top() + rect.height() * 0.55);
+    let strength = if t.dark { 38 } else { 26 };
+    let top = Color32::from_rgba_unmultiplied(t.brand.r(), t.brand.g(), t.brand.b(), 0);
+    let bottom = Color32::from_rgba_unmultiplied(t.brand.r(), t.brand.g(), t.brand.b(), strength);
+    // Three bands ease the glow in, so its upper edge never reads as a line.
+    let mid = Color32::from_rgba_unmultiplied(t.brand.r(), t.brand.g(), t.brand.b(), strength / 4);
+    let band = glow.height() * 0.45;
+    let mut mesh = egui::epaint::Mesh::default();
+    for (y, color) in [
+        (glow.top(), top),
+        (glow.top() + band, mid),
+        (glow.bottom(), bottom),
+    ] {
+        mesh.colored_vertex(egui::pos2(glow.left(), y), color);
+        mesh.colored_vertex(egui::pos2(glow.right(), y), color);
+    }
+    for row in 0..2u32 {
+        let i = row * 2;
+        mesh.add_triangle(i, i + 1, i + 3);
+        mesh.add_triangle(i, i + 3, i + 2);
+    }
+    ui.painter().add(egui::Shape::mesh(mesh));
 }
 
 fn style_id() -> egui::Id {

@@ -108,7 +108,7 @@ impl OrionApp {
                     let mut si = theme::Style::ALL.iter().position(|x| *x == self.settings.style).unwrap_or(0);
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Style").color(t.muted));
-                        if kit::segmented(ui, &mut si, &["Windows", "Classic", "Material"]) {
+                        if kit::segmented(ui, &mut si, &["Windows", "Classic", "Material", "Glass"]) {
                             let previous = self.settings.clone();
                             self.settings.style = theme::Style::ALL[si];
                             self.reapply_theme(ctx);
@@ -176,23 +176,21 @@ impl OrionApp {
                     }
                     let mut palette = self.settings.palette;
                     ui.label(RichText::new("Palette").font(FontId::new(T_SMALL, semibold())).color(t.muted));
-                    egui::Grid::new("appearance-palette-gallery").num_columns(3).spacing(vec2(S3, S1)).show(ui, |ui| {
+                    let columns = 3usize;
+                    let gap = S3;
+                    let tile = ((ui.available_width() - gap * (columns as f32 - 1.0)) / columns as f32).floor();
+                    egui::Grid::new("appearance-palette-gallery").num_columns(columns).spacing(vec2(gap, S2)).show(ui, |ui| {
                         for (index, choice) in theme::Palette::ALL.into_iter().enumerate() {
                             let dark = choice.forced_dark().unwrap_or(self.settings.effective_dark());
                             let sample = theme::Tokens::of(dark, self.settings.style, self.settings.accent())
                                 .with_palette(choice, self.settings.accent());
-                            ui.horizontal(|ui| {
-                                let (swatch, _) = ui.allocate_exact_size(vec2(27.0, 10.0), egui::Sense::hover());
-                                for (offset, color) in [sample.brand, sample.good, sample.warn].into_iter().enumerate() {
-                                    let rect = egui::Rect::from_min_size(swatch.min + vec2(offset as f32 * 9.0, 0.0), vec2(8.0, 10.0));
-                                    ui.painter().rect_filled(rect, CornerRadius::same(2), color);
-                                }
-                                if ui.selectable_label(palette == choice, choice.label())
-                                    .on_hover_text(format!("Preview {} accent and status colors", choice.label())).clicked() {
-                                    palette = choice;
-                                }
-                            });
-                            if index % 3 == 2 { ui.end_row(); }
+                            if kit::theme_preview(ui, &sample, choice.label(), palette == choice, tile)
+                                .on_hover_text(format!("Use the {} palette", choice.label()))
+                                .clicked()
+                            {
+                                palette = choice;
+                            }
+                            if index % columns == columns - 1 { ui.end_row(); }
                         }
                     });
                     if palette != self.settings.palette {
