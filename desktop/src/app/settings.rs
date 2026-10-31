@@ -248,19 +248,23 @@ impl OrionApp {
                 kit::card(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.label(RichText::new("Updates").font(FontId::new(T_BODY, semibold())).color(t.text));
-                    let mut auto = self.settings.auto_update;
-                    if ui.checkbox(&mut auto, "Check for updates when the app starts").on_hover_text("Only checks. Nothing is downloaded until you press Update and restart.").changed() {
-                        self.settings.auto_update = auto;
-                        self.save_settings("Update preference");
-                    }
-                    ui.horizontal(|ui| {
-                        let busy = self.update.is_busy();
-                        if kit::secondary(ui, if matches!(self.update, UpdateState::Checking) { "Checking" } else { "Check now" }, !busy).clicked() {
-                            self.start_check(ctx, true);
+                    if update::IN_APP {
+                        let mut auto = self.settings.auto_update;
+                        if ui.checkbox(&mut auto, "Check for updates when the app starts").on_hover_text("Only checks. Nothing is downloaded until you press Update and restart.").changed() {
+                            self.settings.auto_update = auto;
+                            self.save_settings("Update preference");
                         }
-                        let text = if self.update_note.is_empty() { format!("Version v{}", update::CURRENT) } else { self.update_note.clone() };
-                        ui.add(egui::Label::new(RichText::new(text).size(T_SMALL).color(t.muted)).wrap());
-                    });
+                        ui.horizontal(|ui| {
+                            let busy = self.update.is_busy();
+                            if kit::secondary(ui, if matches!(self.update, UpdateState::Checking) { "Checking" } else { "Check now" }, !busy).clicked() {
+                                self.start_check(ctx, true);
+                            }
+                            let text = if self.update_note.is_empty() { format!("Version v{}", update::CURRENT) } else { self.update_note.clone() };
+                            ui.add(egui::Label::new(RichText::new(text).size(T_SMALL).color(t.muted)).wrap());
+                        });
+                        } else {
+                        ui.add(egui::Label::new(RichText::new(format!("Version v{}. In-app updating replaces the Windows program file, so it is off here. Download newer builds from the releases page.", update::CURRENT)).size(T_SMALL).color(t.muted)).wrap());
+                    }
                 });
                 ui.add_space(S2);
                 kit::card(ui, |ui| {

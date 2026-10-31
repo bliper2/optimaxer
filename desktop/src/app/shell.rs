@@ -482,11 +482,13 @@ impl OrionApp {
                         changed = true;
                     }
                 }
-                side_title(ui, "Software");
-                if cfg!(windows) && kit::nav_item(ui, false, "WinGet apps", None).clicked() {
-                    self.show_winget = true;
-                    self.detail = None;
-                    self.bump(ctx);
+                if cfg!(windows) {
+                    side_title(ui, "Software");
+                    if kit::nav_item(ui, false, "WinGet apps", None).clicked() {
+                        self.show_winget = true;
+                        self.detail = None;
+                        self.bump(ctx);
+                    }
                 }
                 side_title(ui, "Library");
                 let favorite_count = self

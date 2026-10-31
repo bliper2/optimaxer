@@ -1,6 +1,6 @@
 <p align="center"><img src="../assets/logo.png" width="96" alt="Optimaxer logo"></p>
 
-# Orion Store + Optimaxer for Windows
+# Orion Store + Optimaxer for Windows and Linux
 
 One Windows window, one exe. The Orion app catalog (PC, Android and TV, with search, categories, detail pages and downloads) sits next to Optimaxer's tuning tools: 200 tweaks with undo, services, startup items, a cleaner, DNS and network tools, and maintenance helpers. Written in Rust with eframe/egui.
 
@@ -16,6 +16,33 @@ cargo build --release
 `cargo test --locked` runs the offline regression suite. Live-system and network tests are ignored by default. One downloads the latest release into a temp folder and checks the update path; another empties this PC's memory caches, so inspect the ignored tests before running them. `cargo clippy --locked --all-targets -- -D warnings` checks all desktop targets.
 
 The exe starts without administrator rights. The Store works as normal. The Optimaxer section can read everything, and shows a banner with a "Restart as administrator" button, because changing HKLM, services or tasks needs elevation.
+
+## Linux edition
+
+The same crate builds a native Linux app: the Orion Store (catalog browsing, search, detail pages and downloads) and a smaller Optimaxer section built for Linux. It is a separate edition from the Python/Tk one in [`linux/`](../linux), which stays as it is.
+
+```bash
+cargo build --release
+./target/release/orion-store-desktop
+```
+
+No system libraries are needed to compile. At run time the window needs X11 or Wayland and the usual GPU driver stack; the file dialogs use the XDG desktop portal. `cargo test --locked` and `cargo clippy --locked --all-targets -- -D warnings` work the same as on Windows; the Windows-only code is behind `cfg(windows)`.
+
+**Pages.** Overview and Performance (CPU, memory, disk activity, network, GPU load on AMD, CPU temperature, load average, uptime and battery, all from `/proc` and `/sys`), Processes, Activity, Tweaks, Services, Startup, Cleaner and Network. A reading the kernel does not provide is left out or shown as unavailable, never estimated.
+
+- **Tweaks** are the sysctl drop-ins, config files, line edits and systemd units from the Python edition's catalog (memory tuning, SSD TRIM, I/O scheduler rules, journal size, shutdown timeout, core dumps, Wi-Fi power saving, NMI watchdog, inotify and `vm.max_map_count` limits, network buffers, BBR, kernel hardening, Avahi, wait-online units, pacman and dnf options). A tweak is hidden when the system lacks what it needs. Each one is previewed with the exact files and commands, its original is saved first, and Undo restores it, including running kernel values.
+- **Services** lists systemd system services with their boot and run state; disable/enable is previewed and saved, and Restore puts back "enabled at boot" and "running now" separately.
+- **Startup** covers XDG autostart entries (user and `/etc/xdg/autostart`, with user-level override files) and systemd user services. No administrator rights are needed.
+- **Cleaner** empties caches in the home folder (thumbnails, browsers, pip, npm, Go, cargo, Trash, AUR helpers) and runs system cleanups (package manager cache, journal vacuum, core dumps). Deleted files cannot be restored, and the preview says so. Folders that are links are refused.
+- **Network** shows adapters and the DNS servers in use, switches DNS providers through NetworkManager (`nmcli`) with the previous settings saved, and times DNS lookups.
+
+**Administrator rights.** The app never starts as root and never escalates by itself. When a confirmed change needs it, the whole change runs as one script through `pkexec`, so polkit asks for your password; the confirmation window can show that exact script. If the app is already root it runs the script directly. Without `pkexec` the app is read-only for system changes and says so; changes in your home folder still work. `sudo` is not used because it needs a terminal.
+
+**Saved originals** live in `~/.local/share/OrionStore/optimaxer-linux/state.json` (owned by you, so undo works without root). Edited config files are also copied to `~/.local/share/OrionStore/optimaxer/backups`, and confirmed operations are logged in `operations.json` beside it.
+
+**Not on Linux.** Hidden from the sidebar and the command palette: Smart Optimize, Black Box, Bottleneck Detective, Diagnostics, System Snapshot, Gaming, Startup X-Ray, Tools, the registry-based tweaks, WinGet, restore points, in-app updating (it replaces the Windows exe) and the "restore point, then open" installer action. Optimaxer does not run downloaded files on Linux; the Downloads panel opens the folder. Not ported from the Python edition: tweaks that install packages (zram, earlyoom, ufw, GameMode, irqbalance, paccache), the GRUB timeout, browser policy files, the app installer, debloat lists, orphan removal and the system-update, mirror and SMART tools.
+
+**How it was checked.** The parsers and the apply/undo logic run against an in-memory system in unit tests on every platform. This was developed on Windows with no Linux machine, so the Linux build was checked with `cargo check` and `cargo clippy --all-targets -- -D warnings` for `x86_64-unknown-linux-gnu`. The Linux-only tests (live `/proc` readings, the generated `pkexec` script run in `sh`, and drawing every page) are compiled but have not been run; the `desktop-linux` job in `.github/workflows/verify.yml` runs them. The pages have not been looked at on a real Linux desktop yet, so check layout, `pkexec` prompts and Wayland/X11 behaviour on your machine.
 
 ## Design
 
@@ -109,7 +136,7 @@ powershell -NoProfile -File tools\export-optimaxer.ps1
 
 ## Screenshots
 
-`ORION_SHOTS=<folder>` makes the app walk through its pages, save each one as a PNG of its own window, capture Settings, and exit (22 steps). It uses egui's viewport screenshot, so only the app window is captured. Set `ORION_SHOTS_SIZE=760x520` to check the minimum layout or `1440x900` to check a wide layout; the default is 1180x760. Set `ORION_SHOTS_SIDEBAR_COLLAPSED=true` to capture the Optimaxer icon rail, `ORION_SHOTS_RESTART_REQUIRED=true` to capture the restart reminder, or `ORION_SHOTS_PROFILE_OPEN=true` to expand Profiles on the Tweaks page. WinGet icons load for the catalog screenshot by default; set `ORION_SHOTS_LOAD_ICONS=false` for an offline capture. Screenshot mode never saves these overrides to settings or runs WinGet commands.
+`ORION_SHOTS=<folder>` makes the app walk through its pages, save each one as a PNG of its own window, capture Settings, and exit (19 steps). It uses egui's viewport screenshot, so only the app window is captured. Set `ORION_SHOTS_SIZE=760x520` to check the minimum layout or `1440x900` to check a wide layout; the default is 1180x760. Set `ORION_SHOTS_SIDEBAR_COLLAPSED=true` to capture the Optimaxer icon rail, `ORION_SHOTS_RESTART_REQUIRED=true` to capture the restart reminder, or `ORION_SHOTS_PROFILE_OPEN=true` to expand Profiles on the Tweaks page. WinGet icons load for the catalog screenshot by default; set `ORION_SHOTS_LOAD_ICONS=false` for an offline capture. Screenshot mode never saves these overrides to settings or runs WinGet commands.
 
 ## License
 

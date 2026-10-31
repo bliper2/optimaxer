@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
 use std::io::{Read, Write};
+#[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -487,6 +488,29 @@ fn reserve_download(dir: &Path, name: &str) -> Result<(PathBuf, PathBuf, fs::Fil
     Err("No available download filename".into())
 }
 
+#[cfg(unix)]
+fn finish_download(part: &Path, target: &Path) -> Result<(), String> {
+    let source = fs::canonicalize(part).map_err(|e| e.to_string())?;
+    let parent = target
+        .parent()
+        .ok_or("Download has no destination folder")?;
+    let name = target.file_name().ok_or("Download has no filename")?;
+    let destination = fs::canonicalize(parent)
+        .map_err(|e| e.to_string())?
+        .join(name);
+    // rename(2) would silently replace an existing file; hard_link fails with AlreadyExists like MoveFileW does.
+    match fs::hard_link(&source, &destination) {
+        Ok(()) => fs::remove_file(&source),
+        // Some file systems (FAT, exFAT) cannot hard link; rename is fine once we know nothing is there.
+        Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists && !destination.exists() => {
+            fs::rename(&source, &destination)
+        }
+        Err(e) => Err(e),
+    }
+    .map_err(|e| format!("Cannot finish download: {e}"))
+}
+
+#[cfg(windows)]
 fn finish_download(part: &Path, target: &Path) -> Result<(), String> {
     // std::fs creates extended-length Windows paths. Keep that support when calling Win32 directly.
     let source = fs::canonicalize(part).map_err(|e| e.to_string())?;

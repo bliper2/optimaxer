@@ -44,6 +44,23 @@ jobs:
         working-directory: desktop
         run: cargo build --release --locked
 
+  desktop-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Select stable Rust
+        run: rustup default stable && rustup component add clippy rustfmt
+      - name: Desktop format
+        working-directory: desktop
+        run: cargo fmt --check
+      - name: Desktop tests
+        working-directory: desktop
+        run: cargo test --locked
+      - name: Desktop lint
+        working-directory: desktop
+        run: cargo clippy --locked --all-targets -- -D warnings
+
   linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

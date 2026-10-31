@@ -289,12 +289,16 @@ pub fn command_args(action: Action, id: Option<&str>) -> Result<Vec<String>, Str
 }
 
 pub fn run_visible(action: Action, id: Option<&str>) -> Result<i32, String> {
+    #[cfg(windows)]
     use std::os::windows::process::CommandExt;
+    #[cfg(windows)]
     const CREATE_NEW_CONSOLE: u32 = 0x00000010;
     let args = command_args(action, id)?;
-    let status = Command::new("winget.exe")
-        .args(&args)
-        .creation_flags(CREATE_NEW_CONSOLE)
+    let mut command = Command::new("winget.exe");
+    command.args(&args);
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NEW_CONSOLE);
+    let status = command
         .spawn()
         .map_err(|error| format!("Could not start WinGet: {error}"))?
         .wait()

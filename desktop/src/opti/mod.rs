@@ -1,29 +1,56 @@
 //! Optimaxer, ported to Rust. Engine and system access live here; the egui pages are in `opti_ui.rs`.
 
+#[cfg(windows)]
 pub mod backend;
+#[cfg(windows)]
 pub mod backup_integrity;
+#[cfg(windows)]
 pub mod blackbox;
+#[cfg(windows)]
 pub mod bootlog;
+#[cfg(windows)]
 pub mod catalog;
+#[cfg(windows)]
 pub mod cleaner;
+#[cfg(windows)]
 pub mod detective;
+#[cfg(windows)]
 pub mod diagnostics;
+#[cfg(windows)]
 pub mod engine;
+#[cfg(windows)]
 pub mod gaming;
+#[cfg_attr(unix, allow(dead_code))]
 pub mod history;
+#[cfg(windows)]
 pub mod hw;
+#[cfg(windows)]
 pub mod measurements;
+#[cfg(windows)]
 pub mod network;
+#[cfg(windows)]
 pub mod pending_restart;
+#[cfg(windows)]
 pub mod processes;
+#[cfg(windows)]
 pub mod profiles;
+#[cfg(windows)]
 pub mod services;
+#[cfg(windows)]
 pub mod snapshots;
+#[cfg(windows)]
 pub mod special;
+#[cfg(windows)]
 pub mod startup;
+#[cfg_attr(unix, allow(dead_code))]
 pub mod state;
+#[cfg(windows)]
 pub mod sysmon;
+#[cfg(unix)]
+pub use crate::linux::sysmon;
+#[cfg(windows)]
 pub mod tools;
+#[cfg(windows)]
 pub mod tweak_facts;
 
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -52,6 +79,7 @@ pub(crate) fn now_secs() -> u64 {
 }
 
 /// `2026-10-23T00:37:11` for a unix timestamp, in UTC and without a zone suffix.
+#[cfg_attr(unix, allow(dead_code))]
 pub fn iso_utc(secs: u64) -> String {
     let (y, mo, d, h, mi, s) = civil(secs);
     format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}")
