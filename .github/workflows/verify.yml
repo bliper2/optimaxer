@@ -18,14 +18,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.14'
       - name: PowerShell engine and catalog tests
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\Optimaxer.Tests.ps1
-      - name: Linux simulated-system and Tk tests on Windows
-        run: python -B -m unittest discover -s linux/tests
 
   desktop:
     runs-on: windows-latest
@@ -46,12 +41,17 @@ jobs:
 
   linux:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - name: Install test display and Tk
-        run: sudo apt-get update && sudo apt-get install -y xvfb python3-tk
       - name: Installer syntax
         run: bash -n linux/install.sh
-      - name: Simulated-system and Tk tests on Linux
-        run: xvfb-run -a python3 -B -m unittest discover -s linux/tests
+      - name: Linux tests (simulated Arch and Fedora systems)
+        working-directory: linux
+        run: cargo test --locked
+      - name: Linux lint
+        working-directory: linux
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Linux release build
+        working-directory: linux
+        run: cargo build --release --locked
