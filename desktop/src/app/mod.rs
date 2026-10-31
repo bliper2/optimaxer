@@ -1126,7 +1126,7 @@ mod app_tests {
 
     #[test]
     fn palette_lists_all_commands_for_blank_query() {
-        assert_eq!(matching_palette_commands("  ").len(), 51);
+        assert_eq!(matching_palette_commands("  ").len(), 57);
     }
 
     #[test]

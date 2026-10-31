@@ -218,6 +218,12 @@ pub enum Palette {
     Solarized,
     Porcelain,
     Cyberpunk,
+    Yaru,
+    Adwaita,
+    Breeze,
+    Mint,
+    Pop,
+    Manjaro,
     NoirGlass,
     Cobalt,
     Onyx,
@@ -234,7 +240,7 @@ pub enum Palette {
 }
 
 impl Palette {
-    pub const ALL: [Palette; 29] = [
+    pub const ALL: [Palette; 35] = [
         Palette::System,
         Palette::Midnight,
         Palette::Oled,
@@ -251,6 +257,12 @@ impl Palette {
         Palette::Solarized,
         Palette::Porcelain,
         Palette::Cyberpunk,
+        Palette::Yaru,
+        Palette::Adwaita,
+        Palette::Breeze,
+        Palette::Mint,
+        Palette::Pop,
+        Palette::Manjaro,
         Palette::NoirGlass,
         Palette::Cobalt,
         Palette::Onyx,
@@ -284,6 +296,12 @@ impl Palette {
             Palette::Solarized => "Solarized",
             Palette::Porcelain => "Porcelain",
             Palette::Cyberpunk => "Cyberpunk",
+            Palette::Yaru => "Ubuntu Yaru",
+            Palette::Adwaita => "GNOME Adwaita",
+            Palette::Breeze => "KDE Breeze",
+            Palette::Mint => "Linux Mint",
+            Palette::Pop => "Pop!_OS",
+            Palette::Manjaro => "Manjaro",
             Palette::NoirGlass => "Noir Glass",
             Palette::Cobalt => "Cobalt",
             Palette::Onyx => "Onyx",
@@ -318,6 +336,12 @@ impl Palette {
             "solarized" => Some(Palette::Solarized),
             "porcelain" => Some(Palette::Porcelain),
             "cyberpunk" => Some(Palette::Cyberpunk),
+            "yaru" => Some(Palette::Yaru),
+            "adwaita" => Some(Palette::Adwaita),
+            "breeze" => Some(Palette::Breeze),
+            "mint" => Some(Palette::Mint),
+            "pop" => Some(Palette::Pop),
+            "manjaro" => Some(Palette::Manjaro),
             "noir_glass" => Some(Palette::NoirGlass),
             "cobalt" => Some(Palette::Cobalt),
             "onyx" => Some(Palette::Onyx),
@@ -337,8 +361,12 @@ impl Palette {
 
     pub fn overview_layout(self) -> OverviewLayout {
         match self {
-            Palette::NoirGlass | Palette::Cobalt | Palette::Mica => OverviewLayout::Dashboard,
-            Palette::Onyx | Palette::Slate => OverviewLayout::List,
+            Palette::NoirGlass | Palette::Cobalt | Palette::Mica | Palette::Pop => {
+                OverviewLayout::Dashboard
+            }
+            Palette::Onyx | Palette::Slate | Palette::Adwaita | Palette::Breeze => {
+                OverviewLayout::List
+            }
             _ => OverviewLayout::Cards,
         }
     }
@@ -1206,6 +1234,114 @@ fn palette_color_set(palette: Palette, dark: bool) -> PaletteColors {
             c(0xC8, 0xD5, 0xE6),
             c(0x0C, 0x73, 0x91),
         ),
+        (P::Yaru, true) => palette_colors(
+            c(0x23, 0x0A, 0x1A),
+            c(0x1B, 0x07, 0x15),
+            c(0x2E, 0x12, 0x24),
+            c(0x3A, 0x1A, 0x2F),
+            c(0x47, 0x24, 0x3B),
+            c(0x55, 0x30, 0x4A),
+            c(0xFF, 0x7A, 0x45),
+        ),
+        (P::Yaru, false) => palette_colors(
+            c(0xF7, 0xF2, 0xF5),
+            c(0xED, 0xE4, 0xEA),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xF3, 0xEB, 0xF0),
+            c(0xE8, 0xDC, 0xE4),
+            c(0xD6, 0xC6, 0xD1),
+            c(0xC7, 0x36, 0x0A),
+        ),
+        (P::Adwaita, true) => palette_colors(
+            c(0x24, 0x24, 0x24),
+            c(0x1E, 0x1E, 0x1E),
+            c(0x30, 0x30, 0x30),
+            c(0x3A, 0x3A, 0x3A),
+            c(0x45, 0x45, 0x45),
+            c(0x4F, 0x4F, 0x4F),
+            c(0x78, 0xAE, 0xED),
+        ),
+        (P::Adwaita, false) => palette_colors(
+            c(0xFA, 0xFA, 0xFA),
+            c(0xEB, 0xEB, 0xEB),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xF2, 0xF2, 0xF2),
+            c(0xE6, 0xE6, 0xE6),
+            c(0xD5, 0xD5, 0xD5),
+            c(0x1C, 0x71, 0xD8),
+        ),
+        (P::Breeze, true) => palette_colors(
+            c(0x1B, 0x1E, 0x20),
+            c(0x16, 0x19, 0x1B),
+            c(0x31, 0x36, 0x3B),
+            c(0x3B, 0x40, 0x45),
+            c(0x4D, 0x51, 0x57),
+            c(0x54, 0x59, 0x5F),
+            c(0x3D, 0xAE, 0xE9),
+        ),
+        (P::Breeze, false) => palette_colors(
+            c(0xEF, 0xF0, 0xF1),
+            c(0xE3, 0xE5, 0xE7),
+            c(0xFC, 0xFC, 0xFC),
+            c(0xF3, 0xF4, 0xF5),
+            c(0xE5, 0xE7, 0xE9),
+            c(0xBD, 0xC3, 0xC7),
+            c(0x0F, 0x6F, 0xB5),
+        ),
+        (P::Mint, true) => palette_colors(
+            c(0x1C, 0x21, 0x1D),
+            c(0x16, 0x1A, 0x17),
+            c(0x25, 0x2B, 0x27),
+            c(0x2E, 0x35, 0x2F),
+            c(0x39, 0x42, 0x3B),
+            c(0x46, 0x51, 0x4A),
+            c(0x8F, 0xBF, 0x6A),
+        ),
+        (P::Mint, false) => palette_colors(
+            c(0xF2, 0xF5, 0xF0),
+            c(0xE6, 0xEB, 0xE3),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xED, 0xF1, 0xEA),
+            c(0xDF, 0xE6, 0xDB),
+            c(0xC9, 0xD3, 0xC4),
+            c(0x4C, 0x7A, 0x2B),
+        ),
+        (P::Pop, true) => palette_colors(
+            c(0x23, 0x24, 0x26),
+            c(0x1B, 0x1C, 0x1E),
+            c(0x2E, 0x2F, 0x32),
+            c(0x38, 0x39, 0x3D),
+            c(0x44, 0x46, 0x4A),
+            c(0x50, 0x52, 0x56),
+            c(0x48, 0xB9, 0xC7),
+        ),
+        (P::Pop, false) => palette_colors(
+            c(0xF4, 0xF5, 0xF6),
+            c(0xE8, 0xEA, 0xEC),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xEF, 0xF1, 0xF2),
+            c(0xE2, 0xE5, 0xE7),
+            c(0xCD, 0xD2, 0xD5),
+            c(0x0E, 0x7C, 0x8A),
+        ),
+        (P::Manjaro, true) => palette_colors(
+            c(0x12, 0x1D, 0x1B),
+            c(0x0D, 0x16, 0x14),
+            c(0x1A, 0x29, 0x26),
+            c(0x22, 0x35, 0x32),
+            c(0x2C, 0x44, 0x3F),
+            c(0x39, 0x54, 0x4E),
+            c(0x35, 0xBF, 0x5C),
+        ),
+        (P::Manjaro, false) => palette_colors(
+            c(0xF0, 0xF6, 0xF4),
+            c(0xE3, 0xED, 0xE9),
+            c(0xFF, 0xFF, 0xFF),
+            c(0xEA, 0xF2, 0xEF),
+            c(0xDB, 0xE8, 0xE3),
+            c(0xC4, 0xD6, 0xCE),
+            c(0x1B, 0x7F, 0x42),
+        ),
         _ => unreachable!("palette has no variable color set"),
     }
 }
@@ -1466,6 +1602,35 @@ pub fn motion(ctx: &egui::Context) -> Motion {
             .data(|d| d.get_temp::<bool>(motion_id()))
             .unwrap_or(false),
     }
+}
+
+fn entrance_id() -> egui::Id {
+    egui::Id::unique("orion-entrance")
+}
+
+/// Starts a page entrance: cards that appear on it fade in one after another from `started`.
+pub fn begin_entrance(ctx: &egui::Context, started: f64) {
+    ctx.data_mut(|d| d.insert_temp(entrance_id(), (started, 0u32)));
+}
+
+/// Opacity for the next card of the page being entered, `1.0` once the entrance is over or motion is reduced.
+/// Each card waits a little longer than the one before it, up to eight cards.
+pub fn next_entrance_opacity(ctx: &egui::Context) -> f32 {
+    const STEP: f64 = 0.045;
+    const FADE: f64 = 0.24;
+    if motion(ctx).reduce {
+        return 1.0;
+    }
+    let Some((started, index)) = ctx.data(|d| d.get_temp::<(f64, u32)>(entrance_id())) else {
+        return 1.0;
+    };
+    ctx.data_mut(|d| d.insert_temp(entrance_id(), (started, index.saturating_add(1))));
+    let waited = ctx.input(|i| i.time) - started - f64::from(index.min(8)) * STEP;
+    let p = (waited / FADE).clamp(0.0, 1.0) as f32;
+    if p < 1.0 {
+        ctx.request_repaint();
+    }
+    ease_out(p)
 }
 
 pub fn ease_out(t: f32) -> f32 {
