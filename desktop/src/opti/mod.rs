@@ -2,8 +2,11 @@
 
 pub mod backend;
 pub mod backup_integrity;
+pub mod blackbox;
+pub mod bootlog;
 pub mod catalog;
 pub mod cleaner;
+pub mod detective;
 pub mod diagnostics;
 pub mod engine;
 pub mod gaming;
@@ -11,6 +14,7 @@ pub mod history;
 pub mod hw;
 pub mod measurements;
 pub mod network;
+pub mod pending_restart;
 pub mod processes;
 pub mod profiles;
 pub mod services;
@@ -20,6 +24,7 @@ pub mod startup;
 pub mod state;
 pub mod sysmon;
 pub mod tools;
+pub mod tweak_facts;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -39,11 +44,17 @@ fn civil(secs: u64) -> (i64, u32, u32, u32, u32, u32) {
     (y, m, d, rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
-fn now_secs() -> u64 {
+pub(crate) fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// `2026-10-23T00:37:11` for a unix timestamp, in UTC and without a zone suffix.
+pub fn iso_utc(secs: u64) -> String {
+    let (y, mo, d, h, mi, s) = civil(secs);
+    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}")
 }
 
 /// `20261023-003711`, for backup file names.

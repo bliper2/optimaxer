@@ -29,7 +29,7 @@ At the 760 px minimum window width, WinGet moves its toolbar below the page intr
 
 Every text colour is tested against every surface it can sit on (`cargo test`, module `theme`): body text at 7:1 or better, muted and subtle at 4.5:1, status tones at 4.5:1 on their tinted chips, the focus ring at 3:1.
 
-Settings offers 16 named palettes: Midnight, OLED, Graphite, Nebula, Nord, Arctic, Fluent dark/light, Material dark/light, Emerald, Crimson, Solarized, Porcelain, Cyberpunk and Custom theme. System remains the default and follows Windows when using the Windows style. Other palettes adapt to the selected light or dark mode, except the four explicitly labeled dark/light palettes, which lock their mode. Palette colors do not change control shape. Custom theme lets users edit the accent and six surface colors in both dark and light modes. Text colors adjust to preserve contrast; imported color sets that fail contrast checks are rejected. Density, font and corner radius remain separate controls. Versioned appearance presets export/import theme mode, control style, palette, custom accent and surfaces, density, scale, corner radius and reduced-motion preference, without exporting other application or system settings. Contrast tests cover each palette with all three control styles.
+Settings offers 23 named palettes: Midnight, OLED, Graphite, Nebula, Nord, Arctic, Fluent dark/light, Material dark/light, Emerald, Crimson, Solarized, Porcelain, Cyberpunk, Obsidian, Spectra, Ember, Tokyo Night, Rose Quartz, Aurora, Retro Terminal and Custom theme. System remains the default and follows Windows when using the Windows style. Other palettes adapt to the selected light or dark mode, except the four explicitly labeled dark/light palettes, which lock their mode. Palette colors do not change control shape. Custom theme lets users edit the accent and six surface colors in both dark and light modes. Text colors adjust to preserve contrast; imported color sets that fail contrast checks are rejected. Density, font and corner radius remain separate controls. Versioned appearance presets export/import theme mode, control style, palette, custom accent and surfaces, density, scale, corner radius and reduced-motion preference, without exporting other application or system settings. Contrast tests cover each palette with all three control styles.
 
 ## Windows style (default)
 
@@ -88,3 +88,17 @@ Buttons say what happens and use the same words through a flow: "Apply 12 tweaks
 ## Screenshots
 
 `ORION_SHOTS=<folder>` writes a PNG of each page from the app's own window. `ORION_SHOTS_THEME=light` renders the light theme. This run never writes to your saved settings.
+
+## Black Box and Tweaks detail levels
+
+Black Box is off until the user turns it on. It keeps the newest 8,640 readings (CPU, memory, disk, network, GPU) in `optimaxerlackbox.json`, records no process, window or file names, and runs only while the app is open. Charts keep each column's peak so short spikes stay visible, and readings Windows does not provide are gaps, never zeros. Findings are limited to CPU or memory at or above 90% for 60 seconds. The System log lookup shows provider and event ID only.
+
+Tweaks has three detail levels, saved in settings. Beginner lists only Safe, auto-pickable tweaks that fit this PC and hides filters, profiles and technical text. Enthusiast is the full catalog with risk, restart and undo chips. Expert opens every tweak's exact settings, scope, undo behaviour, derived trade-offs and the originals Optimaxer saved. Undo is labelled Reversible, Conditionally reversible or Not reversible from the catalog data; Optimaxer does not claim a speed effect for any tweak.
+
+## Bottleneck Detective
+
+A guided 30-second measurement, or an analysis of the last hour of Black Box readings. Each finding is marked Observed (the readings show it) or Hypothesis (a plausible explanation they cannot confirm), carries its numbers, and offers a next step that opens the relevant page. Processor and memory are reported when at or above 90% for at least 20% of readings; graphics is only ever a hypothesis. Areas that were measured and fine are listed with their numbers, and areas that cannot be measured (temperature, network quality, disk queue and latency) are listed as not assessed. There is no score.
+
+## Startup X-Ray
+
+Reads Windows' Diagnostics-Performance log (administrator only): boot durations (event 100) and the applications, services and drivers Windows itself measured as slowing boots (events 101 to 103). It shows a bar chart of up to 30 boots, a trend that is stated only with four or more boots and only when the change exceeds both a quarter of the earlier median and half their spread, items flagged on more than one boot, a two-boot comparison, a service dependency view, a System-log lookup around a boot, and boot medians before and after each startup change made in Optimaxer. Windows-protected services are marked and never offered for disabling here. Per-app impact is Windows' measurement, not an Optimaxer estimate.

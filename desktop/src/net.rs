@@ -104,7 +104,7 @@ pub fn data_dir() -> PathBuf {
 }
 
 /// Write via temp file + rename so a crash never leaves a half-written file behind.
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, bytes).map_err(|e| format!("Could not stage {}: {e}", path.display()))?;
     if let Err(error) = fs::rename(&tmp, path) {
@@ -238,6 +238,14 @@ pub struct Settings {
     pub opti_sample_interval_seconds: u64,
     /// Visible duration of live Performance and Overview charts.
     pub opti_history_seconds: u64,
+    /// Overview sections the user hid, by id.
+    pub overview_hidden: Vec<String>,
+    /// Black Box recording is opt-in.
+    pub blackbox_enabled: bool,
+    /// Seconds between Black Box readings.
+    pub blackbox_interval_seconds: u64,
+    /// Tweaks page detail: 0 Beginner, 1 Enthusiast, 2 Expert.
+    pub tweak_experience: u8,
 }
 
 impl Default for Settings {
@@ -270,6 +278,10 @@ impl Default for Settings {
             auto_update: true,
             opti_sample_interval_seconds: 1,
             opti_history_seconds: 60,
+            overview_hidden: Vec::new(),
+            blackbox_enabled: false,
+            blackbox_interval_seconds: 10,
+            tweak_experience: 1,
         }
     }
 }
