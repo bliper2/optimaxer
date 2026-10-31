@@ -2,7 +2,7 @@
 
 Snapshot of the repository at v2.15.40. This describes implemented scope, not a parity promise. The Rust desktop app is the primary target for the UI work; the PowerShell and Linux editions remain independent products.
 
-| Area | PowerShell / WPF (Windows) | Python / Tkinter (Linux) | Rust / egui (Windows) |
+| Area | PowerShell / WPF (Windows) | Rust / egui (Linux) | Rust / egui (Windows) |
 | --- | --- | --- | --- |
 | Delivery | Windows app and unattended CLI | Arch-family and Fedora-family GUI and CLI | Windows desktop app, Orion Store and Optimaxer in one window |
 | Tweaks | 209 active, 8 retired; presets and exact undo | Linux-specific catalog, presets, dry run and undo | 206 of 217 catalog entries; 11 PowerShell-only entries omitted; presets, dry run/preview and exact undo |
@@ -15,7 +15,7 @@ Snapshot of the repository at v2.15.40. This describes implemented scope, not a 
 | Diagnostics | Included with maintenance tools | SMART and failed-unit checks where supported | Read-only SFC `/verifyonly` and DISM `/ScanHealth`, with command output and exit codes |
 | System inventory | Hardware and Windows info in the dashboard | Hardware and disk details where supported | Local point-in-time inventory browser; 30 newest captures, no restore capability |
 | Processes | Not a separate page | Process and system monitor features depend on native desktop tools | Read-only process list with sampled CPU, working-set memory and image path; selection reveals embedded CompanyName metadata when available, explicitly not signature verification; no terminate action |
-| Appearance | System/dark/light and several named palettes; motion setting | Nine Tk themes and dry-run control | System/light/dark mode, three shape styles, 16 named palettes including editable custom surfaces, saved accent and reduced motion |
+| Appearance | System/dark/light and several named palettes; motion setting | Windows-app design tokens: Dark, Light and Material dark/light, and dry-run control | System/light/dark mode, three shape styles, 16 named palettes including editable custom surfaces, saved accent and reduced motion |
 | Data portability | Tweak/app selection export and import | Tweak/package selection export and import | Up to 20 named tweak selections saved locally; versioned JSON import/export with current-PC hardware and catalog filtering |
 
 ## Rust desktop baseline and gaps
