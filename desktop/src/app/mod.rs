@@ -1126,7 +1126,9 @@ mod app_tests {
 
     #[test]
     fn palette_lists_all_commands_for_blank_query() {
-        assert_eq!(matching_palette_commands("  ").len(), 46);
+        // Pages that exist only on Windows are not offered elsewhere.
+        let expected = if cfg!(windows) { 46 } else { 38 };
+        assert_eq!(matching_palette_commands("  ").len(), expected);
     }
 
     #[test]
@@ -1188,6 +1190,7 @@ mod app_tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn gaming_command_navigates_to_its_page() {
         let results = matching_palette_commands("gaming");
         assert_eq!(results.len(), 1);
@@ -1195,6 +1198,7 @@ mod app_tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn diagnostics_command_navigates_to_its_page() {
         let results = matching_palette_commands("diagnostics");
         assert_eq!(results.len(), 1);
@@ -1205,6 +1209,7 @@ mod app_tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn system_snapshot_command_navigates_to_its_page() {
         let results = matching_palette_commands("system snapshot");
         assert_eq!(results.len(), 1);
@@ -1229,9 +1234,12 @@ mod app_tests {
         assert_eq!(typo.len(), 1);
         assert_eq!(typo[0].name, "Performance");
 
-        let words = matching_palette_commands("sys snap");
-        assert_eq!(words.len(), 1);
-        assert_eq!(words[0].name, "System Snapshot");
+        #[cfg(windows)]
+        {
+            let words = matching_palette_commands("sys snap");
+            assert_eq!(words.len(), 1);
+            assert_eq!(words[0].name, "System Snapshot");
+        }
     }
 
     #[test]

@@ -1123,12 +1123,14 @@ mod tests {
                     )),
                     ..Default::default()
                 };
-                let _ = ctx.run_ui(input, |ui| {
+                let mut output = ctx.run_ui(input, |ui| {
                     oui.tick(ui.ctx(), &mut settings);
                     oui.side_panel(ui, &ctx, false);
                     oui.log_panel(ui);
                     oui.central(ui, &ctx, &[], &mut settings);
                 });
+                // The textures this frame asked for are never uploaded in a test; egui panics if they are dropped unread.
+                output.textures_delta.clear();
                 std::thread::sleep(Duration::from_millis(60));
             }
         }
