@@ -195,7 +195,7 @@ pub(super) const PALETTE_COMMANDS: [PaletteEntry; 22] = [
     },
 ];
 
-pub(super) const PALETTE_THEME_COMMANDS: [PaletteEntry; 29] = [
+pub(super) const PALETTE_THEME_COMMANDS: [PaletteEntry; 35] = [
     PaletteEntry {
         name: "System palette",
         category: "Appearance",
@@ -363,6 +363,42 @@ pub(super) const PALETTE_THEME_COMMANDS: [PaletteEntry; 29] = [
         category: "Appearance",
         hint: "Glass style with the Mica palette",
         command: PaletteCommand::GlassTheme(theme::Palette::Mica),
+    },
+    PaletteEntry {
+        name: "Ubuntu Yaru palette",
+        category: "Appearance",
+        hint: "Set the Ubuntu Yaru palette",
+        command: PaletteCommand::Palette(theme::Palette::Yaru),
+    },
+    PaletteEntry {
+        name: "GNOME Adwaita palette",
+        category: "Appearance",
+        hint: "Set the GNOME Adwaita palette",
+        command: PaletteCommand::Palette(theme::Palette::Adwaita),
+    },
+    PaletteEntry {
+        name: "KDE Breeze palette",
+        category: "Appearance",
+        hint: "Set the KDE Breeze palette",
+        command: PaletteCommand::Palette(theme::Palette::Breeze),
+    },
+    PaletteEntry {
+        name: "Linux Mint palette",
+        category: "Appearance",
+        hint: "Set the Linux Mint palette",
+        command: PaletteCommand::Palette(theme::Palette::Mint),
+    },
+    PaletteEntry {
+        name: "Pop!_OS palette",
+        category: "Appearance",
+        hint: "Set the Pop!_OS palette",
+        command: PaletteCommand::Palette(theme::Palette::Pop),
+    },
+    PaletteEntry {
+        name: "Manjaro palette",
+        category: "Appearance",
+        hint: "Set the Manjaro palette",
+        command: PaletteCommand::Palette(theme::Palette::Manjaro),
     },
     PaletteEntry {
         name: "Custom palette",

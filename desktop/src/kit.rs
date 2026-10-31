@@ -173,13 +173,39 @@ pub fn chip(ui: &mut Ui, text: &str, tone: Tone) {
 /// A raised group of content: surface fill, quiet border, no shadow at rest.
 pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
     let t = tokens(ui.ctx());
-    let glass = theme::current_style(ui.ctx()) == theme::Style::Glass;
-    let shown = egui::Frame::new()
-        .fill(t.surface1)
-        .stroke(Stroke::new(1.0, t.hairline))
-        .corner_radius(t.card_radius())
-        .inner_margin(S4 as i8)
-        .show(ui, add);
+    let ctx = ui.ctx().clone();
+    let glass = theme::current_style(&ctx) == theme::Style::Glass;
+    let id = ui.next_auto_id();
+    let entrance = theme::next_entrance_opacity(&ctx);
+    let shown = ui
+        .scope(|ui| {
+            if entrance < 1.0 {
+                ui.set_opacity(entrance);
+            }
+            egui::Frame::new()
+                .fill(t.surface1)
+                .stroke(Stroke::new(1.0, t.hairline))
+                .corner_radius(t.card_radius())
+                .inner_margin(S4 as i8)
+                .show(ui, add)
+        })
+        .inner;
+    // The border warms toward the accent while the pointer is over the card.
+    let hovered = ui.rect_contains_pointer(shown.response.rect);
+    let warmth = ctx.animate_bool_with_time_and_easing(
+        id.with("hover"),
+        hovered,
+        motion(&ctx).base(),
+        ease_out,
+    );
+    if warmth > 0.01 {
+        ui.painter().rect_stroke(
+            shown.response.rect,
+            CornerRadius::same(t.card_radius()),
+            Stroke::new(1.0, t.brand.gamma_multiply(0.5 * warmth)),
+            StrokeKind::Inside,
+        );
+    }
     if glass {
         // A lit top edge, the way light catches the rim of a glass panel.
         let rect = shown.response.rect;
@@ -214,6 +240,12 @@ pub fn theme_preview(
     let (rect, response) = ui.allocate_exact_size(vec2(width, preview_h + 22.0), Sense::click());
     let preview = egui::Rect::from_min_size(rect.min, vec2(width, preview_h));
     let radius = CornerRadius::same(sample.card_radius().min(10));
+    let hover = ui.ctx().animate_bool_with_time_and_easing(
+        response.id.with("preview-hover"),
+        response.hovered(),
+        motion(ui.ctx()).base(),
+        ease_out,
+    );
     let painter = ui.painter_at(rect);
     painter.rect_filled(preview, radius, sample.canvas);
     let rail = egui::Rect::from_min_size(preview.min, vec2(width * 0.26, preview_h));
@@ -296,10 +328,11 @@ pub fn theme_preview(
         radius,
         if selected {
             Stroke::new(2.0, live.ring())
-        } else if response.hovered() {
-            Stroke::new(1.0, live.muted)
         } else {
-            Stroke::new(1.0, sample.hairline)
+            Stroke::new(
+                1.0 + hover,
+                mix(sample.hairline, live.brand_text, 0.75 * hover),
+            )
         },
         StrokeKind::Inside,
     );
@@ -319,6 +352,15 @@ pub fn theme_preview(
     );
     response.widget_info(|| WidgetInfo::selected(Role::RadioButton, true, selected, name));
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A reading that eases to its new value instead of jumping, so numbers count rather than flicker.
+pub fn eased_value(ctx: &egui::Context, id: impl Hash + Debug, target: f32) -> f32 {
+    ctx.animate_value_with_time(
+        egui::Id::NULL.with(("eased-value", &id)),
+        target,
+        motion(ctx).slow(),
+    )
 }
 
 // region navigation
@@ -755,6 +797,7 @@ pub fn enter<R>(ui: &mut Ui, started: f64, add: impl FnOnce(&mut Ui) -> R) -> R 
         ctx.request_repaint();
     }
     let e = ease_out(t);
+    theme::begin_entrance(&ctx, started);
     ui.scope(|ui| {
         ui.set_opacity(e);
         ui.add_space((1.0 - e) * 10.0);

@@ -10,8 +10,19 @@ struct Reading {
     subtitle: String,
     /// 0..=1 when measured.
     fraction: Option<f32>,
+    /// What to print when there is no measurement.
     value: String,
     caption: String,
+}
+
+impl Reading {
+    /// The percentage text, eased toward the measured value; the stored text when nothing was measured.
+    fn shown(&self, ctx: &egui::Context) -> String {
+        match self.fraction {
+            Some(f) => format!("{:.0}%", kit::eased_value(ctx, self.title, f * 100.0)),
+            None => self.value.clone(),
+        }
+    }
 }
 
 fn readings(s: &Snapshot, info: &SysInfo) -> Vec<Reading> {
@@ -180,7 +191,7 @@ impl OptiUi {
                                         112.0,
                                         reading.fraction.unwrap_or(0.0),
                                         color,
-                                        &reading.value,
+                                        &reading.shown(ctx),
                                         &reading.caption,
                                     );
                                 });
@@ -228,7 +239,7 @@ impl OptiUi {
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
-                            RichText::new(&reading.value)
+                            RichText::new(reading.shown(ctx))
                                 .font(FontId::new(T_HEADING, semibold()))
                                 .color(t.text),
                         );
