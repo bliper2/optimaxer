@@ -645,6 +645,12 @@ impl Sampler {
         {
             return false;
         }
+        self.sample();
+        true
+    }
+
+    /// Takes a reading now, whatever the configured interval. Rates use the time since the previous reading.
+    pub fn sample(&mut self) {
         let sample_elapsed = self
             .last_at
             .map(|at| at.elapsed().as_secs_f64())
@@ -711,7 +717,6 @@ impl Sampler {
             gpu.busiest_engine_percent,
             history_capacity,
         );
-        true
     }
 
     /// Start a fresh chart window when the Overview becomes visible again.
