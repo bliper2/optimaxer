@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security problem
+    url: https://github.com/bliper2/optimaxer/blob/main/SECURITY.md
+    about: Read this first. Do not post exploit details in a public issue.
+  - name: Frequently asked questions
+    url: https://bliper2.github.io/optimaxer/faq.html
+    about: Safety, administrator rights, undo, updates and antivirus warnings.

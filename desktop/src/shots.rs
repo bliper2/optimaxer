@@ -16,6 +16,8 @@ pub struct Shots {
     load_icons: bool,
     navigated: bool,
     requested: bool,
+    /// Capture only these steps (`ORION_SHOTS_ONLY=optimaxer-tweaks,settings`); `None` walks every step.
+    only: Option<Vec<String>>,
 }
 
 /// (file name, seconds to wait after navigating before the capture)
@@ -56,7 +58,13 @@ impl Shots {
         std::fs::create_dir_all(&dir).ok()?;
         let load_icons = load_icons_in_screenshot();
         let (tx, rx) = channel();
-        Some(Shots {
+        let only = std::env::var("ORION_SHOTS_ONLY").ok().map(|list| {
+            list.split(',')
+                .map(|name| name.trim().to_owned())
+                .filter(|name| !name.is_empty())
+                .collect::<Vec<_>>()
+        });
+        let mut shots = Shots {
             tx,
             rx,
             dir,
@@ -65,7 +73,19 @@ impl Shots {
             load_icons,
             navigated: false,
             requested: false,
-        })
+            only,
+        };
+        shots.skip_unwanted();
+        Some(shots)
+    }
+
+    /// Moves past steps the `ORION_SHOTS_ONLY` list leaves out.
+    fn skip_unwanted(&mut self) {
+        if let Some(only) = &self.only {
+            while self.idx < STEPS.len() && !only.iter().any(|name| name == STEPS[self.idx].0) {
+                self.idx += 1;
+            }
+        }
     }
 
     pub fn sender(&self) -> Sender<Arc<egui::ColorImage>> {
@@ -120,6 +140,7 @@ impl Shots {
             }
         }
         self.idx += 1;
+        self.skip_unwanted();
         self.navigated = false;
         self.requested = false;
     }
@@ -154,6 +175,7 @@ mod tests {
             load_icons: false,
             navigated: false,
             requested: false,
+            only: None,
         };
         assert!(!s.should_capture(0.0), "no capture before navigating");
         assert!(s.should_navigate(1.0));
@@ -178,6 +200,7 @@ mod tests {
             load_icons: true,
             navigated: false,
             requested: false,
+            only: None,
         };
         assert!(s.should_navigate(10.0));
         assert!(
@@ -196,6 +219,7 @@ mod tests {
             load_icons: false,
             navigated: false,
             requested: false,
+            only: None,
         };
         assert!(normal.should_navigate(10.0));
         assert!(

@@ -3,46 +3,164 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Optimaxer</title>
-<meta name="description" content="Open-source tweaking, cleanup and app tools for Windows 10/11, Arch-based Linux and Fedora.">
+<title>Optimaxer: a free Windows optimizer with undo</title>
+<meta name="description" content="Optimaxer is a free, open-source Windows optimizer. It previews every change, saves the original value so you can undo it, and measures before it claims a result. No account, no telemetry.">
+<meta property="og:title" content="Optimaxer: a free Windows optimizer with undo">
+<meta property="og:description" content="Preview every tweak, undo any of them, and see what slows your PC. Open source, no account, no telemetry.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://bliper2.github.io/optimaxer/">
+<meta property="og:image" content="https://bliper2.github.io/optimaxer/screenshots/site-overview-noir.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="https://bliper2.github.io/optimaxer/">
 <link rel="icon" href="favicon.ico">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="page">
-<header>
-  <a class="name" href="index.html"><img src="logo.png" alt="">Optimaxer</a>
-  <nav><a href="https://github.com/bliper2/optimaxer/releases/latest">Download</a><a href="https://github.com/bliper2/optimaxer">Source</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a></nav>
-</header>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="in">
+  <a class="brand" href="index.html"><img src="logo.png" alt="">Optimaxer</a>
+  <nav aria-label="Main">
+    <a href="#features">Features</a>
+    <a href="#safety">Safety</a>
+    <a href="#themes">Themes</a>
+    <a href="#get">Download</a>
+    <a href="faq.html">FAQ</a>
+    <a href="https://github.com/bliper2/optimaxer">GitHub</a>
+  </nav>
+</div></header>
 
-<h1>Optimaxer</h1>
-<p>Optimaxer is a free tool that tweaks, debloats and cleans Windows 10/11, and installs apps. The PowerShell edition uses WPF. A separate Rust desktop app combines Optimaxer with the Orion Store. The Python edition supports Manjaro, other Arch-based distributions and Fedora, with a Tk window and a command-line interface. PowerShell and Linux sources use the MIT license; the Orion-derived desktop app uses GPL-3.0.</p>
-<p>Every tweak saves the value it replaces, so a single tweak, or all of them, can be undone later. It has no telemetry and no account.</p>
+<main id="main">
+<section class="hero"><div class="wrap">
+  <p class="eyebrow">Windows 10 and 11</p>
+  <h1>Tune Windows. Keep the undo button.</h1>
+  <p class="lede">Optimaxer is a free, open-source optimizer. It shows each change before it runs, saves the value it replaces, and measures your PC before it says anything got faster.</p>
+  <div class="cta">
+    <a class="btn primary" href="https://github.com/bliper2/optimaxer/releases/latest">Download for Windows</a>
+    <a class="btn" href="https://github.com/bliper2/optimaxer">View the source</a>
+  </div>
+  <ul class="facts">
+    <li>No account</li>
+    <li>No telemetry</li>
+    <li>Every tweak can be undone</li>
+    <li>MIT and GPL-3.0</li>
+  </ul>
+  <figure class="shot">
+    <img src="screenshots/site-overview-noir.png" alt="The Optimaxer Overview page in the Noir Glass theme, with ring gauges for processor, graphics, memory and storage" width="1280" height="800">
+    <figcaption>The Overview page in the Noir Glass theme. Readings that Windows does not provide show as unavailable.</figcaption>
+  </figure>
+</div></section>
 
-<h2>Windows</h2>
-<p>In PowerShell:</p>
-<pre><code>irm https://raw.githubusercontent.com/bliper2/optimaxer/main/install.ps1 | iex</code></pre>
-<p>That installs to <code>%LOCALAPPDATA%\Optimaxer</code>, checks the SHA-256 of the download against the one GitHub publishes, adds shortcuts and starts it. If you would rather read the code first, get the zip from <a href="https://github.com/bliper2/optimaxer/releases/latest">Releases</a>, look through the scripts, and run <code>Launch.bat</code>.</p>
-<p>What is in it:</p>
-<ul>
-<li>Install: 260+ apps through WinGet, with a check after each install.</li>
-<li>Tweaks covering performance, gaming, network, privacy, Copilot/AI removal and browser debloat, with hardware-aware presets.</li>
-<li>Services, startup entries (including scheduled tasks), cleaner, Appx debloat, DNS, Windows features, tools.</li>
-<li>Config export/import and an unattended mode for scripts.</li>
-</ul>
+<section id="features" class="alt"><div class="wrap">
+  <p class="eyebrow">What you get</p>
+  <h2>Tools for tuning, cleaning and finding out why a PC is slow</h2>
+  <div class="grid">
+    <article class="card"><h3>217 tweaks</h3><p>Performance, gaming, network, privacy and interface settings. The desktop app ports 206 of them. Pick Beginner, Enthusiast or Expert view, from plain language to exact registry keys.</p></article>
+    <article class="card"><h3>Smart Optimize</h3><p>Reads your hardware (laptop or desktop, SSD or HDD, RAM, GPU) and suggests only the tweaks that fit. It lists why it skipped the others.</p></article>
+    <article class="card"><h3>Black Box</h3><p>An opt-in recorder for processor, memory, disk, network and GPU readings. Open it after a slowdown to see what happened, then export a report.</p></article>
+    <article class="card"><h3>Bottleneck Detective</h3><p>A 30-second check that marks each finding as observed or as a guess, and lists what it could not measure. It gives no score.</p></article>
+    <article class="card"><h3>Startup X-Ray</h3><p>Windows' own boot history, the apps and services it flagged as slow, a trend that ignores normal variation, and boot times before and after your changes.</p></article>
+    <article class="card"><h3>Game benchmarks</h3><p>Record 30 seconds with Intel PresentMon: average FPS, 1% and 0.1% lows, stutters. Compare before and after with the run-to-run noise in mind.</p></article>
+    <article class="card"><h3>Cleaner, Services, Startup, DNS</h3><p>Preview what a cleanup removes, see service dependencies before you change one, turn startup items off, and compare DNS providers.</p></article>
+    <article class="card"><h3>App catalog</h3><p>The Orion Store and WinGet in one window. Tick several apps and install them one after another, each in a visible console you can read.</p></article>
+    <article class="card"><h3>Restore tools</h3><p>Create a restore point, check saved backups for damage, review a timeline of what changed, and undo one tweak or all of them.</p></article>
+  </div>
+</div></section>
 
-<h2>Linux (Manjaro / Arch / Fedora)</h2>
-<pre><code>curl -fsSL https://raw.githubusercontent.com/bliper2/optimaxer/main/linux/install.sh | bash
+<section id="safety"><div class="wrap">
+  <p class="eyebrow">Safety</p>
+  <h2>Every change goes through the same five steps</h2>
+  <ol class="steps">
+    <li><strong>Preview</strong><span>You see exactly which values, services and tasks change.</span></li>
+    <li><strong>Confirm</strong><span>Nothing runs until you press the button. Risky tweaks are never part of an automatic plan.</span></li>
+    <li><strong>Save the original</strong><span>The old value goes into a local record before anything is written.</span></li>
+    <li><strong>Verify</strong><span>Optimaxer reads the setting back and tells you if it did not take.</span></li>
+    <li><strong>Undo</strong><span>One tweak or all of them. If a record looks damaged, undo refuses instead of guessing.</span></li>
+  </ol>
+  <div class="two">
+    <div>
+      <h3>What it will not do</h3>
+      <ul>
+        <li>Send your data anywhere. There is no account and no analytics.</li>
+        <li>Claim a speed gain it has not measured.</li>
+        <li>Switch off Microsoft Defender. No built-in tweak does.</li>
+        <li>Apply a Moderate or Advanced tweak on its own.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>What you should do</h3>
+      <ul>
+        <li>Create a restore point before large changes. The app offers to.</li>
+        <li>Read the description of any Moderate or Advanced tweak.</li>
+        <li>Check the SHA-256 of your download against the one on the release page.</li>
+      </ul>
+      <p>See the <a href="privacy.html">privacy policy</a> for every network request the software makes, and the <a href="terms.html">terms</a> for what you accept by using it.</p>
+    </div>
+  </div>
+</div></section>
+
+<section id="themes" class="alt"><div class="wrap">
+  <p class="eyebrow">Themes</p>
+  <h2>35 themes, with a preview of each in Settings</h2>
+  <p class="lede">Pick a palette and the Overview changes with it: ring gauges, a compact list, or standard cards. A Glass style adds larger corners and a soft glow. Dark and light variants and a reduced-motion option are built in.</p>
+  <ul class="chips" aria-label="Theme families">
+    <li>Noir Glass</li><li>Cobalt</li><li>Onyx</li><li>Slate</li><li>Mica</li>
+    <li>Ubuntu Yaru</li><li>GNOME Adwaita</li><li>KDE Breeze</li><li>Linux Mint</li><li>Pop!_OS</li><li>Manjaro</li>
+    <li>Obsidian</li><li>Spectra</li><li>Ember</li><li>Tokyo Night</li><li>Rose Quartz</li><li>Aurora</li><li>Retro Terminal</li>
+    <li>Nord</li><li>Solarized</li><li>Material</li><li>Fluent</li><li>and more</li>
+  </ul>
+  <div class="two">
+    <figure class="shot"><img src="screenshots/site-settings-themes.png" alt="The Settings window showing a miniature preview and name for each theme" width="1280" height="800" loading="lazy"><figcaption>Settings shows a named preview of every theme.</figcaption></figure>
+    <figure class="shot"><img src="screenshots/site-overview-mica.png" alt="The Overview page in the light Mica theme" width="1280" height="800" loading="lazy"><figcaption>The light Mica theme.</figcaption></figure>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <p class="eyebrow">Diagnostics</p>
+  <h2>Find out what slowed the PC, with the evidence</h2>
+  <div class="two">
+    <figure class="shot"><img src="screenshots/site-blackbox.png" alt="The Black Box page with a recording toggle and sampling interval" width="1280" height="800" loading="lazy"><figcaption>Black Box records nothing until you turn it on.</figcaption></figure>
+    <figure class="shot"><img src="screenshots/site-detective.png" alt="The Bottleneck Detective page with a button to start a 30-second check" width="1280" height="800" loading="lazy"><figcaption>Bottleneck Detective starts with one button and changes nothing.</figcaption></figure>
+  </div>
+  <p>Black Box keeps its history in a local file, records no process, window or file names, and can be exported or deleted at any time. Bottleneck Detective reports a processor or memory finding only when the reading stayed at or above 90% for a meaningful share of the check.</p>
+</div></section>
+
+<section id="get" class="alt"><div class="wrap">
+  <p class="eyebrow">Download</p>
+  <h2>Pick your edition</h2>
+  <table>
+    <thead><tr><th>Edition</th><th>For</th><th>Get it</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Desktop app</strong><br>Rust, one exe</td><td>Windows 10 and 11. Includes the Orion Store catalog. Checks for updates on launch and verifies the download before replacing itself.</td><td><a href="https://github.com/bliper2/optimaxer/releases/latest">Download the zip</a> from Releases</td></tr>
+      <tr><td><strong>PowerShell edition</strong><br>WPF window</td><td>Windows 10 and 11. Has the full tweak set, Appx debloat, Windows features and an unattended mode.</td><td>Run the one-line installer below, or download the zip</td></tr>
+      <tr><td><strong>Linux edition</strong><br>Python</td><td>Manjaro and other Arch-based systems, and Fedora. Tkinter window and command line. Tested on a simulated system, so run it with <code>--dry-run</code> first.</td><td>Run the installer below</td></tr>
+    </tbody>
+  </table>
+  <h3 style="margin-top:24px">PowerShell edition, one line</h3>
+  <pre><code>irm https://raw.githubusercontent.com/bliper2/optimaxer/main/install.ps1 | iex</code></pre>
+  <p>It installs to <code>%LOCALAPPDATA%\Optimaxer</code>, checks the SHA-256 of the download against the one GitHub publishes, adds shortcuts and starts the app. If you want to read the code first, download the zip from Releases and run <code>Launch.bat</code>.</p>
+  <h3>Linux</h3>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/bliper2/optimaxer/main/linux/install.sh | bash
 optimaxer --dry-run</code></pre>
-<p>Needs Python 3 and Tk for the optional window (<code>optimaxer gui</code>). Apps come from pacman, the AUR, dnf or Flatpak, depending on the distribution. Includes tweaks with undo, browser debloat, cleaner, services, autostart entries, package removal, DNS and maintenance tools. Automated tests use a simulated system; real Arch and Fedora integration remains a separate check.</p>
+  <p>The desktop exe is not code-signed, so Windows SmartScreen may warn you. Compare the file's SHA-256 with the one on the release page before you run it.</p>
+</div></section>
 
-<h2>Desktop app</h2>
-<p>The Rust desktop build includes the Orion app catalog and Optimaxer's supported Windows tuning tools. Some PowerShell features are not ported; the <a href="https://github.com/bliper2/optimaxer/blob/main/desktop/README.md">desktop documentation</a> lists them. Download the desktop ZIP from <a href="https://github.com/bliper2/optimaxer/releases/latest">Releases</a>.</p>
+<section><div class="wrap">
+  <p class="eyebrow">Questions</p>
+  <h2>Short answers</h2>
+  <div class="two">
+    <div><h3>Will it make my games faster?</h3><p>Some tweaks help some PCs. Optimaxer will not promise a number. Use the benchmark to compare your own before and after runs.</p></div>
+    <div><h3>Does it phone home?</h3><p>No. It contacts GitHub for updates and the catalog servers you ask it to, and nothing else. The <a href="privacy.html">privacy policy</a> lists every request.</p></div>
+    <div><h3>Can I undo everything?</h3><p>Registry values, service start types and scheduled tasks come back. Deleted cache files and cleared event logs do not, and the app labels each tweak as reversible, conditionally reversible or not reversible.</p></div>
+    <div><h3>Need more?</h3><p>The <a href="faq.html">FAQ</a> covers permissions, antivirus warnings, updates and removal. Bugs and requests go to the <a href="https://github.com/bliper2/optimaxer/issues">issue tracker</a>.</p></div>
+  </div>
+</div></section>
+</main>
 
-<h2>Before you use it</h2>
-<p>It changes system settings and needs administrator rights. Make a restore point or snapshot first, and read the <a href="terms.html">terms</a>. What it sends over the network is listed in the <a href="privacy.html">privacy policy</a>. Bugs and requests go to the <a href="https://github.com/bliper2/optimaxer/issues">issue tracker</a>.</p>
-
-<footer>PowerShell and Linux: MIT. Orion-derived desktop app: GPL-3.0. App names and icons belong to their owners.</footer>
-</div>
+<footer class="site"><div class="in">
+  <div><h3>Optimaxer</h3><a href="https://github.com/bliper2/optimaxer/releases/latest">Download</a><a href="https://github.com/bliper2/optimaxer">Source code</a><a href="https://github.com/bliper2/optimaxer/issues">Report a bug</a></div>
+  <div><h3>Help</h3><a href="faq.html">FAQ</a><a href="security.html">Security</a><a href="https://github.com/bliper2/optimaxer/blob/main/docs/verification.md">Verification notes</a></div>
+  <div><h3>Legal</h3><a href="privacy.html">Privacy policy</a><a href="terms.html">Terms of service</a><a href="https://github.com/bliper2/optimaxer/blob/main/THIRD-PARTY-NOTICES.md">Third-party notices</a></div>
+  <p class="fine">PowerShell and Linux editions: MIT. Orion-derived desktop app: GPL-3.0. App names and icons belong to their owners.</p>
+</div></footer>
 </body>
 </html>

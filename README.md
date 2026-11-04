@@ -2,7 +2,7 @@
 
 # Optimaxer
 
-**[Website](https://bliper2.github.io/optimaxer/)** · [Download](https://github.com/bliper2/optimaxer/releases/latest) · [Privacy](https://bliper2.github.io/optimaxer/privacy.html) · [Terms](https://bliper2.github.io/optimaxer/terms.html) · MIT licensed
+**[Website](https://bliper2.github.io/optimaxer/)** · [Download](https://github.com/bliper2/optimaxer/releases/latest) · [Privacy](https://bliper2.github.io/optimaxer/privacy.html) · [Terms](https://bliper2.github.io/optimaxer/terms.html) · [FAQ](https://bliper2.github.io/optimaxer/faq.html) · [Security](SECURITY.md) · MIT licensed
 
 Windows 10/11 performance, privacy, debloat and app-install toolkit. WPF GUI in Windows PowerShell 5.1, inspired by the layout of [Chris Titus Tech's WinUtil](https://github.com/ChrisTitusTech/winutil) (MIT), rebuilt with undo support, verification and a lot more tweaks. Many settings, app lists and scripts are adapted from WinUtil and [Win11Debloat](https://github.com/Raphire/Win11Debloat) (MIT); see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
@@ -19,12 +19,32 @@ Windows 10/11 performance, privacy, debloat and app-install toolkit. WPF GUI in 
 | ![Live performance charts including disk activity](docs/screenshots/desktop-performance.png) | ![Local system inventory snapshots](docs/screenshots/desktop-system-snapshot.png) |
 | ![Cleaner scan](docs/screenshots/desktop-cleaner.png) | |
 
+**New in the desktop app** (themes with their own Overview layouts, plus the diagnostics pages):
+
+| | |
+|---|---|
+| ![Overview in the Noir Glass theme](docs/screenshots/site-overview-noir.png) | ![Overview in the light Mica theme](docs/screenshots/site-overview-mica.png) |
+| ![Theme previews in Settings](docs/screenshots/site-settings-themes.png) | ![Black Box recorder](docs/screenshots/site-blackbox.png) |
+| ![Bottleneck Detective](docs/screenshots/site-detective.png) | ![Startup X-Ray](docs/screenshots/site-xray.png) |
+
 **Optimaxer for PowerShell** (WPF, Windows 10 and 11):
 
 | | |
 |---|---|
 | ![Dashboard with live gauges](docs/screenshots/powershell-dashboard.png) | ![Tweaks](docs/screenshots/powershell-tweaks.png) |
 | ![Apps](docs/screenshots/powershell-apps.png) | ![Cleaner](docs/screenshots/powershell-cleaner.png) |
+
+## Desktop app highlights
+- **Black Box**: an opt-in, bounded recorder for processor, memory, disk, network and GPU readings, with a timeline, saturation findings, bookmarks, a System-log lookup, and report and CSV export.
+- **Bottleneck Detective**: a 30-second check (or the last hour of Black Box readings) that marks each finding as observed or as a hypothesis and lists what it could not measure. It gives no score.
+- **Startup X-Ray**: Windows' own boot history (administrator only), flagged apps and services, a trend that ignores normal variation, and boot times before and after your startup changes.
+- **Tweaks for three levels**: Beginner, Enthusiast and Expert views, with undo labeled reversible, conditionally reversible or not reversible.
+- **Multi-select installs**: tick several WinGet apps, review the exact commands, and install them one after another in visible consoles.
+- **File Explorer restart**: after a tweak that changed something, the app closes File Explorer and waits for Windows to bring it back. It starts Explorer by hand only if Windows does not. Turn it off in the confirmation window.
+- **Themes**: 35 options, including glass styles and Linux-desktop colours, each with a named preview. The Overview layout follows the theme.
+
+## Privacy, security and terms
+[Privacy policy](https://bliper2.github.io/optimaxer/privacy.html) lists every file the software keeps and every network request it makes. [Security](SECURITY.md) explains how downloads are checked and how to report a vulnerability. [Terms](https://bliper2.github.io/optimaxer/terms.html) and the [FAQ](https://bliper2.github.io/optimaxer/faq.html) are on the website. See [CONTRIBUTING.md](CONTRIBUTING.md) to report a bug or send a change.
 
 ## Get it
 **One line** (installs to `%LOCALAPPDATA%\Optimaxer`, adds desktop and Start menu shortcuts, starts the app; run again to update):
@@ -82,7 +102,7 @@ Non-interactive: `optimaxer tweaks list | apply --preset safe | undo --all`, `op
 Safety: changes record their original state in `/var/lib/optimaxer/state.json` (files, config lines, service states, DNS) before mutation; edited config files are also copied to `/var/lib/optimaxer/backups`. Failed undo operations keep their saved originals for retry. Unreadable state blocks changes. Package installs by a tweak are kept on undo. Tests use a simulated system covering Arch and Fedora, including Tk controls (`python -B -m unittest discover -s linux/tests`). Real distribution integration still needs testing, so start with `--dry-run`.
 
 ## Desktop app (Rust)
-[`desktop/`](desktop/) holds a single-exe Windows app that puts the [Orion Store](https://github.com/RookieEnough/Orion-Store) catalog and Optimaxer in one window (Rust, eframe/egui). The Optimaxer side ports 206 of 217 tweaks with shared undo records and hardware-aware Smart optimize, plus services, startup, cleaner, DNS, network tools and maintenance helpers. Overview shows live CPU, memory and disk gauges, recommends reviewing inactive eligible Smart Optimize settings, offers a cleanup scan when measured system-drive use reaches 90%, and links to startup review, diagnostics, update checks, restore-point creation and memory cleanup. System changes stay behind their existing confirmation flows. Service changes show direct dependencies before confirmation. Cleaner exclusions protect exact paths during path-based scans, previews and cleanup; read-only size scans can be cancelled without keeping partial results. System-managed cleanup APIs clearly show where path exclusions cannot apply. Startup includes Run keys, Startup folders and third-party logon/boot tasks; Microsoft tasks are excluded. Activity searches confirmed tweak records and captured output from selected system actions in one chronological timeline; operation output does not prove final system state or provide undo data. The notification center surfaces restart, update, operation and download events. Settings combines Windows, Classic and Material control styles with 16 named color palettes, custom accent and editable light/dark surface colors, reduced motion, compact or comfortable density, adjustable interface scale and corner radius, and update controls. The command palette searches pages and actions, including the eight newest saved Activity records; selecting a record opens Activity filtered to its timestamp. Performance can compare 30-second PresentMon captures, DPC and interrupt counters, timer resolution, TCP connect timings to a DNS endpoint, and the last Windows boot duration. Every system change opens a confirmation window listing what will change. The 11 tweaks that need PowerShell cmdlets stay in this edition. Download `OrionStore-Optimaxer-desktop-v*-win-x64.zip` from [Releases](https://github.com/bliper2/optimaxer/releases/latest), or build it with `cargo build --release` in `desktop/`. The desktop folder is GPL-3.0 (it derives from Orion Store); everything else here stays MIT. See [desktop/README.md](desktop/README.md) and [the edition comparison](docs/edition-comparison.md).
+[`desktop/`](desktop/) holds a single-exe Windows app that puts the [Orion Store](https://github.com/RookieEnough/Orion-Store) catalog and Optimaxer in one window (Rust, eframe/egui). The Optimaxer side ports 206 of 217 tweaks with shared undo records and hardware-aware Smart optimize, plus services, startup, cleaner, DNS, network tools and maintenance helpers. Overview shows live CPU, memory and disk gauges, recommends reviewing inactive eligible Smart Optimize settings, offers a cleanup scan when measured system-drive use reaches 90%, and links to startup review, diagnostics, update checks, restore-point creation and memory cleanup. System changes stay behind their existing confirmation flows. Service changes show direct dependencies before confirmation. Cleaner exclusions protect exact paths during path-based scans, previews and cleanup; read-only size scans can be cancelled without keeping partial results. System-managed cleanup APIs clearly show where path exclusions cannot apply. Startup includes Run keys, Startup folders and third-party logon/boot tasks; Microsoft tasks are excluded. Activity searches confirmed tweak records and captured output from selected system actions in one chronological timeline; operation output does not prove final system state or provide undo data. The notification center surfaces restart, update, operation and download events. Settings combines Windows, Classic and Material control styles with 35 themes with live previews in Settings, custom accent and editable light/dark surface colors, reduced motion, compact or comfortable density, adjustable interface scale and corner radius, and update controls. The command palette searches pages and actions, including the eight newest saved Activity records; selecting a record opens Activity filtered to its timestamp. Performance can compare 30-second PresentMon captures, DPC and interrupt counters, timer resolution, TCP connect timings to a DNS endpoint, and the last Windows boot duration. Every system change opens a confirmation window listing what will change. The 11 tweaks that need PowerShell cmdlets stay in this edition. Download `OrionStore-Optimaxer-desktop-v*-win-x64.zip` from [Releases](https://github.com/bliper2/optimaxer/releases/latest), or build it with `cargo build --release` in `desktop/`. The desktop folder is GPL-3.0 (it derives from Orion Store); everything else here stays MIT. See [desktop/README.md](desktop/README.md) and [the edition comparison](docs/edition-comparison.md).
 
 ## Run unattended
 ```powershell

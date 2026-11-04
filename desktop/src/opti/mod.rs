@@ -18,6 +18,7 @@ pub mod pending_restart;
 pub mod processes;
 pub mod profiles;
 pub mod services;
+pub mod shell;
 pub mod snapshots;
 pub mod special;
 pub mod startup;

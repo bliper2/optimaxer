@@ -83,6 +83,7 @@ impl OrionApp {
             ui.add_space(S3);
             egui::ScrollArea::vertical()
                 .id_salt("settings-content")
+                .min_scrolled_height((ctx.content_rect().height() - 110.0).max(200.0))
                 .max_height((ctx.content_rect().height() - 110.0).max(200.0))
                 .auto_shrink([false, false])
                 .show(ui, |ui| {

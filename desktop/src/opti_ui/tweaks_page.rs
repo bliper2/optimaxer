@@ -258,7 +258,7 @@ impl OptiUi {
                             || tw.desc.to_lowercase().contains(&q))
                         && (risk_filter.is_empty() || tw.risk == risk_filter)
                         && in_group(tw, group_filter, applied)
-                        && (!beginner || tweak_facts::guided(tw, fits))
+                        && (!beginner || (traits.is_some() && tweak_facts::guided(tw, fits)))
                         && tweak_matches_view(
                             tw,
                             applied,
@@ -498,7 +498,13 @@ impl OptiUi {
                 }
             });
         }
-        if shown == 0 {
+        if shown == 0 && beginner && traits.is_none() {
+            kit::empty_state(
+                ui,
+                "Reading this PC",
+                "Beginner lists only tweaks that suit your hardware, so it waits until the hardware check finishes.",
+            );
+        } else if shown == 0 {
             kit::empty_state(
                 ui,
                 "No tweaks match",
