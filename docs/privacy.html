@@ -4,55 +4,85 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Privacy Policy - Optimaxer</title>
+<meta name="description" content="What Optimaxer stores on your PC, what it sends over the network, and who receives it.">
+<link rel="canonical" href="https://bliper2.github.io/optimaxer/privacy.html">
 <link rel="icon" href="favicon.ico">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="page">
-<header>
-  <a class="name" href="index.html"><img src="logo.png" alt="">Optimaxer</a>
-  <nav><a href="https://github.com/bliper2/optimaxer/releases/latest">Download</a><a href="https://github.com/bliper2/optimaxer">Source</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a></nav>
-</header>
-
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="in">
+  <a class="brand" href="index.html"><img src="logo.png" alt="">Optimaxer</a>
+  <nav aria-label="Main">
+    <a href="index.html#features">Features</a>
+    <a href="index.html#get">Download</a>
+    <a href="faq.html">FAQ</a>
+    <a href="security.html">Security</a>
+    <a href="privacy.html" aria-current="page">Privacy</a>
+    <a href="terms.html">Terms</a>
+    <a href="https://github.com/bliper2/optimaxer">GitHub</a>
+  </nav>
+</div></header>
+<main id="main" class="prose">
 <h1>Privacy Policy</h1>
-<p class="meta">Last updated 28 October 2026</p>
+<p class="meta">Last updated 4 November 2026</p>
 
-<p>Optimaxer does not collect, send or sell personal data. It has no accounts, analytics or telemetry, and the author receives nothing from your computer.</p>
+<p>Optimaxer collects no personal data. It has no accounts, analytics or telemetry, and the author receives nothing from your computer. This page lists what the software stores on your PC and every network request it can make.</p>
 
 <h2>Files kept on your computer</h2>
 <ul>
-<li>Windows: a log, settings, tweak undo state, service backups and an icon cache in <code>%ProgramData%\Optimaxer</code>; the program in <code>%LOCALAPPDATA%\Optimaxer</code>.</li>
-<li>Rust desktop app: settings, catalog cache, update staging and Optimaxer undo records in <code>%LOCALAPPDATA%\OrionStore</code>. Downloads use the folder chosen in Settings.</li>
-<li>Linux: undo state and config backups in <code>/var/lib/optimaxer</code>.</li>
+<li><strong>Rust desktop app:</strong> settings, the catalog cache, update staging and download history in <code>%LOCALAPPDATA%\OrionStore</code>. Optimaxer's own records sit in <code>%LOCALAPPDATA%\OrionStore\optimaxer</code>: tweak undo records and backups, tweak and operation history, system snapshots, saved profiles, game profiles, benchmark captures and the Black Box history. Downloads go to the folder you pick in Settings.</li>
+<li><strong>PowerShell edition:</strong> a log, settings, tweak undo state, service backups and an icon cache in <code>%ProgramData%\Optimaxer</code>. The program lives in <code>%LOCALAPPDATA%\Optimaxer</code>.</li>
+<li><strong>Linux edition:</strong> undo state and config backups in <code>/var/lib/optimaxer</code>.</li>
 </ul>
-<p>They stay there. Delete the folders to remove them.</p>
+<p>These files stay on your PC. You can delete the folders at any time to remove them.</p>
+
+<h2>Black Box, Bottleneck Detective and Startup X-Ray</h2>
+<ul>
+<li><strong>Black Box</strong> is off until you turn it on. While it is on, it saves processor, memory, disk, network and GPU readings every 5, 10 or 30 seconds, plus any bookmarks you write. It keeps the newest 8,640 readings in <code>blackbox.json</code>. It does not record process names, window titles, file names or the content of anything you do. Nothing leaves your PC unless you export a report or CSV and share it yourself. Turning it off stops recording, and "Delete history" removes the file.</li>
+<li><strong>Bottleneck Detective</strong> reads the same counters for 30 seconds, plus the names and processor use of running programs, and keeps the result in memory only. It sends nothing.</li>
+<li><strong>Startup X-Ray</strong> reads Windows' own boot performance log on your PC. The "System log" lookups in Black Box and Startup X-Ray read your Windows event log locally and list provider names and event IDs.</li>
+</ul>
 
 <h2>Network requests the software makes</h2>
-<p>Only the following, and only to do what you asked. The author runs none of these servers and none of the requests carry an ID that identifies you.</p>
+<p>Only the requests below, and only to do what you asked. The author runs none of these servers, and no request carries an ID that identifies you.</p>
 <ul>
-<li>GitHub (api.github.com, github.com): update checks, release downloads, installers and publisher avatars used for app icons. GitHub sees your IP address and user agent, covered by <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">its privacy statement</a>.</li>
-<li>Rust desktop catalog refresh: GitHub, GitLab, Codeberg and jsDelivr mirrors of Orion-Data. Catalog images and screenshots come from their published URLs. App downloads contact the server named by the selected download link.</li>
-<li>jsDelivr (cdn.jsdelivr.net) and Simple Icons (cdn.simpleicons.org): app icons for the Install and WinGet catalogs.</li>
-<li>Google, Gstatic and DuckDuckGo favicon services: fallback icons for apps with no icon in the packs. Requests name the app's website.</li>
-<li>raw.githubusercontent.com (WindowsSpyBlocker list): only when you apply the optional hosts-file telemetry block.</li>
-<li>Package sources you choose to use: WinGet and the Microsoft Store on Windows; pacman mirrors, the AUR, dnf repositories and Flathub on Linux. Their own policies apply.</li>
-<li>A DNS provider, if you switch DNS in the Network tab. That provider then sees your DNS queries.</li>
-<li>When you choose “Benchmark servers,” the Rust desktop app sends five UDP A-record queries for <code>example.com</code> to each listed provider's first IPv4 DNS server. The benchmark does not change your configured DNS; those servers receive the test domain and your network address.</li>
+<li><strong>GitHub</strong> (api.github.com, github.com): update checks, release downloads, installers, the PresentMon download and publisher avatars used for app icons. GitHub sees your IP address and user agent under <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">its privacy statement</a>.</li>
+<li><strong>Catalog refresh in the Rust desktop app:</strong> GitHub, GitLab, Codeberg and jsDelivr mirrors of Orion-Data. Catalog images and screenshots load from their published URLs. App downloads contact the server named by the download link you pick.</li>
+<li><strong>Icon services:</strong> jsDelivr (cdn.jsdelivr.net) and Simple Icons (cdn.simpleicons.org) for app icons in the Install and WinGet catalogs. Google, Gstatic and DuckDuckGo favicon services provide fallback icons, and those requests name the app's website.</li>
+<li><strong>Intel PresentMon:</strong> when you first record a game benchmark, the app downloads PresentMon from its GitHub release and checks it against the published SHA-256.</li>
+<li><strong>Latency measurement:</strong> the Performance measurement in the Rust desktop app opens ten short TCP connections to 1.1.1.1 on port 53 (Cloudflare) and records how long they take. Cloudflare sees your IP address.</li>
+<li><strong>DNS benchmark:</strong> when you choose "Benchmark servers," the app sends five UDP A-record queries for <code>example.com</code> to the first IPv4 DNS server of each listed provider. Your configured DNS does not change. Those servers receive the test domain and your network address.</li>
+<li><strong>DNS provider you choose:</strong> if you switch DNS in the Network page, that provider sees your DNS queries from then on. If you pick a provider with DNS over HTTPS, Windows contacts it directly.</li>
+<li><strong>raw.githubusercontent.com</strong> (WindowsSpyBlocker list): only when you apply the optional hosts-file telemetry block.</li>
+<li><strong>Package sources you choose to use:</strong> WinGet and the Microsoft Store on Windows, and pacman mirrors, the AUR, dnf repositories and Flathub on Linux. WinGet opens in its own console and its own policies apply. Optimaxer does not accept package agreements for you.</li>
 </ul>
 
 <h2>Privacy tweaks</h2>
-<p>Some tweaks lower the data Windows or other software sends to its vendor. That changes what those vendors receive. It does not send anything to the Optimaxer author.</p>
+<p>Some tweaks lower the data Windows or other software sends to its vendor. That changes what those vendors receive. It sends nothing to the Optimaxer author.</p>
 
 <h2>This website</h2>
-<p>Static pages on GitHub Pages. No cookies, analytics or third-party scripts. GitHub may log visits under its own policy.</p>
+<p>These are static pages on GitHub Pages. They use no cookies, analytics or third-party scripts. GitHub may log visits under its own policy.</p>
+
+<h2>Your rights and choices</h2>
+<ul>
+<li>You can read, move or delete every file listed above.</li>
+<li>Because the author holds no data about you, there is nothing to request, correct or erase on the author's side. For data held by GitHub, Cloudflare or another service named above, use that service's own privacy tools.</li>
+<li>You can disable the in-app update check in Settings.</li>
+</ul>
 
 <h2>Children</h2>
 <p>The software collects no data from anyone, including children.</p>
 
 <h2>Changes</h2>
-<p>Changes are made on this page; history is in the <a href="https://github.com/bliper2/optimaxer/commits/main/docs/privacy.html">repository</a>. Questions: <a href="https://github.com/bliper2/optimaxer/issues">issue tracker</a>.</p>
+<p>Changes appear on this page, and the history is in the <a href="https://github.com/bliper2/optimaxer/commits/main/docs/privacy.html">repository</a>. Questions go to the <a href="https://github.com/bliper2/optimaxer/issues">issue tracker</a>.</p>
 
-<footer>PowerShell and Linux: MIT. Orion-derived desktop app: GPL-3.0.</footer>
-</div>
+</main>
+<footer class="site"><div class="in">
+  <div><h3>Optimaxer</h3><a href="https://github.com/bliper2/optimaxer/releases/latest">Download</a><a href="https://github.com/bliper2/optimaxer">Source code</a><a href="https://github.com/bliper2/optimaxer/issues">Report a bug</a></div>
+  <div><h3>Help</h3><a href="faq.html">FAQ</a><a href="security.html">Security</a><a href="https://github.com/bliper2/optimaxer/blob/main/docs/verification.md">Verification notes</a></div>
+  <div><h3>Legal</h3><a href="privacy.html">Privacy policy</a><a href="terms.html">Terms of service</a><a href="https://github.com/bliper2/optimaxer/blob/main/THIRD-PARTY-NOTICES.md">Third-party notices</a></div>
+  <p class="fine">PowerShell and Linux editions: MIT. Orion-derived desktop app: GPL-3.0. App names and icons belong to their owners.</p>
+</div></footer>
 </body>
 </html>

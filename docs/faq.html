@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FAQ - Optimaxer</title>
+<meta name="description" content="Answers about safety, administrator rights, undo, updates, antivirus warnings, data and removal for Optimaxer.">
+<link rel="canonical" href="https://bliper2.github.io/optimaxer/faq.html">
+<link rel="icon" href="favicon.ico">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="in">
+  <a class="brand" href="index.html"><img src="logo.png" alt="">Optimaxer</a>
+  <nav aria-label="Main">
+    <a href="index.html#features">Features</a>
+    <a href="index.html#get">Download</a>
+    <a href="faq.html" aria-current="page">FAQ</a>
+    <a href="security.html">Security</a>
+    <a href="privacy.html">Privacy</a>
+    <a href="terms.html">Terms</a>
+    <a href="https://github.com/bliper2/optimaxer">GitHub</a>
+  </nav>
+</div></header>
+<main id="main" class="prose">
+<h1>Frequently asked questions</h1>
+<p class="meta">Last updated 4 November 2026</p>
+<h2>Using it</h2>
+<details><summary>Is Optimaxer safe to run?</summary><p>It is open source, previews every change and saves the original value for undo. It still changes system settings, so create a restore point first and read the description of any Moderate or Advanced tweak. The <a href="terms.html">terms</a> cover the details.</p></details>
+<details><summary>Does it need administrator rights?</summary><p>Reading works without them. Applying tweaks, changing services and cleaning system files need administrator rights. The desktop app shows a banner with a <strong>Restart as administrator</strong> button, and Windows asks you to approve it.</p></details>
+<details><summary>How do I undo a tweak?</summary><p>Select it on the Tweaks page and choose <strong>Undo selected</strong>, or use <strong>Undo all</strong>. Each tweak is labeled reversible, conditionally reversible or not reversible. Deleted cache files and cleared event logs cannot come back.</p></details>
+<details><summary>Will it make my games faster?</summary><p>Some tweaks help some PCs, and Optimaxer makes no promise. Record a benchmark before and after with PresentMon and compare average FPS, the 1% and 0.1% lows and stutters. Small differences fall inside normal run-to-run variation.</p></details>
+<details><summary>Does it turn off Microsoft Defender or Windows Update?</summary><p>No built-in tweak turns off Defender. A few Moderate tweaks change Windows Update behavior, for example pausing updates for 35 days, delaying feature updates or stopping automatic driver installs. One tweak stops Windows from turning on BitLocker device encryption by itself. The preview names each of these.</p></details>
+<details><summary>Why does it restart File Explorer after a tweak?</summary><p>Many interface tweaks only show after Explorer reloads. The desktop app restarts it after a run that changed something, and Windows brings it back on its own. Open File Explorer windows close. Clear the checkbox in the confirmation window to skip it, and the choice is saved.</p></details>
+<details><summary>What does Black Box record?</summary><p>Processor, memory, disk, network and GPU readings at the interval you choose, and bookmarks you add. It is off by default, keeps a rolling window in a local file, and never records process names, window titles or file names. You can export a report or delete the history.</p></details>
+<details><summary>Why does Startup X-Ray ask for administrator rights?</summary><p>Windows lets only administrators read its boot performance log. Optimaxer reads that log and changes nothing. Without administrator rights the page offers a restart button.</p></details>
+<h2>Downloads and updates</h2>
+<details><summary>Windows SmartScreen or my antivirus warns about the exe. Why?</summary><p>The desktop exe is not code-signed, and tools that edit system settings often trigger warnings. Compare the file's SHA-256 with the one on the release page, or build it yourself from the source. If a warning persists after the hashes match, report it on the issue tracker with the scanner's name and version.</p></details>
+<details><summary>How do updates work?</summary><p>The desktop app checks GitHub once per launch and shows an <strong>Update</strong> button for a newer release. Nothing downloads until you press it. The app checks the zip against the SHA-256 GitHub publishes, backs up the old file and restarts. You can turn the check off in Settings.</p></details>
+<details><summary>Which Windows versions work?</summary><p>Windows 10 and 11. Some tweaks need a newer build, and the app hides or skips the ones that do not fit your PC.</p></details>
+<details><summary>Is there a Linux version?</summary><p>Yes, a separate Python edition for Manjaro and other Arch-based systems and for Fedora. It has been tested on a simulated system, so run it with <code>--dry-run</code> first. A Linux build of the Rust app is in development.</p></details>
+<h2>Data and removal</h2>
+<details><summary>Does it send my data anywhere?</summary><p>No. There is no account, analytics or telemetry. It contacts GitHub for updates and the catalog servers you ask it to. The <a href="privacy.html">privacy policy</a> lists every request.</p></details>
+<details><summary>Where does it keep its files, and how do I uninstall it?</summary><p>The desktop app uses <code>%LOCALAPPDATA%\OrionStore</code>, and the PowerShell edition uses <code>%LOCALAPPDATA%\Optimaxer</code> and <code>%ProgramData%\Optimaxer</code>. Undo your tweaks first if you want the old settings back, then delete the program and those folders.</p></details>
+<h2>Help and licensing</h2>
+<details><summary>How do I report a bug or ask for a feature?</summary><p>Open an issue on the <a href="https://github.com/bliper2/optimaxer/issues">issue tracker</a>. Include the edition, the version and what you did. For a security problem, read the <a href="security.html">security page</a> first.</p></details>
+<details><summary>Can I use it at work or in a business?</summary><p>The licenses allow it, but your employer or device administrator decides what you may change on a managed PC. The PowerShell and Linux editions use MIT. The desktop app uses GPL-3.0, which applies when you redistribute it.</p></details>
+
+</main>
+<footer class="site"><div class="in">
+  <div><h3>Optimaxer</h3><a href="https://github.com/bliper2/optimaxer/releases/latest">Download</a><a href="https://github.com/bliper2/optimaxer">Source code</a><a href="https://github.com/bliper2/optimaxer/issues">Report a bug</a></div>
+  <div><h3>Help</h3><a href="faq.html">FAQ</a><a href="security.html">Security</a><a href="https://github.com/bliper2/optimaxer/blob/main/docs/verification.md">Verification notes</a></div>
+  <div><h3>Legal</h3><a href="privacy.html">Privacy policy</a><a href="terms.html">Terms of service</a><a href="https://github.com/bliper2/optimaxer/blob/main/THIRD-PARTY-NOTICES.md">Third-party notices</a></div>
+  <p class="fine">PowerShell and Linux editions: MIT. Orion-derived desktop app: GPL-3.0. App names and icons belong to their owners.</p>
+</div></footer>
+</body>
+</html>

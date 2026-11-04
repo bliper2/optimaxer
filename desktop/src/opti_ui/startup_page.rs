@@ -38,9 +38,13 @@ impl OptiUi {
                 );
             } else {
                 ui.label(
-                    RichText::new("No recent Windows boot record")
-                        .size(T_SMALL)
-                        .color(t.subtle),
+                    RichText::new(if self.elevated {
+                        "No recent Windows boot record"
+                    } else {
+                        "Windows lets only administrators read the boot log. Restart as administrator to see it."
+                    })
+                    .size(T_SMALL)
+                    .color(t.subtle),
                 );
             }
         });

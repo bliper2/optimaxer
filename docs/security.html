@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security - Optimaxer</title>
+<meta name="description" content="How Optimaxer protects its downloads and updates, what privileges it uses, and how to report a vulnerability.">
+<link rel="canonical" href="https://bliper2.github.io/optimaxer/security.html">
+<link rel="icon" href="favicon.ico">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="in">
+  <a class="brand" href="index.html"><img src="logo.png" alt="">Optimaxer</a>
+  <nav aria-label="Main">
+    <a href="index.html#features">Features</a>
+    <a href="index.html#get">Download</a>
+    <a href="faq.html">FAQ</a>
+    <a href="security.html" aria-current="page">Security</a>
+    <a href="privacy.html">Privacy</a>
+    <a href="terms.html">Terms</a>
+    <a href="https://github.com/bliper2/optimaxer">GitHub</a>
+  </nav>
+</div></header>
+<main id="main" class="prose">
+<h1>Security</h1>
+<p class="meta">Last updated 4 November 2026</p>
+
+<p>Optimaxer changes sensitive Windows settings, so it is built to show you each change first, keep a way back, and check what it downloads.</p>
+
+<h2>How downloads and updates are checked</h2>
+<ul>
+<li>Release files are published on <a href="https://github.com/bliper2/optimaxer/releases">GitHub Releases</a> with a <code>SHA256SUMS.txt</code> file and the SHA-256 digest GitHub shows for each asset. Compare it with your download before you run it. In PowerShell: <code>Get-FileHash .\file.zip -Algorithm SHA256</code>.</li>
+<li>The in-app updater downloads a release only after you press the update button. It checks the file against the digest GitHub publishes and refuses a release that has none. It keeps a backup of the files it replaces.</li>
+<li>The PowerShell installer and updater check the download against the published SHA-256, and the updater rejects archives with paths that escape the install folder.</li>
+<li>The PresentMon benchmark tool is downloaded from its GitHub release and checked against the published SHA-256.</li>
+<li>The desktop exe is not code-signed. Windows SmartScreen may warn on first run. You can build it yourself with <code>cargo build --release</code> in the <code>desktop</code> folder.</li>
+</ul>
+
+<h2>Privileges</h2>
+<ul>
+<li>Reading works without administrator rights. Changes need them. The desktop app asks only when you press <strong>Restart as administrator</strong>, and Windows shows its own approval prompt.</li>
+<li>Services Windows depends on are on a protected list, and Optimaxer does not offer to disable them.</li>
+<li>Risky tweaks are never part of an automatic plan, and no built-in tweak turns off Microsoft Defender.</li>
+<li>Undo uses saved records and refuses to act if a record is damaged or the setting was changed elsewhere, so it does not guess.</li>
+</ul>
+
+<h2>What stays on your PC</h2>
+<p>Settings, undo records, history and diagnostic readings are local files. The <a href="privacy.html">privacy policy</a> lists the files and every network request.</p>
+
+<h2>Report a vulnerability</h2>
+<p>Please do not post exploit details in a public issue.</p>
+<ul>
+<li>Use the <strong>Report a vulnerability</strong> button on the <a href="https://github.com/bliper2/optimaxer/security">Security tab</a> if it appears.</li>
+<li>If it does not, open an <a href="https://github.com/bliper2/optimaxer/issues/new">issue</a> titled "Security contact request" with no technical detail, and the maintainer will arrange a private channel.</li>
+</ul>
+<p>Include the edition and version, the steps to reproduce, and what an attacker could do. You will get a reply on the issue, and fixes ship as a new release with a note in the release text.</p>
+
+<h2>Supported versions</h2>
+<p>Only the latest release receives fixes.</p>
+
+</main>
+<footer class="site"><div class="in">
+  <div><h3>Optimaxer</h3><a href="https://github.com/bliper2/optimaxer/releases/latest">Download</a><a href="https://github.com/bliper2/optimaxer">Source code</a><a href="https://github.com/bliper2/optimaxer/issues">Report a bug</a></div>
+  <div><h3>Help</h3><a href="faq.html">FAQ</a><a href="security.html">Security</a><a href="https://github.com/bliper2/optimaxer/blob/main/docs/verification.md">Verification notes</a></div>
+  <div><h3>Legal</h3><a href="privacy.html">Privacy policy</a><a href="terms.html">Terms of service</a><a href="https://github.com/bliper2/optimaxer/blob/main/THIRD-PARTY-NOTICES.md">Third-party notices</a></div>
+  <p class="fine">PowerShell and Linux editions: MIT. Orion-derived desktop app: GPL-3.0. App names and icons belong to their owners.</p>
+</div></footer>
+</body>
+</html>

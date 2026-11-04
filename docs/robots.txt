@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://bliper2.github.io/optimaxer/sitemap.xml

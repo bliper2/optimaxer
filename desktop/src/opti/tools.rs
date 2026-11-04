@@ -19,6 +19,7 @@ pub enum Tool {
     Dism,
     ResetUpdate,
     IconCache,
+    RestartExplorer,
     StoreCache,
     PerfCounters,
     RegBackup,
@@ -32,7 +33,7 @@ pub struct ToolInfo {
     pub changes_system: bool,
 }
 
-pub const TOOLS: [ToolInfo; 10] = [
+pub const TOOLS: [ToolInfo; 11] = [
     ToolInfo {
         tool: Tool::RestorePoint,
         title: "Create restore point",
@@ -73,6 +74,12 @@ pub const TOOLS: [ToolInfo; 10] = [
         tool: Tool::IconCache,
         title: "Rebuild icon cache",
         desc: "Fixes blank or wrong icons and thumbnails. Restarts Explorer.",
+        changes_system: true,
+    },
+    ToolInfo {
+        tool: Tool::RestartExplorer,
+        title: "Restart File Explorer",
+        desc: "Closes and reopens the desktop shell so interface changes show. Open File Explorer windows close.",
         changes_system: true,
     },
     ToolInfo {
@@ -478,6 +485,15 @@ pub fn run(sys: &dyn System, tool: Tool, backups: &Path, log: &mut dyn FnMut(&st
                 "Windows Update reset incomplete. Review the failed steps."
             });
         }
+        Tool::RestartExplorer => match super::shell::restart_explorer_now(sys, log) {
+            super::shell::Restart::Restarted => log("File Explorer restarted."),
+            super::shell::Restart::NotRunning => {
+                log("File Explorer was not running, so nothing was restarted.")
+            }
+            super::shell::Restart::Failed => {
+                log("File Explorer restart did not finish. Review the messages above.")
+            }
+        },
         Tool::IconCache => {
             if !command_ok(sys, "taskkill.exe", &["/F", "/IM", "explorer.exe"], log) {
                 return;
@@ -503,7 +519,19 @@ pub fn run(sys: &dyn System, tool: Tool, backups: &Path, log: &mut dyn FnMut(&st
                 succeeded = false;
                 log("WARN LOCALAPPDATA is unavailable; cache files were not removed.");
             }
-            succeeded &= command_ok(sys, "cmd.exe", &["/c", "start", "", "explorer.exe"], log);
+            // Windows relaunches the shell after it is killed; start it by hand only if it did not come back.
+            let back = super::shell::ensure_explorer_running(
+                sys,
+                log,
+                super::shell::FALLBACK_WAIT,
+                std::time::Duration::from_millis(400),
+            );
+            if !back {
+                log(
+                    "WARN Explorer is not running. Press Ctrl+Shift+Esc, choose Run new task and enter explorer.exe.",
+                );
+            }
+            succeeded &= back;
             log(if succeeded {
                 "Icon cache rebuilt."
             } else {

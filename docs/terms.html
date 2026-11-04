@@ -4,51 +4,79 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Terms of Service - Optimaxer</title>
+<meta name="description" content="The terms for using Optimaxer and this website: license, what the software changes, your responsibilities, warranty and liability.">
+<link rel="canonical" href="https://bliper2.github.io/optimaxer/terms.html">
 <link rel="icon" href="favicon.ico">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="page">
-<header>
-  <a class="name" href="index.html"><img src="logo.png" alt="">Optimaxer</a>
-  <nav><a href="https://github.com/bliper2/optimaxer/releases/latest">Download</a><a href="https://github.com/bliper2/optimaxer">Source</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a></nav>
-</header>
-
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="in">
+  <a class="brand" href="index.html"><img src="logo.png" alt="">Optimaxer</a>
+  <nav aria-label="Main">
+    <a href="index.html#features">Features</a>
+    <a href="index.html#get">Download</a>
+    <a href="faq.html">FAQ</a>
+    <a href="security.html">Security</a>
+    <a href="privacy.html">Privacy</a>
+    <a href="terms.html" aria-current="page">Terms</a>
+    <a href="https://github.com/bliper2/optimaxer">GitHub</a>
+  </nav>
+</div></header>
+<main id="main" class="prose">
 <h1>Terms of Service</h1>
-<p class="meta">Last updated 28 October 2026</p>
+<p class="meta">Last updated 4 November 2026</p>
 
-<p>By downloading or running Optimaxer, or using this website, you agree to these terms. If you do not agree, do not use them.</p>
+<p>By downloading or running Optimaxer, or by using this website, you agree to these terms. If you do not agree, do not use them.</p>
 
 <h2>License</h2>
-<p>The PowerShell and Linux editions use the <a href="https://github.com/bliper2/optimaxer/blob/main/LICENSE">MIT License</a>. The Orion-derived Rust desktop app uses <a href="https://github.com/bliper2/optimaxer/blob/main/desktop/LICENSE">GPL-3.0</a>. Use, modification and redistribution follow the license for the relevant edition. Product names, logos and app icons belong to their owners and appear only to identify their software.</p>
+<p>The PowerShell and Linux editions use the <a href="https://github.com/bliper2/optimaxer/blob/main/LICENSE">MIT License</a>. The Rust desktop app derives from Orion Store and uses <a href="https://github.com/bliper2/optimaxer/blob/main/desktop/LICENSE">GPL-3.0</a>. Use, modification and redistribution follow the license of the edition you use. Product names, logos and app icons belong to their owners and appear only to identify their software. Notices for code adapted from other projects are in <a href="https://github.com/bliper2/optimaxer/blob/main/THIRD-PARTY-NOTICES.md">THIRD-PARTY-NOTICES.md</a>.</p>
 
 <h2>What the software does</h2>
-<p>Optimaxer changes system settings, services, scheduled tasks, startup entries, the hosts file, installed packages and files, and needs administrator (Windows) or root (Linux) rights to do it. You choose what is applied. Most changes record the original value so they can be undone. Some cannot be: deleted temp and cache files, cleared event logs and the emptied Recycle Bin. Removed apps and packages can be reinstalled but their local data may be gone.</p>
+<p>Optimaxer changes system settings, services, scheduled tasks, startup entries, the hosts file, installed packages and files. It needs administrator rights on Windows or root on Linux to do so. You choose what runs. Most changes record the original value so you can undo them. Some cannot be undone: deleted temporary and cache files, cleared event logs and the emptied Recycle Bin. Removed apps and packages can be reinstalled, but their local data may be gone.</p>
+<p>The desktop app can restart File Explorer after a tweak or Smart Optimize run. Open File Explorer windows close and reopen. You can turn this off in the confirmation window.</p>
 
 <h2>Your responsibility</h2>
 <ul>
-<li>Back up important data and make a restore point or snapshot first. The Windows version offers to create a restore point.</li>
-<li>Read each tweak's description. Those marked Moderate or Advanced can turn off features you use, such as Windows Update, indexing or the Microsoft Store.</li>
+<li>Back up important data and make a restore point or snapshot before large changes. The Windows editions offer to create a restore point.</li>
+<li>Read each tweak's description. Tweaks marked Moderate or Advanced can turn off features you use, such as Windows Update behavior, indexing, BitLocker device encryption or the Microsoft Store.</li>
 <li>Make sure your use is allowed by your employer, school or device administrator, and by the licenses of any software you change or install.</li>
-<li>The Linux edition has been tested only on a simulated system. Use <code>--dry-run</code> first.</li>
+<li>The Linux edition has been tested on a simulated system. Run it with <code>--dry-run</code> first.</li>
 </ul>
 
+<h2>Diagnostics and benchmarks</h2>
+<p>Black Box, Bottleneck Detective, Startup X-Ray, the benchmark tools and the system snapshots report measurements and observations. They do not diagnose faults, and a finding marked as a hypothesis is a guess. Results vary between runs and between PCs. Do not rely on them for decisions about safety, warranty or data recovery.</p>
+
+<h2>Updates</h2>
+<p>The software can check GitHub for new releases. It downloads an update only when you press the update button, and it checks the file against the SHA-256 that GitHub publishes before it replaces anything. A release without a checksum is refused. Updates may change how the software behaves, and you can keep using an older release.</p>
+
 <h2>No warranty</h2>
-<p>The software and this website are provided "as is", without warranty of any kind, including fitness for a particular purpose, any performance gain, compatibility or uninterrupted operation. Results differ between systems.</p>
+<p>The software and this website are provided "as is," without warranty of any kind. That includes fitness for a particular purpose, any performance gain, compatibility and uninterrupted operation. Results differ between systems.</p>
 
 <h2>Limitation of liability</h2>
-<p>To the extent the law allows, the author is not liable for data loss, system instability, downtime, lost profit or any other damage from using the software or website, even if told it was possible. This does not limit any liability that cannot be limited by law.</p>
+<p>To the extent the law allows, the author is not liable for data loss, system instability, downtime, lost profit or any other damage from using the software or website, even if told it was possible. This does not limit any liability that the law does not allow to be limited.</p>
 
-<h2>Third-party software</h2>
-<p>Optimaxer can install software from WinGet, the AUR, Flathub and other sources. That software comes from others, under their terms, and the author does not control or guarantee it. Third-party services the software contacts are listed in the <a href="privacy.html">privacy policy</a>.</p>
+<h2>Third-party software and services</h2>
+<p>Optimaxer can install software from WinGet, the AUR, Flathub and other sources, and it downloads Intel PresentMon for game benchmarks. That software comes from others, under their terms, and the author does not control or guarantee it. Third-party services the software contacts are listed in the <a href="privacy.html">privacy policy</a>.</p>
 
 <h2>Acceptable use</h2>
 <p>Do not use Optimaxer to damage or disrupt systems, or to change systems you do not own or have permission to change.</p>
 
-<h2>Changes</h2>
-<p>These terms may change. The current version is this page; history is in the <a href="https://github.com/bliper2/optimaxer/commits/main/docs/terms.html">repository</a>. Questions: <a href="https://github.com/bliper2/optimaxer/issues">issue tracker</a>.</p>
+<h2>Ending your use</h2>
+<p>You can stop using the software at any time. Undo your tweaks first if you want the original settings back, then delete the program and the folders listed in the <a href="privacy.html">privacy policy</a>.</p>
 
-<footer>PowerShell and Linux: MIT. Orion-derived desktop app: GPL-3.0.</footer>
-</div>
+<h2>If part of these terms does not apply</h2>
+<p>If a court or law makes part of these terms unenforceable, the rest stays in effect.</p>
+
+<h2>Changes</h2>
+<p>These terms may change. The current version is this page, and the history is in the <a href="https://github.com/bliper2/optimaxer/commits/main/docs/terms.html">repository</a>. Questions go to the <a href="https://github.com/bliper2/optimaxer/issues">issue tracker</a>.</p>
+
+</main>
+<footer class="site"><div class="in">
+  <div><h3>Optimaxer</h3><a href="https://github.com/bliper2/optimaxer/releases/latest">Download</a><a href="https://github.com/bliper2/optimaxer">Source code</a><a href="https://github.com/bliper2/optimaxer/issues">Report a bug</a></div>
+  <div><h3>Help</h3><a href="faq.html">FAQ</a><a href="security.html">Security</a><a href="https://github.com/bliper2/optimaxer/blob/main/docs/verification.md">Verification notes</a></div>
+  <div><h3>Legal</h3><a href="privacy.html">Privacy policy</a><a href="terms.html">Terms of service</a><a href="https://github.com/bliper2/optimaxer/blob/main/THIRD-PARTY-NOTICES.md">Third-party notices</a></div>
+  <p class="fine">PowerShell and Linux editions: MIT. Orion-derived desktop app: GPL-3.0. App names and icons belong to their owners.</p>
+</div></footer>
 </body>
 </html>

@@ -2278,6 +2278,7 @@ impl OptiUi {
             Action::ApplyWithoutRestore(ids) => self.run_tweaks(ctx, ids, true, false),
             Action::UndoAll => {
                 let cat = self.cat.clone();
+                let restart_explorer = self.restart_explorer;
                 self.spawn_recorded(ctx, "Undo all Optimaxer tweaks", move |w| {
                     let sys = WinSystem;
                     let mut st = State::load();
@@ -2300,6 +2301,9 @@ impl OptiUi {
                         w.log(&format!("Reverted {n} tweak(s)."));
                     } else {
                         w.log(&format!("WARN Reverted {n} tweak(s); {} NOT undone, their saved values are kept: {}", bad.len(), bad.join(", ")));
+                    }
+                    if restart_explorer && n > 0 {
+                        crate::opti::shell::restart_explorer_now(&sys, &mut |l| w.log(l));
                     }
                     w.send(Msg::Status(eng.status_all(&cat.tweaks, &st)));
                 });
@@ -2529,8 +2533,7 @@ impl OptiUi {
                 }
             }
             if explorer {
-                w.log("Restarting Explorer to apply interface changes");
-                sys.run("taskkill.exe", &["/F", "/IM", "explorer.exe"]);
+                crate::opti::shell::restart_explorer_now(&sys, &mut |l| w.log(l));
             }
             w.log(&format!("Finished: {ok} of {} tweak(s) verified.", ids.len()));
             if restart {
@@ -3133,18 +3136,29 @@ impl OptiUi {
         theme::paint_glow(ui);
         if !self.elevated {
             egui::Frame::new().fill(mix(t.canvas, t.warn, 0.14)).corner_radius(t.card_radius()).inner_margin(Margin::symmetric(S4 as i8, S3 as i8)).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Changes need administrator rights. Everything can be read without them.").color(t.text));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if kit::secondary(ui, "Restart as administrator", true).clicked() {
-                            if hw::relaunch_as_admin() {
-                                self.events.push(OptiEvent::Close);
-                            } else {
-                                self.events.push(OptiEvent::Toast("Administrator access was not granted, so Optimaxer stays in read-only mode.".into()));
-                            }
-                        }
+                let message = RichText::new("Changes need administrator rights. Everything can be read without them.").color(t.text);
+                let mut relaunch = false;
+                if ui.available_width() < 720.0 {
+                    // Narrow windows stack the text above the button instead of clipping it.
+                    ui.vertical(|ui| {
+                        ui.add(egui::Label::new(message).wrap());
+                        relaunch = kit::secondary(ui, "Restart as administrator", true).clicked();
                     });
-                });
+                } else {
+                    ui.horizontal(|ui| {
+                        ui.label(message);
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            relaunch = kit::secondary(ui, "Restart as administrator", true).clicked();
+                        });
+                    });
+                }
+                if relaunch {
+                    if hw::relaunch_as_admin() {
+                        self.events.push(OptiEvent::Close);
+                    } else {
+                        self.events.push(OptiEvent::Toast("Administrator access was not granted, so Optimaxer stays in read-only mode.".into()));
+                    }
+                }
             });
             ui.add_space(S3);
         }
@@ -3302,6 +3316,15 @@ impl OptiUi {
                 if p.restore_option {
                     ui.add_space(S3);
                     ui.checkbox(&mut restore, "Create a System Restore point first");
+                }
+                if matches!(
+                    p.action,
+                    Action::ApplyTweaks(_)
+                        | Action::UndoTweaks(_)
+                        | Action::ApplyWithoutRestore(_)
+                        | Action::UndoAll
+                ) {
+                    ui.add_space(S2);
                     ui.checkbox(&mut explorer_after, "Restart File Explorer afterwards so changes show at once");
                     ui.label(RichText::new("Open File Explorer windows close and reopen. Unsaved work in other programs is not affected.").size(T_CAPTION).color(t.subtle));
                 }
@@ -3489,6 +3512,50 @@ mod tests {
             tags: hw::tags_for(laptop, true, true, 32.0, 16, &gpus, 26100),
             gpus,
             ..Default::default()
+        }
+    }
+
+    /// Draws every page for a few frames against the machine running the test, so a panic in layout or in a loader
+    /// shows up here instead of on a user's desktop. It reads the real system, so it only runs on request.
+    #[test]
+    #[ignore = "draws every page against this PC's real data"]
+    fn every_page_draws_with_real_data_without_panicking() {
+        let ctx = egui::Context::default();
+        let mut settings = Settings::default();
+        for palette in [
+            theme::Palette::System,
+            theme::Palette::NoirGlass,
+            theme::Palette::Onyx,
+        ] {
+            settings.palette = palette;
+            settings.style = if palette == theme::Palette::System {
+                theme::Style::Windows
+            } else {
+                theme::Style::Glass
+            };
+            theme::apply(&ctx, settings.appearance());
+            let mut oui = OptiUi::new();
+            for page in Page::ALL {
+                oui.set_page(&ctx, page);
+                for _ in 0..6 {
+                    let input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            vec2(1100.0, 720.0),
+                        )),
+                        ..Default::default()
+                    };
+                    let mut output = ctx.run_ui(input, |ui| {
+                        oui.tick(ui.ctx(), &mut settings);
+                        oui.side_panel(ui, &ctx, false);
+                        oui.log_panel(ui);
+                        oui.central(ui, &ctx, &[], &mut settings);
+                    });
+                    output.textures_delta.clear();
+                    std::thread::sleep(Duration::from_millis(80));
+                }
+            }
+            assert!(!oui.status_text().is_empty());
         }
     }
 
