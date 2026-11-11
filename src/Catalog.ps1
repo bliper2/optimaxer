@@ -105,9 +105,18 @@ T -Id 'perf-fastboot' -Cat $P -Name 'Disable Fast Startup' -Tags max -Restart `
   -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' 'HiberbootEnabled' 0 )
 
 T -Id 'perf-hibernate' -Cat $P -Name 'Disable hibernation (frees disk space)' -Tags max -Risk Moderate -DesktopOnly `
-  -Desc 'Deletes hiberfil.sys (about 40% of RAM size). Do not use if you rely on hibernate.' `
-  -Apply { powercfg /hibernate off | Out-Null; $null } `
-  -Undo  { powercfg /hibernate on | Out-Null } `
+  -Desc 'Deletes hiberfil.sys (about 40% of RAM size). Do not use if you rely on hibernate. Undo turns hibernation back on only if it was on before.' `
+  -Snapshot {
+      $v = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Power' -ErrorAction SilentlyContinue).HibernateEnabled
+      if ($null -eq $v) { $v = 1 }
+      @{ Prev = [int]$v }
+  } `
+  -Apply { param($d) powercfg /hibernate off | Out-Null } `
+  -Undo  {
+      param($d)
+      if (-not $d -or $null -eq $d.Prev) { throw 'The saved hibernation setting is missing.' }
+      if ([int]$d.Prev -ne 0) { powercfg /hibernate on | Out-Null }
+  } `
   -Test  { (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Power' -ErrorAction SilentlyContinue).HibernateEnabled -eq 0 }
 
 T -Id 'perf-ntfs' -Cat $P -Name 'NTFS: stop last-access timestamp writes' -Tags safe, max `
@@ -496,9 +505,30 @@ T -Id 'svc-disable' -Cat $D -Name 'Services: disable truly useless services' -Ta
   -Svc @( $global:OptiServiceRecs | Where-Object { $_.Start -eq 4 } | ForEach-Object { Sx $_.Name 4 } )
 
 T -Id 'sto-reserved' -Cat $D -Name 'Disable Reserved Storage' -Tags optin -Risk Moderate `
-  -Desc 'Gives back about 7 GB that Windows reserves for updates. Updates may fail on a nearly full disk.' `
-  -Apply { Dism.exe /Online /Set-ReservedStorageState /State:Disabled | Out-Null; $null } `
-  -Undo  { Dism.exe /Online /Set-ReservedStorageState /State:Enabled | Out-Null }
+  -Desc 'Gives back about 7 GB that Windows reserves for updates. Updates may fail on a nearly full disk. Undo restores the previous Reserved Storage state.' `
+  -Snapshot {
+      $o = Invoke-Native Dism.exe @('/Online', '/Get-ReservedStorageState')
+      if ($o -match '(?i)Reserved storage is (Enabled|Disabled)') { @{ Prev = $Matches[1] } }
+      elseif ($o -match '(?i)State\s*:\s*(Enabled|Disabled)') { @{ Prev = $Matches[1] } }
+      else { throw "Could not read the Reserved Storage state. $o" }
+  } `
+  -Apply {
+      param($d)
+      $o = Invoke-Native Dism.exe @('/Online', '/Set-ReservedStorageState', '/State:Disabled')
+      if ($global:OptiExit -ne 0) { throw "Could not disable Reserved Storage: $o" }
+  } `
+  -Undo {
+      param($d)
+      $prev = [string]$d.Prev
+      if (-not $d -or $prev -notmatch '^(?i)(Enabled|Disabled)$') { throw 'The saved Reserved Storage state is missing or invalid.' }
+      if ($prev -ieq 'Disabled') { return }
+      $o = Invoke-Native Dism.exe @('/Online', '/Set-ReservedStorageState', '/State:Enabled')
+      if ($global:OptiExit -ne 0) { throw "Could not restore Reserved Storage: $o" }
+  } `
+  -Test {
+      $o = Invoke-Native Dism.exe @('/Online', '/Get-ReservedStorageState')
+      $global:OptiExit -eq 0 -and $o -match '(?i)Reserved storage is Disabled|State\s*:\s*Disabled'
+  }
 
 # ======================================================================= INTERFACE
 $I = 'Interface & Explorer'

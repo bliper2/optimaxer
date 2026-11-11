@@ -1,4 +1,4 @@
-//! The tweak catalog. The 217 tweaks come from Optimaxer's PowerShell catalog, exported once by
+//! The tweak catalog. The 225 tweaks come from Optimaxer's PowerShell catalog, exported once by
 //! `tools/export-optimaxer.ps1` into `assets/optimaxer/tweaks.json`. Registry, service and scheduled-task tweaks
 //! are plain data. Tweaks that ran scripts are mapped to a `Special` port, or listed as not ported.
 
@@ -187,8 +187,8 @@ mod tests {
     #[test]
     fn embedded_catalog_parses_and_ids_are_unique() {
         let c = Catalog::parse(EMBEDDED).unwrap();
-        assert_eq!(c.tweaks.len() + c.not_ported.len(), 217);
-        assert_eq!(c.not_ported.len(), 11);
+        assert_eq!(c.tweaks.len() + c.not_ported.len(), 225);
+        assert_eq!(c.not_ported.len(), 12);
         let ids: HashSet<_> = c.tweaks.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids.len(), c.tweaks.len());
         assert!(
@@ -247,10 +247,18 @@ mod tests {
         assert!(c.find("net-smb1").unwrap().special.is_none());
         assert!(!c.find("net-smb1").unwrap().reg.is_empty());
         assert!(c.not_ported.iter().any(|s| s.id == "debloat-onedrive"));
+        assert!(c.not_ported.iter().any(|s| s.id == "net-ipv6-off"));
         assert!(
             c.find("ai-settingspage")
                 .is_some_and(|t| t.special.is_some())
         );
+        assert!(
+            c.find("ui-settingshome")
+                .is_some_and(|t| t.special.is_some())
+        );
+        assert!(c.find("ui-explorer-home").is_some());
+        assert!(c.find("ui-mmtaskbar-whenfull").is_some());
+        assert!(c.find("net-ipv6-off").is_none());
         assert!(
             c.find("ui-thispc-folders")
                 .is_some_and(|t| t.special.is_some())
@@ -330,6 +338,27 @@ mod tests {
                 .filter(|t| t.conflict == "search style")
                 .count()
                 >= 2
+        );
+        assert!(
+            c.tweaks
+                .iter()
+                .filter(|t| t.conflict == "Explorer opens to")
+                .count()
+                >= 3
+        );
+        assert_eq!(
+            c.tweaks
+                .iter()
+                .filter(|t| t.conflict == "secondary taskbar buttons")
+                .count(),
+            3
+        );
+        assert!(c.find("ui-start-webview").is_some_and(|tweak| {
+            tweak.has_tag("optin") && tweak.risk == "Moderate" && !tweak.auto_pick()
+        }));
+        assert!(
+            c.find("ui-classic-outlook")
+                .is_some_and(|tweak| { !tweak.auto_pick() && tweak.tags.is_empty() })
         );
     }
 }

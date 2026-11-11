@@ -525,9 +525,7 @@ impl SoftwareUi {
             .iter()
             .filter(|package| {
                 let in_category = self.category == "All" || package.category == self.category;
-                let installed = self
-                    .installed
-                    .contains_key(&package.id.to_ascii_lowercase());
+                let installed = winget::installed_package(&self.installed, &package.id).is_some();
                 let in_state = !self.installed_only || installed;
                 let in_query = query.is_empty()
                     || package.name.to_lowercase().contains(&query)
@@ -586,7 +584,7 @@ impl SoftwareUi {
             return;
         }
         let is_installed =
-            |ui_self: &Self, id: &str| ui_self.installed.contains_key(&id.to_ascii_lowercase());
+            |ui_self: &Self, id: &str| winget::installed_package(&ui_self.installed, id).is_some();
         let picked: Vec<Package> = self
             .packages
             .iter()
@@ -661,10 +659,8 @@ impl SoftwareUi {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for package in &visible {
-                    let installed = self
-                        .installed
-                        .get(&package.id.to_ascii_lowercase())
-                        .cloned();
+                    let installed =
+                        winget::installed_package(&self.installed, &package.id).cloned();
                     let chosen = self.selected.contains(&package.id);
                     kit::row(ui, ("winget-package", &package.id), chosen, |ui| {
                         ui.horizontal_wrapped(|ui| {

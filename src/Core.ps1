@@ -1598,13 +1598,19 @@ function Invoke-WingetPackages {
         if ([string]::IsNullOrWhiteSpace($program)) { continue }
         $n++
         $upgradeAll = $Action -eq 'Upgrade' -and $program -eq 'all'
+        $source = 'winget'
+        $packageId = $program
+        if (-not $upgradeAll -and $program -like 'msstore:*') {
+            $source = 'msstore'
+            $packageId = $program.Substring(8)
+        }
         Write-Log "[$n/$total] $Action $program"
 
         $arguments = switch ($Action) {
-            'Uninstall' { @('uninstall', '--id', $program, '--source', 'winget', '--silent') }
+            'Uninstall' { @('uninstall', '--id', $packageId, '--source', $source, '--silent') }
             'Upgrade'   { if ($upgradeAll) { @('upgrade', '--all', '--accept-package-agreements', '--accept-source-agreements', '--include-unknown', '--silent') }
-                          else { @('upgrade', '--id', $program, '--accept-package-agreements', '--accept-source-agreements', '--source', 'winget', '--include-unknown', '--silent') } }
-            default     { @('install', '--id', $program, '--accept-package-agreements', '--accept-source-agreements', '--source', 'winget', '--silent') }
+                          else { @('upgrade', '--id', $packageId, '--accept-package-agreements', '--accept-source-agreements', '--source', $source, '--include-unknown', '--silent') } }
+            default     { @('install', '--id', $packageId, '--accept-package-agreements', '--accept-source-agreements', '--source', $source, '--silent') }
         }
 
         $outFile = [IO.Path]::GetTempFileName(); $errFile = [IO.Path]::GetTempFileName()
@@ -1623,7 +1629,7 @@ function Invoke-WingetPackages {
             $detail = if ($exit -eq 0) { 'exit code 0' } else { $rebootCodes[$exit] }
             # do not trust the exit code alone: confirm the package state changed
             if (-not $upgradeAll) {
-                $null = winget list --id $program --exact --accept-source-agreements 2>&1
+                $null = winget list --id $packageId --exact --accept-source-agreements 2>&1
                 $listed = ($LASTEXITCODE -eq 0)
                 if ($Action -eq 'Install' -and -not $listed) { Write-Log ("    winget reported success ({0}) but {1} is not listed as installed" -f $detail, $program) 'WARN'; $failed += $program; continue }
                 if ($Action -eq 'Uninstall' -and $listed) { Write-Log "    winget reported success but $program is still listed" 'WARN'; $failed += $program; continue }
