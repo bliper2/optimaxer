@@ -153,8 +153,8 @@ Microsoft.BingNews|Microsoft News|R
 Microsoft.BingWeather|Weather|R
 Microsoft.BingFinance|Money|R
 Microsoft.BingSports|Sports|R
-Microsoft.BingSearch|Bing Search|R
-Microsoft.GetHelp|Get Help|R
+Microsoft.BingSearch|Bing Search|O
+Microsoft.GetHelp|Get Help|O
 Microsoft.Getstarted|Tips|R
 Microsoft.MicrosoftOfficeHub|Office hub (ad launcher)|R
 Microsoft.MicrosoftSolitaireCollection|Solitaire Collection|R
@@ -191,7 +191,7 @@ Microsoft.GamingApp|Xbox app|O
 Microsoft.XboxApp|Xbox console companion|O
 Microsoft.XboxGamingOverlay|Xbox Game Bar|O
 Microsoft.XboxGameOverlay|Xbox Game overlay|O
-Microsoft.Xbox.TCUI|Xbox TCUI|O
+Microsoft.Xbox.TCUI|Xbox TCUI (needed for Xbox sign-in)|C
 Microsoft.XboxSpeechToTextOverlay|Xbox speech overlay|O
 Microsoft.XboxIdentityProvider|Xbox identity provider (needed for Xbox sign-in)|C
 *Copilot*|Copilot (all packages)|R
@@ -199,6 +199,7 @@ MicrosoftWindows.Client.WebExperience|Widgets web experience|O
 Microsoft.WidgetsPlatformRuntime|Widgets runtime|O
 Microsoft.Edge.GameAssist|Edge Game Assist|O
 Microsoft.PCManager|PC Manager|R
+Microsoft.MicrosoftPCManager|PC Manager (alternate package id)|R
 Microsoft.Windows.AIHub|Copilot+ AI Hub|R
 MicrosoftWindows.Client.AIX|Windows AI experience (system component)|C
 MicrosoftWindows.Client.CoreAI|Windows AI core (system component)|C
@@ -276,6 +277,14 @@ LenovoCompanyLimited.*|Lenovo services|O
 *Duolingo*|Duolingo|R
 *Roblox*|Roblox|R
 *Solitaire*|Solitaire|R
+MicrosoftCorporationII.Windows365|Windows 365|O
+Microsoft.SurfaceHub|Surface Hub|O
+AcerIncorporated.*|Acer preinstalled apps|O
+B9ECED6F.*|ASUS preinstalled apps|O
+SAMSUNGELECTRONICSCoLtd.*|Samsung apps|O
+SAMSUNGELECTRONICSCO.LTD.*|Samsung apps (alternate publisher id)|O
+9426MICRO-STARINTERNATION.*|MSI Center and preinstalled apps|O
+E0469640.SmartAppearance|Lenovo Smart Appearance|O
 '@ -split "`r?`n" | Where-Object { $_ } | ForEach-Object {
     $p = $_ -split '\|'
     [pscustomobject]@{ Id = $p[0]; Name = $p[1]; Level = $p[2] }

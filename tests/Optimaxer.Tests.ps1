@@ -183,6 +183,21 @@ It 'presets tick at most one tweak per conflict group' {
         Assert ($g.Count -eq 0) "$p preset has two of: $($g.Name -join ', ')"
     }
     Assert (@($global:OptiCatalog | Where-Object { $_.Conflict -eq 'search style' }).Count -ge 2) 'search style group missing'
+    Assert (@($global:OptiCatalog | Where-Object { $_.Conflict -eq 'secondary taskbar grouping' }).Count -eq 2) 'secondary taskbar grouping'
+    Assert (@($global:OptiCatalog | Where-Object { $_.Conflict -eq 'secondary taskbar buttons' }).Count -eq 3) 'secondary taskbar buttons'
+}
+It 'risky catalog additions stay opt-in and out of presets' {
+    $webview = Get-TweakById 'ui-start-webview'
+    Assert ($webview.Tags -contains 'optin' -and $webview.Risk -eq 'Moderate') 'ui-start-webview safety'
+    $ipv6 = Get-TweakById 'net-ipv6-off'
+    Assert ($ipv6.Tags -contains 'optin' -and $ipv6.Risk -eq 'Advanced') 'net-ipv6-off safety'
+    $kept = 'ui-start-webview', 'net-ipv6-off', 'ui-classic-outlook', 'ui-explorer-home', 'ui-explorer-od', 'ui-mmtaskbar-whenfull', 'ui-mmtaskbar-all', 'ui-search-box'
+    foreach ($p in 'max', 'safe', 'privacy', 'deai', 'gaming') {
+        $ids = @(Get-PresetTweakIds $p $refPC)
+        foreach ($id in $kept) { Assert ($ids -notcontains $id) "$id in $p" }
+    }
+    Assert ((Get-SmartPlan $refPC @{}).Ids -notcontains 'net-ipv6-off') 'ipv6 auto-selected'
+    Assert ((Get-SmartPlan $refPC @{}).Ids -notcontains 'ui-start-webview') 'webview auto-selected'
 }
 
 Write-Host 'engine'

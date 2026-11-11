@@ -445,7 +445,7 @@
     {
         "id":  "perf-hibernate",
         "name":  "Disable hibernation (frees disk space)",
-        "desc":  "Deletes hiberfil.sys (about 40% of RAM size). Do not use if you rely on hibernate.",
+        "desc":  "Deletes hiberfil.sys (about 40% of RAM size). Do not use if you rely on hibernate. Undo turns hibernation back on only if it was on before.",
         "cat":  "Performance",
         "risk":  "Moderate",
         "tags":  [
@@ -476,9 +476,9 @@
                        "apply":  true,
                        "undo":  true,
                        "test":  true,
-                       "snapshot":  false
+                       "snapshot":  true
                    },
-        "apply_text":  " powercfg /hibernate off | Out-Null; $null "
+        "apply_text":  " param($d) powercfg /hibernate off | Out-Null "
     },
     {
         "id":  "perf-ntfs",
@@ -3250,7 +3250,7 @@
     {
         "id":  "sto-reserved",
         "name":  "Disable Reserved Storage",
-        "desc":  "Gives back about 7 GB that Windows reserves for updates. Updates may fail on a nearly full disk.",
+        "desc":  "Gives back about 7 GB that Windows reserves for updates. Updates may fail on a nearly full disk. Undo restores the previous Reserved Storage state.",
         "cat":  "Debloat",
         "risk":  "Moderate",
         "tags":  [
@@ -3280,10 +3280,10 @@
         "script":  {
                        "apply":  true,
                        "undo":  true,
-                       "test":  false,
-                       "snapshot":  false
+                       "test":  true,
+                       "snapshot":  true
                    },
-        "apply_text":  " Dism.exe /Online /Set-ReservedStorageState /State:Disabled | Out-Null; $null "
+        "apply_text":  "\r\n      param($d)\r\n      $o = Invoke-Native Dism.exe @(\u0027/Online\u0027, \u0027/Set-ReservedStorageState\u0027, \u0027/State:Disabled\u0027)\r\n      if ($global:OptiExit -ne 0) { throw \"Could not disable Reserved Storage: $o\" }\r\n  "
     },
     {
         "id":  "ui-ext",
@@ -7168,6 +7168,12 @@
                         "n":  "UrlKeyedAnonymizedDataCollectionEnabled",
                         "v":  0,
                         "t":  "DWord"
+                    },
+                    {
+                        "p":  "HKLM:\\SOFTWARE\\Policies\\BraveSoftware\\Brave",
+                        "n":  "TorDisabled",
+                        "v":  1,
+                        "t":  "DWord"
                     }
                 ],
         "svc":  [
@@ -8105,19 +8111,14 @@
     {
         "id":  "ui-settingshome",
         "name":  "Hide the Settings home page",
-        "desc":  "Settings opens on System instead of the Home page with cloud and account promos.",
+        "desc":  "Settings opens on System instead of the Home page with cloud and account promos. Merges with other hide: entries (for example AI components) instead of overwriting them.",
         "cat":  "Interface \u0026 Explorer",
         "risk":  "Safe",
         "tags":  [
 
                  ],
         "reg":  [
-                    {
-                        "p":  "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer",
-                        "n":  "SettingsPageVisibility",
-                        "v":  "hide:home",
-                        "t":  "String"
-                    }
+
                 ],
         "svc":  [
 
@@ -8138,12 +8139,12 @@
         "conflict":  "",
         "retired":  "",
         "script":  {
-                       "apply":  false,
-                       "undo":  false,
-                       "test":  false,
+                       "apply":  true,
+                       "undo":  true,
+                       "test":  true,
                        "snapshot":  false
                    },
-        "apply_text":  ""
+        "apply_text":  "\r\n      $k = \u0027HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\u0027\r\n      $snap = Get-RegSnapshot @{ P = $k; N = \u0027SettingsPageVisibility\u0027 }\r\n      $cur = if ($snap.Exists) { [string]$snap.Value } else { \u0027\u0027 }\r\n      if ($cur -like \u0027showonly:*\u0027) { Write-Log \u0027  Settings page visibility is in \"show only\" mode; not changed\u0027 \u0027WARN\u0027; return @{ Existed = [bool]$snap.Exists; Value = $cur; Changed = $false } }\r\n      if ($cur -notmatch \u0027(^|[:;])home(;|$)\u0027) {\r\n          $new = if ($cur -like \u0027hide:*\u0027) { $cur.TrimEnd(\u0027;\u0027) + \u0027;home\u0027 } else { \u0027hide:home\u0027 }\r\n          Set-RegEntry $k \u0027SettingsPageVisibility\u0027 $new \u0027String\u0027\r\n      }\r\n      @{ Existed = [bool]$snap.Exists; Value = $cur; Changed = $true }\r\n  "
     },
     {
         "id":  "ui-sharetray",
@@ -8234,7 +8235,7 @@
     {
         "id":  "ui-legacyboot",
         "name":  "Classic boot menu (F8 advanced options)",
-        "desc":  "bcdedit bootmenupolicy legacy: F8 works at boot for Safe Mode. Undo sets it back to standard.",
+        "desc":  "bcdedit bootmenupolicy legacy: F8 works at boot for Safe Mode. Undo restores the previous policy, not a guessed default.",
         "cat":  "Interface \u0026 Explorer",
         "risk":  "Moderate",
         "tags":  [
@@ -8265,9 +8266,9 @@
                        "apply":  true,
                        "undo":  true,
                        "test":  true,
-                       "snapshot":  false
+                       "snapshot":  true
                    },
-        "apply_text":  " bcdedit /set \u0027{default}\u0027 bootmenupolicy legacy | Out-Null; $null "
+        "apply_text":  " param($d) bcdedit /set \u0027{default}\u0027 bootmenupolicy legacy | Out-Null "
     },
     {
         "id":  "priv-searchhistory",
@@ -10348,7 +10349,7 @@
         "need":  [
 
                  ],
-        "conflict":  "",
+        "conflict":  "secondary taskbar grouping",
         "retired":  "",
         "script":  {
                        "apply":  false,
@@ -10391,7 +10392,7 @@
         "need":  [
 
                  ],
-        "conflict":  "",
+        "conflict":  "secondary taskbar buttons",
         "retired":  "",
         "script":  {
                        "apply":  false,
@@ -10434,7 +10435,7 @@
         "need":  [
 
                  ],
-        "conflict":  "",
+        "conflict":  "secondary taskbar buttons",
         "retired":  "",
         "script":  {
                        "apply":  false,
@@ -11263,5 +11264,361 @@
                        "snapshot":  true
                    },
         "apply_text":  "\r\n      param($d)\r\n      $o = Invoke-Native fsutil.exe @(\u0027behavior\u0027, \u0027set\u0027, \u0027DisableDeleteNotify\u0027, \u0027NTFS\u0027, \u00270\u0027)\r\n      if ($global:OptiExit -ne 0) { throw \"Could not enable NTFS TRIM: $o\" }\r\n  "
+    },
+    {
+        "id":  "ui-mmtaskbar-whenfull",
+        "name":  "Secondary taskbars: combine buttons only when full",
+        "desc":  "Adapted from Win11Debloat: taskbars on extra monitors show labels until they run out of room, then combine them.",
+        "cat":  "Interface \u0026 Explorer",
+        "risk":  "Safe",
+        "tags":  [
+
+                 ],
+        "reg":  [
+                    {
+                        "p":  "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+                        "n":  "MMTaskbarGlomLevel",
+                        "v":  1,
+                        "t":  "DWord"
+                    }
+                ],
+        "svc":  [
+
+                ],
+        "task":  [
+
+                 ],
+        "restart":  false,
+        "explorer":  true,
+        "desktop_only":  false,
+        "ssd_only":  false,
+        "vendor":  "",
+        "svc_tol":  1,
+        "min_ram":  0,
+        "need":  [
+
+                 ],
+        "conflict":  "secondary taskbar grouping",
+        "retired":  "",
+        "script":  {
+                       "apply":  false,
+                       "undo":  false,
+                       "test":  false,
+                       "snapshot":  false
+                   },
+        "apply_text":  ""
+    },
+    {
+        "id":  "ui-mmtaskbar-all",
+        "name":  "Extra monitors: show every window on every taskbar",
+        "desc":  "Adapted from Win11Debloat: the same buttons appear on the main taskbar and on every extra monitor. This is the Windows default; use it to switch back from the other extra-monitor layouts.",
+        "cat":  "Interface \u0026 Explorer",
+        "risk":  "Safe",
+        "tags":  [
+
+                 ],
+        "reg":  [
+                    {
+                        "p":  "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+                        "n":  "MMTaskbarMode",
+                        "v":  0,
+                        "t":  "DWord"
+                    }
+                ],
+        "svc":  [
+
+                ],
+        "task":  [
+
+                 ],
+        "restart":  false,
+        "explorer":  true,
+        "desktop_only":  false,
+        "ssd_only":  false,
+        "vendor":  "",
+        "svc_tol":  1,
+        "min_ram":  0,
+        "need":  [
+
+                 ],
+        "conflict":  "secondary taskbar buttons",
+        "retired":  "",
+        "script":  {
+                       "apply":  false,
+                       "undo":  false,
+                       "test":  false,
+                       "snapshot":  false
+                   },
+        "apply_text":  ""
+    },
+    {
+        "id":  "ui-explorer-home",
+        "name":  "Open Explorer to Home",
+        "desc":  "Adapted from Win11Debloat: File Explorer starts on the Home page (LaunchTo = 2) instead of This PC, Downloads or OneDrive.",
+        "cat":  "Interface \u0026 Explorer",
+        "risk":  "Safe",
+        "tags":  [
+
+                 ],
+        "reg":  [
+                    {
+                        "p":  "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+                        "n":  "LaunchTo",
+                        "v":  2,
+                        "t":  "DWord"
+                    }
+                ],
+        "svc":  [
+
+                ],
+        "task":  [
+
+                 ],
+        "restart":  false,
+        "explorer":  true,
+        "desktop_only":  false,
+        "ssd_only":  false,
+        "vendor":  "",
+        "svc_tol":  1,
+        "min_ram":  0,
+        "need":  [
+
+                 ],
+        "conflict":  "Explorer opens to",
+        "retired":  "",
+        "script":  {
+                       "apply":  false,
+                       "undo":  false,
+                       "test":  false,
+                       "snapshot":  false
+                   },
+        "apply_text":  ""
+    },
+    {
+        "id":  "ui-explorer-od",
+        "name":  "Open Explorer to OneDrive",
+        "desc":  "Adapted from Win11Debloat: File Explorer starts in your OneDrive folder (LaunchTo = 4).",
+        "cat":  "Interface \u0026 Explorer",
+        "risk":  "Safe",
+        "tags":  [
+
+                 ],
+        "reg":  [
+                    {
+                        "p":  "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+                        "n":  "LaunchTo",
+                        "v":  4,
+                        "t":  "DWord"
+                    }
+                ],
+        "svc":  [
+
+                ],
+        "task":  [
+
+                 ],
+        "restart":  false,
+        "explorer":  true,
+        "desktop_only":  false,
+        "ssd_only":  false,
+        "vendor":  "",
+        "svc_tol":  1,
+        "min_ram":  0,
+        "need":  [
+
+                 ],
+        "conflict":  "Explorer opens to",
+        "retired":  "",
+        "script":  {
+                       "apply":  false,
+                       "undo":  false,
+                       "test":  false,
+                       "snapshot":  false
+                   },
+        "apply_text":  ""
+    },
+    {
+        "id":  "ui-search-box",
+        "name":  "Taskbar search: full search box",
+        "desc":  "Adapted from Win11Debloat: shows the full search box on the taskbar (SearchboxTaskbarMode = 2). This is the usual Windows 11 default; use it to switch back from the icon or hidden styles.",
+        "cat":  "Interface \u0026 Explorer",
+        "risk":  "Safe",
+        "tags":  [
+
+                 ],
+        "reg":  [
+                    {
+                        "p":  "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Search",
+                        "n":  "SearchboxTaskbarMode",
+                        "v":  2,
+                        "t":  "DWord"
+                    }
+                ],
+        "svc":  [
+
+                ],
+        "task":  [
+
+                 ],
+        "restart":  false,
+        "explorer":  true,
+        "desktop_only":  false,
+        "ssd_only":  false,
+        "vendor":  "",
+        "svc_tol":  1,
+        "min_ram":  0,
+        "need":  [
+
+                 ],
+        "conflict":  "search style",
+        "retired":  "",
+        "script":  {
+                       "apply":  false,
+                       "undo":  false,
+                       "test":  false,
+                       "snapshot":  false
+                   },
+        "apply_text":  ""
+    },
+    {
+        "id":  "ui-start-webview",
+        "name":  "Start menu: turn off the WebView2 shell",
+        "desc":  "Adapted from Win11Debloat (Windows 11, build 22000 and newer): sets the feature override (1694661260) that stops Start from hosting WebView2 content. Undo removes the override key if it was not there before, or restores the previous value.",
+        "cat":  "Interface \u0026 Explorer",
+        "risk":  "Moderate",
+        "tags":  [
+                     "optin"
+                 ],
+        "reg":  [
+                    {
+                        "p":  "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FeatureManagement\\Overrides\\8\\1694661260",
+                        "n":  "EnabledState",
+                        "v":  1,
+                        "t":  "DWord"
+                    }
+                ],
+        "svc":  [
+
+                ],
+        "task":  [
+
+                 ],
+        "restart":  false,
+        "explorer":  true,
+        "desktop_only":  false,
+        "ssd_only":  false,
+        "vendor":  "",
+        "svc_tol":  1,
+        "min_ram":  0,
+        "need":  [
+
+                 ],
+        "conflict":  "",
+        "retired":  "",
+        "script":  {
+                       "apply":  false,
+                       "undo":  false,
+                       "test":  false,
+                       "snapshot":  false
+                   },
+        "apply_text":  ""
+    },
+    {
+        "id":  "ui-classic-outlook",
+        "name":  "Keep classic Outlook: do not auto-switch to new Outlook",
+        "desc":  "Adapted from Chris Titus Tech WinUtil: stays on classic Outlook (UseNewOutlook = 0) and turns off the automatic migration policy. The new Outlook app is not uninstalled. Not applied by presets.",
+        "cat":  "Interface \u0026 Explorer",
+        "risk":  "Safe",
+        "tags":  [
+
+                 ],
+        "reg":  [
+                    {
+                        "p":  "HKCU:\\SOFTWARE\\Microsoft\\Office\\16.0\\Outlook\\Preferences",
+                        "n":  "UseNewOutlook",
+                        "v":  0,
+                        "t":  "DWord"
+                    },
+                    {
+                        "p":  "HKCU:\\Software\\Policies\\Microsoft\\Office\\16.0\\Outlook\\Options\\General",
+                        "n":  "DoNewOutlookAutoMigration",
+                        "v":  0,
+                        "t":  "DWord"
+                    },
+                    {
+                        "p":  "HKCU:\\Software\\Policies\\Microsoft\\Office\\16.0\\Outlook\\Preferences",
+                        "n":  "NewOutlookMigrationUserSetting",
+                        "v":  0,
+                        "t":  "DWord"
+                    }
+                ],
+        "svc":  [
+
+                ],
+        "task":  [
+
+                 ],
+        "restart":  false,
+        "explorer":  false,
+        "desktop_only":  false,
+        "ssd_only":  false,
+        "vendor":  "",
+        "svc_tol":  1,
+        "min_ram":  0,
+        "need":  [
+
+                 ],
+        "conflict":  "",
+        "retired":  "",
+        "script":  {
+                       "apply":  false,
+                       "undo":  false,
+                       "test":  false,
+                       "snapshot":  false
+                   },
+        "apply_text":  ""
+    },
+    {
+        "id":  "net-ipv6-off",
+        "name":  "Disable IPv6 completely",
+        "desc":  "Adapted from Chris Titus Tech WinUtil: sets DisabledComponents = 255 and unbinds the IPv6 protocol from every network adapter. This can break IPv6-only or IPv6-preferred networks. Undo restores the previous registry value and re-binds IPv6 only on the adapters that had it enabled.",
+        "cat":  "Network",
+        "risk":  "Advanced",
+        "tags":  [
+                     "optin"
+                 ],
+        "reg":  [
+                    {
+                        "p":  "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters",
+                        "n":  "DisabledComponents",
+                        "v":  255,
+                        "t":  "DWord"
+                    }
+                ],
+        "svc":  [
+
+                ],
+        "task":  [
+
+                 ],
+        "restart":  true,
+        "explorer":  false,
+        "desktop_only":  false,
+        "ssd_only":  false,
+        "vendor":  "",
+        "svc_tol":  1,
+        "min_ram":  0,
+        "need":  [
+
+                 ],
+        "conflict":  "",
+        "retired":  "",
+        "script":  {
+                       "apply":  true,
+                       "undo":  true,
+                       "test":  true,
+                       "snapshot":  true
+                   },
+        "apply_text":  " param($d) Disable-NetAdapterBinding -Name * -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue "
     }
 ]

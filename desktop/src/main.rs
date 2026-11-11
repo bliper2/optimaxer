@@ -38,7 +38,23 @@ fn window_icon() -> egui::IconData {
     }
 }
 
+/// Groups the running window with a pinned shortcut under one identity so the
+/// taskbar can show the embedded exe icon instead of a generic document icon.
+fn set_app_user_model_id() {
+    #[cfg(windows)]
+    {
+        const ID: &str = "Optimaxer.OrionStore";
+        let wide: Vec<u16> = ID.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe {
+            let _ = windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(
+                wide.as_ptr(),
+            );
+        }
+    }
+}
+
 fn main() -> eframe::Result {
+    set_app_user_model_id();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_icon(window_icon())

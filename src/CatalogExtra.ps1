@@ -518,6 +518,7 @@ T -Id 'br-brave-debloat' -Cat $B -Name 'Brave: remove Rewards, Wallet, VPN, News
       Rg $BRV 'SafeBrowsingExtendedReportingEnabled' 0
       Rg $BRV 'BraveP3AEnabled' 0
       Rg $BRV 'UrlKeyedAnonymizedDataCollectionEnabled' 0
+      Rg $BRV 'TorDisabled' 1
   )
 
 T -Id 'br-edge-debloat' -Cat $B -Name 'Edge: remove new-tab feed, workspaces, Bing ads and promos' -Tags privacy, max, deai `
@@ -687,8 +688,28 @@ T -Id 'ui-notifs-off' -Cat $I -Name 'Turn off all toast notifications' -Risk Mod
   -Reg @( Rg "$CV\PushNotifications" 'ToastEnabled' 0 )
 
 T -Id 'ui-settingshome' -Cat $I -Name 'Hide the Settings home page' `
-  -Desc 'Settings opens on System instead of the Home page with cloud and account promos.' `
-  -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'SettingsPageVisibility' 'hide:home' 'String' )
+  -Desc 'Settings opens on System instead of the Home page with cloud and account promos. Merges with other hide: entries (for example AI components) instead of overwriting them.' `
+  -Apply {
+      $k = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'
+      $snap = Get-RegSnapshot @{ P = $k; N = 'SettingsPageVisibility' }
+      $cur = if ($snap.Exists) { [string]$snap.Value } else { '' }
+      if ($cur -like 'showonly:*') { Write-Log '  Settings page visibility is in "show only" mode; not changed' 'WARN'; return @{ Existed = [bool]$snap.Exists; Value = $cur; Changed = $false } }
+      if ($cur -notmatch '(^|[:;])home(;|$)') {
+          $new = if ($cur -like 'hide:*') { $cur.TrimEnd(';') + ';home' } else { 'hide:home' }
+          Set-RegEntry $k 'SettingsPageVisibility' $new 'String'
+      }
+      @{ Existed = [bool]$snap.Exists; Value = $cur; Changed = $true }
+  } `
+  -Undo {
+      param($d)
+      if (-not $d -or -not $d.Changed) { return }
+      $k = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'
+      if ($d.Existed) { Set-RegEntry $k 'SettingsPageVisibility' $d.Value 'String' } else { Remove-RegEntry $k 'SettingsPageVisibility' }
+  } `
+  -Test {
+      $v = (Get-RegSnapshot @{ P = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'; N = 'SettingsPageVisibility' }).Value
+      [bool]($v -and ([string]$v -match '(^|[:;])home(;|$)'))
+  }
 
 T -Id 'ui-sharetray' -Cat $I -Name 'Disable the Share drag tray' -Tags max `
   -Desc 'Stops the "drag files here to share" tray that appears when dragging files to the top of the screen.' `
@@ -699,9 +720,18 @@ T -Id 'ui-phonelink-start' -Cat $I -Name 'Hide Phone Link in the Start menu' -Ta
   -Reg @( Rg "$CV\Start\Companions\Microsoft.YourPhone_8wekyb3d8bbwe" 'IsEnabled' 0 )
 
 T -Id 'ui-legacyboot' -Cat $I -Name 'Classic boot menu (F8 advanced options)' -Risk Moderate `
-  -Desc 'bcdedit bootmenupolicy legacy: F8 works at boot for Safe Mode. Undo sets it back to standard.' `
-  -Apply { bcdedit /set '{default}' bootmenupolicy legacy | Out-Null; $null } `
-  -Undo  { bcdedit /set '{default}' bootmenupolicy standard | Out-Null } `
+  -Desc 'bcdedit bootmenupolicy legacy: F8 works at boot for Safe Mode. Undo restores the previous policy, not a guessed default.' `
+  -Snapshot {
+      $o = bcdedit /enum '{current}' | Out-String
+      $prev = if ($o -match 'bootmenupolicy\s+(\S+)') { $Matches[1] } else { 'standard' }
+      @{ Prev = $prev }
+  } `
+  -Apply { param($d) bcdedit /set '{default}' bootmenupolicy legacy | Out-Null } `
+  -Undo  {
+      param($d)
+      if (-not $d -or [string]::IsNullOrWhiteSpace([string]$d.Prev)) { throw 'The saved boot menu policy is missing.' }
+      bcdedit /set '{default}' bootmenupolicy $d.Prev | Out-Null
+  } `
   -Test  { (bcdedit /enum '{current}' | Out-String) -match 'bootmenupolicy\s+Legacy' }
 
 # ---- privacy / debloat
@@ -1054,15 +1084,15 @@ T -Id 'ui-taskbar-whenfull' -Conflict 'taskbar grouping' -Cat $I -Name 'Taskbar:
   -Desc 'Adapted from Win11Debloat: the main taskbar shows labels until it runs out of room, then combines them.' `
   -Reg @( Rg $EXA 'TaskbarGlomLevel' 1 )
 
-T -Id 'ui-taskbar-labels2' -Cat $I -Name 'Secondary taskbars: never combine buttons' -Tags max -Explorer `
+T -Id 'ui-taskbar-labels2' -Conflict 'secondary taskbar grouping' -Cat $I -Name 'Secondary taskbars: never combine buttons' -Tags max -Explorer `
   -Desc 'Adapted from Win11Debloat: taskbars on extra monitors show a separate labeled button for every window.' `
   -Reg @( Rg $EXA 'MMTaskbarGlomLevel' 2 )
 
-T -Id 'ui-mmtaskbar-main' -Cat $I -Name 'Extra monitors: show a window on the main taskbar too' -Explorer `
+T -Id 'ui-mmtaskbar-main' -Conflict 'secondary taskbar buttons' -Cat $I -Name 'Extra monitors: show a window on the main taskbar too' -Explorer `
   -Desc 'Adapted from Win11Debloat: an app appears on the main taskbar and on the monitor where its window is open.' `
   -Reg @( Rg $EXA 'MMTaskbarMode' 1 )
 
-T -Id 'ui-mmtaskbar-active' -Cat $I -Name 'Extra monitors: show a window only where it is open' -Explorer `
+T -Id 'ui-mmtaskbar-active' -Conflict 'secondary taskbar buttons' -Cat $I -Name 'Extra monitors: show a window only where it is open' -Explorer `
   -Desc 'Adapted from Win11Debloat: each window is listed only on the taskbar of the monitor it sits on.' `
   -Reg @( Rg $EXA 'MMTaskbarMode' 2 )
 
@@ -1177,3 +1207,52 @@ T -Id 'ui-start-old' -Cat $I -Name 'Prefer the Start menu layout from before the
       Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\FeatureManagement\Overrides\8\3036241548' 'EnabledState' 1
       Rg 'HKLM:\SYSTEM\ControlSet001\Control\FeatureManagement\Overrides\8\3036241548' 'EnabledState' 1
   )
+
+T -Id 'ui-mmtaskbar-whenfull' -Conflict 'secondary taskbar grouping' -Cat $I -Name 'Secondary taskbars: combine buttons only when full' -Explorer `
+  -Desc 'Adapted from Win11Debloat: taskbars on extra monitors show labels until they run out of room, then combine them.' `
+  -Reg @( Rg $EXA 'MMTaskbarGlomLevel' 1 )
+
+T -Id 'ui-mmtaskbar-all' -Conflict 'secondary taskbar buttons' -Cat $I -Name 'Extra monitors: show every window on every taskbar' -Explorer `
+  -Desc 'Adapted from Win11Debloat: the same buttons appear on the main taskbar and on every extra monitor. This is the Windows default; use it to switch back from the other extra-monitor layouts.' `
+  -Reg @( Rg $EXA 'MMTaskbarMode' 0 )
+
+T -Id 'ui-explorer-home' -Conflict 'Explorer opens to' -Cat $I -Name 'Open Explorer to Home' -Explorer `
+  -Desc 'Adapted from Win11Debloat: File Explorer starts on the Home page (LaunchTo = 2) instead of This PC, Downloads or OneDrive.' `
+  -Reg @( Rg $EXA 'LaunchTo' 2 )
+
+T -Id 'ui-explorer-od' -Conflict 'Explorer opens to' -Cat $I -Name 'Open Explorer to OneDrive' -Explorer `
+  -Desc 'Adapted from Win11Debloat: File Explorer starts in your OneDrive folder (LaunchTo = 4).' `
+  -Reg @( Rg $EXA 'LaunchTo' 4 )
+
+T -Id 'ui-search-box' -Conflict 'search style' -Cat $I -Name 'Taskbar search: full search box' -Explorer `
+  -Desc 'Adapted from Win11Debloat: shows the full search box on the taskbar (SearchboxTaskbarMode = 2). This is the usual Windows 11 default; use it to switch back from the icon or hidden styles.' `
+  -Reg @( Rg "$CV\Search" 'SearchboxTaskbarMode' 2 )
+
+T -Id 'ui-start-webview' -Cat $I -Name 'Start menu: turn off the WebView2 shell' -Tags optin -Risk Moderate -Explorer `
+  -Desc 'Adapted from Win11Debloat (Windows 11, build 22000 and newer): sets the feature override (1694661260) that stops Start from hosting WebView2 content. Undo removes the override key if it was not there before, or restores the previous value.' `
+  -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\FeatureManagement\Overrides\8\1694661260' 'EnabledState' 1 )
+
+T -Id 'ui-classic-outlook' -Cat $I -Name 'Keep classic Outlook: do not auto-switch to new Outlook' `
+  -Desc 'Adapted from Chris Titus Tech WinUtil: stays on classic Outlook (UseNewOutlook = 0) and turns off the automatic migration policy. The new Outlook app is not uninstalled. Not applied by presets.' `
+  -Reg @(
+      Rg 'HKCU:\SOFTWARE\Microsoft\Office\16.0\Outlook\Preferences' 'UseNewOutlook' 0
+      Rg 'HKCU:\Software\Policies\Microsoft\Office\16.0\Outlook\Options\General' 'DoNewOutlookAutoMigration' 0
+      Rg 'HKCU:\Software\Policies\Microsoft\Office\16.0\Outlook\Preferences' 'NewOutlookMigrationUserSetting' 0
+  )
+
+T -Id 'net-ipv6-off' -Cat $N -Name 'Disable IPv6 completely' -Tags optin -Risk Advanced -Restart `
+  -Desc 'Adapted from Chris Titus Tech WinUtil: sets DisabledComponents = 255 and unbinds the IPv6 protocol from every network adapter. This can break IPv6-only or IPv6-preferred networks. Undo restores the previous registry value and re-binds IPv6 only on the adapters that had it enabled.' `
+  -Reg @( Rg 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters' 'DisabledComponents' 255 ) `
+  -Snapshot {
+      $on = @(Get-NetAdapterBinding -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue | Where-Object { $_.Enabled } | ForEach-Object { $_.Name })
+      @{ Adapters = $on }
+  } `
+  -Apply { param($d) Disable-NetAdapterBinding -Name * -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue } `
+  -Undo {
+      param($d)
+      foreach ($n in @($d.Adapters)) {
+          if ([string]::IsNullOrWhiteSpace([string]$n)) { continue }
+          Enable-NetAdapterBinding -Name $n -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue
+      }
+  } `
+  -Test { (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters' -ErrorAction SilentlyContinue).DisabledComponents -eq 255 }

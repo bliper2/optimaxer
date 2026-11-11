@@ -103,12 +103,36 @@ fn parse_catalog(raw: &str) -> Result<Vec<Package>, String> {
     Ok(packages)
 }
 
-pub fn valid_package_id(id: &str) -> bool {
+fn valid_plain_package_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 255
         && id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'))
+}
+
+/// Catalog IDs may use an `msstore:` prefix. The WinGet `--id` value is the bare identifier.
+pub fn package_source(id: &str) -> Option<(&'static str, &str)> {
+    if let Some(rest) = id.strip_prefix("msstore:") {
+        return valid_plain_package_id(rest).then_some(("msstore", rest));
+    }
+    valid_plain_package_id(id).then_some(("winget", id))
+}
+
+pub fn valid_package_id(id: &str) -> bool {
+    package_source(id).is_some()
+}
+
+/// WinGet export uses the bare Microsoft Store ID; the curated catalog stores `msstore:<id>`.
+pub fn installed_package<'a>(
+    installed: &'a HashMap<String, InstalledPackage>,
+    catalog_id: &str,
+) -> Option<&'a InstalledPackage> {
+    let lower = catalog_id.to_ascii_lowercase();
+    if let Some(found) = installed.get(&lower) {
+        return Some(found);
+    }
+    installed.get(lower.strip_prefix("msstore:").unwrap_or(&lower))
 }
 
 pub fn parse_export(bytes: &[u8]) -> Result<HashMap<String, InstalledPackage>, String> {
@@ -263,9 +287,8 @@ pub fn command_args(action: Action, id: Option<&str>) -> Result<Vec<String>, Str
             "winget".into(),
         ],
         Action::Install | Action::Upgrade | Action::Uninstall => {
-            let id = id
-                .filter(|id| valid_package_id(id))
-                .ok_or("Invalid WinGet package ID")?;
+            let id = id.ok_or("Invalid WinGet package ID")?;
+            let (source, package_id) = package_source(id).ok_or("Invalid WinGet package ID")?;
             let command = match action {
                 Action::Install => "install",
                 Action::Upgrade => "upgrade",
@@ -275,10 +298,10 @@ pub fn command_args(action: Action, id: Option<&str>) -> Result<Vec<String>, Str
             vec![
                 command.into(),
                 "--id".into(),
-                id.into(),
+                package_id.into(),
                 "--exact".into(),
                 "--source".into(),
-                "winget".into(),
+                source.into(),
             ]
         }
     };
@@ -305,6 +328,7 @@ pub fn run_visible(action: Action, id: Option<&str>) -> Result<i32, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn curated_catalog_has_unique_valid_ids_and_real_categories() {
@@ -360,5 +384,47 @@ mod tests {
             ["upgrade", "--all", "--source", "winget"]
         );
         assert!(command_args(Action::Install, Some("Git.Git & whoami")).is_err());
+        assert_eq!(
+            command_args(Action::Install, Some("msstore:9NKSQGP7F2NH")).unwrap(),
+            [
+                "install",
+                "--id",
+                "9NKSQGP7F2NH",
+                "--exact",
+                "--source",
+                "msstore",
+                "--no-upgrade"
+            ]
+        );
+        assert!(command_args(Action::Install, Some("msstore:")).is_err());
+        assert!(command_args(Action::Install, Some("msstore:foo & bar")).is_err());
+        let packages = catalog().unwrap();
+        assert!(packages.iter().any(|package| package.id == "WerWolv.ImHex"));
+        assert!(packages.iter().any(|package| package.id == "SST.opencode"));
+        assert!(
+            packages
+                .iter()
+                .any(|package| package.id == "Microsoft.Sysinternals.PsTools")
+        );
+        assert!(
+            packages
+                .iter()
+                .any(|package| package.id == "msstore:9NKSQGP7F2NH")
+        );
+        assert!(
+            packages
+                .iter()
+                .any(|package| package.id == "msstore:9NT1R1C2HH7J")
+        );
+        let mut installed = HashMap::new();
+        installed.insert(
+            "9nksqgp7f2nh".into(),
+            InstalledPackage {
+                id: "9NKSQGP7F2NH".into(),
+                version: Some("1.0".into()),
+            },
+        );
+        assert!(installed_package(&installed, "msstore:9NKSQGP7F2NH").is_some());
+        assert!(installed_package(&installed, "Git.Git").is_none());
     }
 }

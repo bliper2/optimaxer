@@ -1,4 +1,4 @@
-# Installer catalog: Category|Display name|WinGet package id|Homepage domain|WinUtil product link and an icon-pack reference sh:/di:/si: (selfh.st icons, dashboard-icons, Simple Icons), used for the tile icon. Installed through WinGet (--source winget).
+# Installer catalog: Category|Display name|WinGet package id|Homepage domain|WinUtil product link and an icon-pack reference sh:/di:/si: (selfh.st icons, dashboard-icons, Simple Icons), used for the tile icon. Installed through WinGet (--source winget). IDs starting with msstore: are installed from the Microsoft Store source instead.
 $global:OptiApps = @'
 Browsers|Brave|Brave.Brave|brave.com|https://www.brave.com|sh:brave
 Browsers|Google Chrome|Google.Chrome|google.com|https://www.google.com/chrome/|sh:google-chrome
@@ -266,6 +266,11 @@ Utilities|TranslucentTB|CharlesMilette.TranslucentTB|github.com/TranslucentTB|ht
 Utilities|UniGetUI|Devolutions.UniGetUI|devolutions.net|https://devolutions.net/unigetui/|
 Utilities|WinDirStat|WinDirStat.WinDirStat|github.com/windirstat||di:windirstat
 Utilities|Wise Program Uninstaller (WiseCleaner)|WiseCleaner.WiseProgramUninstaller|wisecleaner.com|https://www.wisecleaner.com/wise-program-uninstaller.html|
+Communications|WhatsApp|msstore:9NKSQGP7F2NH|whatsapp.com|https://www.whatsapp.com/|
+Development|ChatGPT Desktop|msstore:9NT1R1C2HH7J|openai.com|https://chatgpt.com/|
+Development|OpenCode|SST.opencode|opencode.ai|https://opencode.ai/|
+Microsoft Tools|PsTools|Microsoft.Sysinternals.PsTools|sysinternals.com|https://learn.microsoft.com/sysinternals/downloads/pstools|
+Pro Tools|ImHex|WerWolv.ImHex|github.com/WerWolv|https://imhex.werwolv.net/|
 '@ -split "`r?`n" | Where-Object { $_ } | ForEach-Object {
     $p = $_ -split '\|', 6
     [pscustomobject]@{ Cat = $p[0]; Name = $p[1]; Id = $p[2]; Domain = $p[3]; Link = $p[4]; Pack = $p[5] }

@@ -35,11 +35,75 @@ const UPDATE_PAUSE_VALUES: [&str; 6] = [
     "PauseUpdatesExpiryTime",
 ];
 
-fn ai_page_hidden(value: &str) -> bool {
+fn settings_page_hidden(value: &str, page: &str) -> bool {
     value
         .to_ascii_lowercase()
         .strip_prefix("hide:")
-        .is_some_and(|pages| pages.split(';').any(|page| page == "aicomponents"))
+        .is_some_and(|pages| pages.split(';').any(|entry| entry == page))
+}
+
+fn apply_settings_page_hide_value(
+    sys: &dyn System,
+    current: &str,
+    page: &str,
+) -> Result<(), String> {
+    if current.to_ascii_lowercase().starts_with("showonly:") {
+        return Err(
+            "Settings page visibility uses show-only mode; refusing to replace that policy".into(),
+        );
+    }
+    if settings_page_hidden(current, page) {
+        return Ok(());
+    }
+    let value = if current.to_ascii_lowercase().starts_with("hide:") {
+        format!("{};{page}", current.trim_end_matches(';'))
+    } else {
+        format!("hide:{page}")
+    };
+    sys.reg_set(AI_PAGE_KEY, "SettingsPageVisibility", &RegData::Str(value))
+}
+
+fn apply_settings_page_hide_from_snap(
+    sys: &dyn System,
+    snap: &Value,
+    page: &str,
+) -> Result<(), String> {
+    let current = match snap.get("Exists").and_then(Value::as_bool) {
+        Some(true) => snap
+            .get("Value")
+            .and_then(Value::as_str)
+            .ok_or("saved SettingsPageVisibility value is unreadable")?,
+        Some(false) => "",
+        None => return Err("saved SettingsPageVisibility state is unreadable".into()),
+    };
+    apply_settings_page_hide_value(sys, current, page)
+}
+
+fn reserved_storage_state(text: &str) -> Option<String> {
+    for line in text.lines() {
+        if let Some((key, value)) = line.split_once(':')
+            && key.trim().eq_ignore_ascii_case("Reserved storage state")
+        {
+            let state = value.trim();
+            if state.eq_ignore_ascii_case("Enabled") {
+                return Some("Enabled".into());
+            }
+            if state.eq_ignore_ascii_case("Disabled") {
+                return Some("Disabled".into());
+            }
+        }
+        let lower = line.trim().to_ascii_lowercase();
+        if let Some(rest) = lower.strip_prefix("reserved storage is ") {
+            let state = rest.trim_end_matches('.').trim();
+            if state == "enabled" {
+                return Some("Enabled".into());
+            }
+            if state == "disabled" {
+                return Some("Disabled".into());
+            }
+        }
+    }
+    None
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,6 +146,7 @@ pub enum Special {
         name: &'static str,
     },
     SettingsAiPage,
+    SettingsHomePage,
     CreateKey {
         create: &'static str,
         remove: &'static str,
@@ -391,6 +456,7 @@ impl Special {
             Special::SvcHostSplit => "Set SvcHostSplitDisable=1 on every service key (Xbox services excluded)".into(),
             Special::DropRegValue { path, name } => format!("Remove {path}\\{name} (the old value is saved for undo)"),
             Special::SettingsAiPage => "Hide the AI components Settings page while preserving the existing page visibility policy".into(),
+            Special::SettingsHomePage => "Hide the Settings home page while preserving the existing page visibility policy".into(),
             Special::CreateKey { create, .. } => format!("Create registry key {create}"),
             Special::EventLogs(logs) => format!("Turn off {} diagnostic event log(s) with wevtutil", logs.len()),
             Special::ReservedStorage => "DISM: disable Reserved Storage".into(),
@@ -413,7 +479,7 @@ impl Special {
             }
             Special::Hibernate => Some(matches!(
                 sys.reg_get(POWER_KEY, "HibernateEnabled"),
-                Some(RegData::Dword(0))
+                Some(RegData::Dword(0) | RegData::Qword(0))
             )),
             Special::Fsutil(Fs::LastAccess) => {
                 let q = fs_query(sys, Fs::LastAccess).ok()?;
@@ -488,7 +554,14 @@ impl Special {
                 else {
                     return Some(false);
                 };
-                Some(ai_page_hidden(&value))
+                Some(settings_page_hidden(&value, "aicomponents"))
+            }
+            Special::SettingsHomePage => {
+                let Some(RegData::Str(value)) = sys.reg_get(AI_PAGE_KEY, "SettingsPageVisibility")
+                else {
+                    return Some(false);
+                };
+                Some(settings_page_hidden(&value, "home"))
             }
             Special::RemoveKeys { test, .. } => Some(test.iter().all(|k| !sys.reg_key_exists(k))),
             _ => None,
@@ -612,17 +685,20 @@ impl Special {
                 snap["Existed"] = snap["Exists"].clone();
                 Some(snap)
             }
-            Special::SettingsAiPage => {
+            Special::SettingsAiPage | Special::SettingsHomePage => {
                 Some(reg_snapshot(sys, AI_PAGE_KEY, "SettingsPageVisibility"))
             }
             Special::CreateKey { create, .. } => Some(
                 json!({ "Existed": sys.reg_key_exists(create), "Default": reg_snapshot(sys, create, "") }),
             ),
             Special::Hibernate => {
-                let Some(RegData::Dword(value)) = sys.reg_get(POWER_KEY, "HibernateEnabled") else {
-                    return Err("could not read the original hibernation state".into());
+                let enabled = match sys.reg_get(POWER_KEY, "HibernateEnabled") {
+                    Some(RegData::Dword(value)) => value != 0,
+                    Some(RegData::Qword(value)) => value != 0,
+                    None => true,
+                    _ => return Err("could not read the original hibernation state".into()),
                 };
-                Some(json!({ "Enabled": value != 0 }))
+                Some(json!({ "Enabled": enabled }))
             }
             Special::BcdLegacyBootMenu => {
                 let text = checked(sys, "bcdedit", &["/enum", "{default}"])?;
@@ -634,16 +710,8 @@ impl Special {
                     "dism.exe",
                     &["/Online", "/English", "/Get-ReservedStorageState"],
                 )?;
-                let state = text
-                    .lines()
-                    .find_map(|l| {
-                        l.split_once(':')
-                            .filter(|(key, _)| {
-                                key.trim().eq_ignore_ascii_case("Reserved storage state")
-                            })
-                            .map(|(_, value)| value.trim().to_string())
-                    })
-                    .ok_or("could not read reserved storage state")?;
+                let state =
+                    reserved_storage_state(&text).ok_or("could not read reserved storage state")?;
                 if !["Enabled", "Disabled"]
                     .iter()
                     .any(|s| state.eq_ignore_ascii_case(s))
@@ -908,27 +976,9 @@ impl Special {
                 Ok(())
             }
             Special::SettingsAiPage => {
-                let current = match snap.get("Exists").and_then(Value::as_bool) {
-                    Some(true) => snap
-                        .get("Value")
-                        .and_then(Value::as_str)
-                        .ok_or("saved SettingsPageVisibility value is unreadable")?,
-                    Some(false) => "",
-                    None => return Err("saved SettingsPageVisibility state is unreadable".into()),
-                };
-                if current.to_ascii_lowercase().starts_with("showonly:") {
-                    return Err("Settings page visibility uses show-only mode; refusing to replace that policy".into());
-                }
-                if ai_page_hidden(current) {
-                    return Ok(());
-                }
-                let value = if current.to_ascii_lowercase().starts_with("hide:") {
-                    format!("{};aicomponents", current.trim_end_matches(';'))
-                } else {
-                    "hide:aicomponents".to_string()
-                };
-                sys.reg_set(AI_PAGE_KEY, "SettingsPageVisibility", &RegData::Str(value))
+                apply_settings_page_hide_from_snap(sys, snap, "aicomponents")
             }
+            Special::SettingsHomePage => apply_settings_page_hide_from_snap(sys, snap, "home"),
             other => other.apply(ctx, log).map(|_| ()),
         }
     }
@@ -1046,7 +1096,7 @@ impl Special {
                     None => json!({ "Existed": false }),
                 })
             }
-            Special::SettingsAiPage => {
+            Special::SettingsAiPage | Special::SettingsHomePage => {
                 let snap = self
                     .snapshot(ctx)?
                     .ok_or("missing SettingsPageVisibility snapshot")?;
@@ -1302,32 +1352,27 @@ impl Special {
                 }
             }
             Special::BcdLegacyBootMenu => {
-                if let Some(old) = data.get("Previous") {
-                    match old.as_str() {
-                        Some(value) => {
+                let Some(old) = data.get("Previous") else {
+                    return Err("no saved boot menu policy".into());
+                };
+                match old.as_str() {
+                    Some(value) => {
+                        checked(
+                            sys,
+                            "bcdedit",
+                            &["/set", "{default}", "bootmenupolicy", value],
+                        )?;
+                    }
+                    None => {
+                        let now = checked(sys, "bcdedit", &["/enum", "{default}"])?;
+                        if bcd_value(&now, "bootmenupolicy").is_some() {
                             checked(
                                 sys,
                                 "bcdedit",
-                                &["/set", "{default}", "bootmenupolicy", value],
+                                &["/deletevalue", "{default}", "bootmenupolicy"],
                             )?;
                         }
-                        None => {
-                            let now = checked(sys, "bcdedit", &["/enum", "{default}"])?;
-                            if bcd_value(&now, "bootmenupolicy").is_some() {
-                                checked(
-                                    sys,
-                                    "bcdedit",
-                                    &["/deletevalue", "{default}", "bootmenupolicy"],
-                                )?;
-                            }
-                        }
                     }
-                } else {
-                    checked(
-                        sys,
-                        "bcdedit",
-                        &["/set", "{default}", "bootmenupolicy", "standard"],
-                    )?;
                 }
             }
             Special::Teredo => {
@@ -1407,7 +1452,7 @@ impl Special {
                     sys.reg_delete_value(path, name)?;
                 }
             }
-            Special::SettingsAiPage => {
+            Special::SettingsAiPage | Special::SettingsHomePage => {
                 if data.get("Exists").is_none() {
                     return Err("no saved SettingsPageVisibility value".into());
                 }
@@ -1452,12 +1497,19 @@ impl Special {
                 }
             }
             Special::ReservedStorage => {
-                let previous = data["Previous"].as_str().unwrap_or("Enabled");
-                if !["Enabled", "Disabled"]
-                    .iter()
-                    .any(|s| previous.eq_ignore_ascii_case(s))
-                {
+                let previous = data
+                    .get("Previous")
+                    .and_then(Value::as_str)
+                    .ok_or("no saved reserved storage state")?;
+                let state = if previous.eq_ignore_ascii_case("Enabled") {
+                    "Enabled"
+                } else if previous.eq_ignore_ascii_case("Disabled") {
+                    "Disabled"
+                } else {
                     return Err("invalid saved reserved storage state".into());
+                };
+                if state == "Disabled" {
+                    return Ok(());
                 }
                 checked(
                     sys,
@@ -1465,7 +1517,7 @@ impl Special {
                     &[
                         "/Online",
                         "/Set-ReservedStorageState",
-                        &format!("/State:{previous}"),
+                        &format!("/State:{state}"),
                     ],
                 )?;
             }
@@ -1560,6 +1612,7 @@ pub fn special_for(id: &str) -> Option<Special> {
             name: "PeriodInNanoSeconds",
         },
         "ai-settingspage" => Special::SettingsAiPage,
+        "ui-settingshome" => Special::SettingsHomePage,
         "ui-classicmenu" => Special::CreateKey {
             create: r"HKCU:\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32",
             remove: r"HKCU:\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}",
@@ -1604,7 +1657,7 @@ pub fn special_for(id: &str) -> Option<Special> {
 mod tests {
     use super::*;
     use crate::opti::backend::fake::FakeSystem;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn ctx<'a>(sys: &'a FakeSystem, dir: &'a Path) -> Ctx<'a> {
         Ctx { sys, backups: dir }
@@ -2174,5 +2227,85 @@ mod tests {
             .unwrap_err();
         assert!(error.contains("Undo this tweak before applying it again"));
         assert!(sys.commands.borrow().is_empty());
+    }
+
+    #[test]
+    fn settings_home_page_policy_appends_and_restores_exact_visibility_value() {
+        let sys = FakeSystem::default();
+        sys.put(
+            AI_PAGE_KEY,
+            "SettingsPageVisibility",
+            RegData::Str("hide:aicomponents;display".into()),
+        );
+        let c = ctx(&sys, Path::new(""));
+        let special = special_for("ui-settingshome").unwrap();
+        let snap = special.snapshot(&c).unwrap().unwrap();
+        special.apply_snapshot(&c, &snap, &mut |_| {}).unwrap();
+        assert_eq!(
+            sys.reg_get(AI_PAGE_KEY, "SettingsPageVisibility"),
+            Some(RegData::Str("hide:aicomponents;display;home".into()))
+        );
+        assert_eq!(special.test(&c), Some(true));
+        special.undo(&c, &snap, &mut |_| {}).unwrap();
+        assert_eq!(
+            sys.reg_get(AI_PAGE_KEY, "SettingsPageVisibility"),
+            Some(RegData::Str("hide:aicomponents;display".into()))
+        );
+    }
+
+    #[test]
+    fn hibernate_snapshot_defaults_to_enabled_when_the_value_is_missing() {
+        let sys = FakeSystem::default();
+        let c = ctx(&sys, Path::new(""));
+        let snap = Special::Hibernate.snapshot(&c).unwrap().unwrap();
+        assert_eq!(snap, json!({ "Enabled": true }));
+        sys.put(POWER_KEY, "HibernateEnabled", RegData::Dword(0));
+        let snap = Special::Hibernate.snapshot(&c).unwrap().unwrap();
+        assert_eq!(snap, json!({ "Enabled": false }));
+        sys.put(POWER_KEY, "HibernateEnabled", RegData::Qword(1));
+        let snap = Special::Hibernate.snapshot(&c).unwrap().unwrap();
+        assert_eq!(snap, json!({ "Enabled": true }));
+    }
+
+    #[test]
+    fn reserved_storage_parses_both_dism_formats_and_refuses_undo_without_a_snapshot() {
+        let sys = FakeSystem::default();
+        let c = ctx(&sys, Path::new(""));
+        let special = special_for("sto-reserved").unwrap();
+        sys.answer(
+            "dism.exe /Online /English /Get-ReservedStorageState",
+            "Reserved storage is enabled.",
+        );
+        assert_eq!(
+            special.snapshot(&c).unwrap().unwrap(),
+            json!({ "Previous": "Enabled" })
+        );
+        sys.answer(
+            "dism.exe /Online /English /Get-ReservedStorageState",
+            "Reserved Storage State : disabled",
+        );
+        assert_eq!(
+            special.snapshot(&c).unwrap().unwrap(),
+            json!({ "Previous": "Disabled" })
+        );
+        assert!(special.undo(&c, &Value::Null, &mut |_| {}).is_err());
+        special
+            .undo(&c, &json!({ "Previous": "Disabled" }), &mut |_| {})
+            .unwrap();
+        assert!(!sys.ran("/Set-ReservedStorageState"));
+    }
+
+    #[test]
+    fn legacy_boot_menu_undo_requires_the_saved_policy() {
+        let sys = FakeSystem::default();
+        let c = ctx(&sys, Path::new(""));
+        let special = special_for("ui-legacyboot").unwrap();
+        assert!(special.undo(&c, &json!({}), &mut |_| {}).is_err());
+        sys.answer("bcdedit /enum {default}", "bootmenupolicy    Legacy");
+        special
+            .undo(&c, &json!({ "Previous": null }), &mut |_| {})
+            .unwrap();
+        assert!(sys.ran("bootmenupolicy"));
+        assert!(sys.ran("/deletevalue"));
     }
 }

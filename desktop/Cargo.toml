@@ -1,7 +1,10 @@
 [package]
 name = "orion-store-desktop"
-version = "2.19.0"
+version = "2.20.0"
 edition = "2024"
+
+[build-dependencies]
+winresource = "0.1"
 
 [dependencies]
 dirs = "7.0.0"
