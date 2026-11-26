@@ -54,6 +54,10 @@ fn set_app_user_model_id() {
 }
 
 fn main() -> eframe::Result {
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--winget-batch")) {
+        let result = winget::batch_worker(std::env::args_os().nth(2).as_deref());
+        std::process::exit(if result.is_ok() { 0 } else { 1 });
+    }
     set_app_user_model_id();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

@@ -23,7 +23,7 @@ $tweaks = foreach ($t in $global:OptiCatalog) {
         restart = $t.Restart; explorer = $t.Explorer; desktop_only = $t.DesktopOnly; ssd_only = $t.SSDOnly
         vendor = $t.Vendor; svc_tol = $t.SvcTol; min_ram = $t.MinRamGB; need = @($t.Need); conflict = [string]$t.Conflict; retired = [string]$t.Retired
         script = [ordered]@{ apply = [bool]$t.Apply; undo = [bool]$t.Undo; test = [bool]$t.Test; snapshot = [bool]$t.Snapshot }
-        apply_text = $(if ($t.Apply) { $t.Apply.ToString() } else { '' })
+        apply_text = $(if ($t.Apply) { $t.Apply.ToString() -replace '\r?\n', "`r`n" } else { '' })
     }
 }
 ConvertTo-Json -InputObject @($tweaks) -Depth 8 | Set-Content -LiteralPath (Join-Path $Out 'tweaks.json') -Encoding UTF8

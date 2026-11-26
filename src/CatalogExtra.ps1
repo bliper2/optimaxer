@@ -675,7 +675,7 @@ T -Id 'ui-recent' -Cat $I -Name 'Do not track recent and frequent files in Explo
   -Desc 'Quick access stops showing recent files and frequent folders.' `
   -Reg @( Rg "$CV\Explorer" 'ShowRecent' 0; Rg "$CV\Explorer" 'ShowFrequent' 0 )
 
-T -Id 'ui-alttab' -Cat $I -Name 'Alt+Tab: windows only, no Edge tabs' `
+T -Id 'ui-alttab' -Conflict 'alttab' -Cat $I -Name 'Alt+Tab: windows only, no Edge tabs' `
   -Desc 'Alt+Tab lists windows, not individual browser tabs.' `
   -Reg @( Rg $EXA 'MultiTaskingAltTabFilter' 3 )
 
@@ -711,7 +711,7 @@ T -Id 'ui-settingshome' -Cat $I -Name 'Hide the Settings home page' `
       [bool]($v -and ([string]$v -match '(^|[:;])home(;|$)'))
   }
 
-T -Id 'ui-sharetray' -Cat $I -Name 'Disable the Share drag tray' -Tags max `
+T -Id 'ui-sharetray' -Retired 'Win11Debloat retired this drag tray setting. Existing changes can still be undone.' -Cat $I -Name 'Disable the Share drag tray' -Tags max `
   -Desc 'Stops the "drag files here to share" tray that appears when dragging files to the top of the screen.' `
   -Reg @( Rg "$CV\CDP" 'DragTrayEnabled' 0 )
 
@@ -1256,3 +1256,26 @@ T -Id 'net-ipv6-off' -Cat $N -Name 'Disable IPv6 completely' -Tags optin -Risk A
       }
   } `
   -Test { (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters' -ErrorAction SilentlyContinue).DisabledComponents -eq 255 }
+
+T -Id 'game-mpo-full' -Cat $G -Name 'Fully disable multiplane overlays' -Conflict 'mpo' -Tags optin -Risk Advanced -Restart `
+  -Desc 'WinUtil display workaround for persistent overlay flicker. Disables overlays in both DWM and the graphics driver. Can increase GPU power use. Undo restores both registry values.' `
+  -Reg @(
+      Rg 'HKLM:\SOFTWARE\Microsoft\Windows\Dwm' 'OverlayTestMode' 5
+      Rg 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers' 'DisableOverlays' 1
+  )
+
+T -Id 'ui-outlook-toggle' -Cat $I -Name 'Hide the Try the new Outlook switch' -Tags optin `
+  -Desc 'WinUtil preference for classic Outlook. Hides the switch for this account. You can manage automatic migration separately.' `
+  -Reg @( Rg 'HKCU:\Software\Microsoft\Office\16.0\Outlook\Options\General' 'HideNewOutlookToggle' 1 )
+
+T -Id 'ui-alttab-3' -Cat $I -Name 'Alt+Tab: show up to 3 recent tabs' -Conflict 'alttab' -Tags optin -Need win11 `
+  -Desc 'Win11Debloat Alt+Tab layout for Windows 11. Includes up to 3 recent tabs from supported apps alongside open windows.' `
+  -Reg @( Rg $EXA 'MultiTaskingAltTabFilter' 2 )
+
+T -Id 'ui-alttab-5' -Cat $I -Name 'Alt+Tab: show up to 5 recent tabs' -Conflict 'alttab' -Tags optin -Need win11 `
+  -Desc 'Win11Debloat Alt+Tab layout for Windows 11. Includes up to 5 recent tabs from supported apps alongside open windows.' `
+  -Reg @( Rg $EXA 'MultiTaskingAltTabFilter' 1 )
+
+T -Id 'ui-alttab-20' -Cat $I -Name 'Alt+Tab: show up to 20 recent tabs' -Conflict 'alttab' -Tags optin -Need win11 `
+  -Desc 'Win11Debloat Alt+Tab layout for Windows 11. Includes up to 20 recent tabs from supported apps alongside open windows.' `
+  -Reg @( Rg $EXA 'MultiTaskingAltTabFilter' 0 )

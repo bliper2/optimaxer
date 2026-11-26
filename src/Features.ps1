@@ -346,12 +346,24 @@ function Restore-WakeSources {
 }
 
 # ---------------------------------------------------------------- Appx: installed AND provisioned must be gone
+function Get-RemovableAppxNames {
+    # One inventory for the entire batch, including packages staged for future accounts.
+    $names = @{}
+    foreach ($p in (Get-AppxPackage -AllUsers -ErrorAction Stop)) {
+        if (-not $p.NonRemovable -and -not $p.IsFramework) { $names[$p.Name] = $true }
+    }
+    foreach ($p in (Get-AppxProvisionedPackage -Online -ErrorAction Stop)) {
+        $names[$p.DisplayName] = $true
+    }
+    return $names
+}
+
 function Test-AppxGone {
-    # False while any matching package is still installed for a user or still provisioned for new accounts.
     param([string[]]$Pattern)
+    try { $names = Get-RemovableAppxNames }
+    catch { Write-Log "App removal verification failed: $($_.Exception.Message)" 'WARN'; return $false }
     foreach ($pat in $Pattern) {
-        foreach ($p in @(Get-AppxPackage -AllUsers -Name $pat -ErrorAction SilentlyContinue)) { if (-not $p.NonRemovable -and -not $p.IsFramework) { return $false } }
-        try { if (@(Get-AppxProvisionedPackage -Online -ErrorAction Stop | Where-Object { $_.DisplayName -like $pat }).Count) { return $false } } catch {}
+        if ($names.Keys -like $pat) { return $false }
     }
     return $true
 }

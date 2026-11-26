@@ -1,4 +1,4 @@
-//! The tweak catalog. The 225 tweaks come from Optimaxer's PowerShell catalog, exported once by
+//! The tweak catalog. The 230 tweaks come from Optimaxer's PowerShell catalog, exported once by
 //! `tools/export-optimaxer.ps1` into `assets/optimaxer/tweaks.json`. Registry, service and scheduled-task tweaks
 //! are plain data. Tweaks that ran scripts are mapped to a `Special` port, or listed as not ported.
 
@@ -187,7 +187,7 @@ mod tests {
     #[test]
     fn embedded_catalog_parses_and_ids_are_unique() {
         let c = Catalog::parse(EMBEDDED).unwrap();
-        assert_eq!(c.tweaks.len() + c.not_ported.len(), 225);
+        assert_eq!(c.tweaks.len() + c.not_ported.len(), 230);
         assert_eq!(c.not_ported.len(), 12);
         let ids: HashSet<_> = c.tweaks.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids.len(), c.tweaks.len());

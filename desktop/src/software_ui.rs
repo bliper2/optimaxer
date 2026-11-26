@@ -14,7 +14,7 @@ struct PendingAction {
     package: Option<Package>,
 }
 
-/// Several packages for one action, run one after another, each in its own visible WinGet console.
+/// Several packages for one action, run one after another, in one visible WinGet console.
 struct PendingBatch {
     action: Action,
     packages: Vec<Package>,
@@ -134,12 +134,21 @@ impl SoftwareUi {
                             let count = installed.len();
                             self.installed = installed;
                             self.has_checked = true;
-                            self.message = Some((
-                                true,
-                                format!("WinGet reported {count} installed package entries."),
-                            ));
+                            self.message.get_or_insert_with(|| {
+                                (
+                                    true,
+                                    format!("WinGet reported {count} installed package entries."),
+                                )
+                            });
                         }
-                        Err(error) => self.message = Some((false, error)),
+                        Err(error) => {
+                            let summary = self
+                                .message
+                                .take()
+                                .map(|(_, text)| text + " ")
+                                .unwrap_or_default();
+                            self.message = Some((false, format!("{summary}{error}")));
+                        }
                     }
                     ctx.request_repaint();
                 }
@@ -226,6 +235,17 @@ impl SoftwareUi {
         let total = packages.len();
         std::thread::spawn(move || {
             let mut results = Vec::new();
+            let mut console = match winget::BatchConsole::open(action) {
+                Ok(console) => console,
+                Err(error) => {
+                    let _ = tx.send(BatchMsg::Finished(vec![(
+                        "Batch console".into(),
+                        Err(error.to_string()),
+                    )]));
+                    repaint.request_repaint();
+                    return;
+                }
+            };
             for (index, package) in packages.iter().enumerate() {
                 if cancel.load(Ordering::Relaxed) {
                     break;
@@ -236,17 +256,20 @@ impl SoftwareUi {
                     name: package.name.clone(),
                 });
                 repaint.request_repaint();
-                results.push((
-                    package.name.clone(),
-                    winget::run_visible(action, Some(&package.id)),
-                ));
+                match console.run(&package.id) {
+                    Ok(outcome) => results.push((package.name.clone(), outcome)),
+                    Err(error) => {
+                        results.push((package.name.clone(), Err(error.to_string())));
+                        break;
+                    }
+                }
             }
             let _ = tx.send(BatchMsg::Finished(results));
             repaint.request_repaint();
         });
         self.batch_progress = Some((0, total, String::new()));
         self.batch_rx = Some(rx);
-        self.message = Some((true, "WinGet opens one console per app, one after another. Review each prompt there; Optimaxer does not accept package agreements or suppress installer UI.".into()));
+        self.message = Some((true, "Your selected apps share one WinGet console. Review each prompt there; Optimaxer does not accept package agreements or suppress installer UI.".into()));
     }
 
     fn poll_batch(&mut self, ctx: &egui::Context) {
@@ -273,7 +296,7 @@ impl SoftwareUi {
         }
         if let Some(results) = finished {
             self.batch_rx = None;
-            self.batch_progress = None;
+            let total = self.batch_progress.take().map_or(0, |(_, total, _)| total);
             let ok = results.iter().filter(|(_, r)| matches!(r, Ok(0))).count();
             let failed: Vec<String> = results
                 .iter()
@@ -284,19 +307,16 @@ impl SoftwareUi {
                 })
                 .collect();
             let summary = if failed.is_empty() {
-                format!("{ok} of {} finished with exit code 0.", results.len())
+                format!("{ok} of {total} packages finished with exit code 0.")
             } else {
                 format!(
-                    "{ok} finished; did not finish cleanly: {}. Review the WinGet consoles for details.",
+                    "{ok} of {total} packages finished with exit code 0. Errors: {}. Review the WinGet console for details.",
                     failed.join(", ")
                 )
             };
-            self.message = Some((
-                failed.is_empty(),
-                format!("{summary} Checking installed status…"),
-            ));
             self.selected.clear();
             self.refresh(ctx);
+            self.message = Some((failed.is_empty() && ok == total, summary));
         }
     }
 
@@ -782,7 +802,7 @@ impl SoftwareUi {
             ui.add_space(theme::S2);
             ui.add(
                 egui::Label::new(
-                    RichText::new("WinGet opens a separate console for each app, one after another. Each installer may ask for administrator approval, show agreements to read, or need a restart. You can stop after the current app.")
+                    RichText::new("WinGet runs the selected apps one at a time in one terminal. Each installer may ask for administrator approval, show agreements to read, or need a restart. You can stop after the current app.")
                         .color(t.muted),
                 )
                 .wrap(),
