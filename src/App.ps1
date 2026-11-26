@@ -958,7 +958,7 @@ $global:DbRows = Initialize-List $UI.DbList 'db'
 function Start-AppScan {
     [void](Start-OptiJob 'Scanning installed apps' -Script {
         $seen = @{}
-        Get-AppxPackage -AllUsers | Group-Object Name | ForEach-Object {
+        Get-AppxPackage -AllUsers -ErrorAction Stop | Group-Object Name | ForEach-Object {
             $p = $_.Group[0]
             if ($p.NonRemovable -or $p.IsFramework) { return }
             $m = $OptiAppx | Where-Object { $p.Name -like $_.Id } | Select-Object -First 1
@@ -971,7 +971,7 @@ function Start-AppScan {
                 $m = $OptiAppx | Where-Object { $pp.DisplayName -like $_.Id } | Select-Object -First 1
                 if ($m) { $seen[$pp.DisplayName] = $true; @{ Name = $pp.DisplayName; Friendly = "$($m.Name) (new accounts only)"; Level = $m.Level } }
             }
-        } catch {}
+        } catch { Write-Log "Could not scan apps provisioned for new accounts: $($_.Exception.Message)" 'WARN' }
     } -OnDone {
         param($res)
         $global:DbRows.Clear()
@@ -992,10 +992,14 @@ function Start-AppRemove {
     [void](Start-OptiJob 'Removing apps' -ArgList @(, $names) -Script {
         param($names)
         $done = 0; $bad = 0
+        $results = @{}
+        foreach ($n in $names) { $results[$n] = Remove-AppxByName $n }
+        try { $remaining = Get-RemovableAppxNames }
+        catch { Write-Log "Could not verify app removals: $($_.Exception.Message)" 'WARN'; return }
         foreach ($n in $names) {
-            $r = Remove-AppxByName $n
+            $r = $results[$n]
             if ($r.Failed.Count) { $bad++; foreach ($f in $r.Failed) { Write-Log "  $f" 'WARN' } }
-            elseif (-not (Test-AppxGone $n)) { $bad++; Write-Log "  $n : still installed or still provisioned for new accounts" 'WARN' }
+            elseif ($remaining.ContainsKey($n)) { $bad++; Write-Log "  $n : still installed or still provisioned for new accounts" 'WARN' }
             elseif ($r.Removed.Count) { $done++; Write-Log "  removed $n (installed and provisioned copies)" }
             else { Write-Log "  $n : nothing to remove (already gone)" }
         }

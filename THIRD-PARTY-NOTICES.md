@@ -3,7 +3,7 @@
 Optimaxer includes or adapts code and data from the projects below. Each adapted tweak says so in its description or a code comment. The rfd entry covers a runtime dependency.
 
 ## WinUtil (Chris Titus Tech)
-https://github.com/ChrisTitusTech/winutil
+https://github.com/ChrisTitusTech/winutil/releases/tag/26.11.13
 
 MIT License
 
@@ -53,7 +53,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ## Win11Debloat (Raphire)
-https://github.com/Raphire/Win11Debloat
+https://github.com/Raphire/Win11Debloat/releases/tag/2026.10.30
 
 MIT License
 

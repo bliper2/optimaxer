@@ -227,10 +227,32 @@ Microsoft.WindowsTerminal|Windows Terminal (default terminal)|C
 Microsoft.WindowsStore|Microsoft Store (hard to reinstall)|C
 MicrosoftWindows.CrossDevice|Cross Device Experience|O
 Microsoft.StartExperiencesApp|Start experiences (widgets host)|O
-AD2F1837.*|HP preinstalled apps|O
-DellInc.*|Dell preinstalled apps|O
+AD2F1837.OMENCommandCenter|HP OMEN Gaming Hub|O
+AD2F1837.HPAIExperienceCenter|HP AI Experience Center|O
+AD2F1837.HPConnectedMusic|HP Connected Music|O
+AD2F1837.HPConnectedPhotopoweredbySnapfish|HP Connected Photo|O
+AD2F1837.HPDesktopSupportUtilities|HP Desktop Support Utilities|O
+AD2F1837.HPEasyClean|HP Easy Clean|O
+AD2F1837.HPFileViewer|HP File Viewer|O
+AD2F1837.HPJumpStarts|HP JumpStarts|O
+AD2F1837.HPPCHardwareDiagnosticsWindows|HP PC Hardware Diagnostics Windows|O
+AD2F1837.HPPowerManager|HP Power Manager|O
+AD2F1837.HPPrinterControl|HP Smart|O
+AD2F1837.HPPrivacySettings|HP PC Privacy Settings|O
+AD2F1837.HPQuickDrop|HP QuickDrop|O
+AD2F1837.HPQuickTouch|HP QuickTouch|O
+AD2F1837.HPRegistration|HP Registration|O
+AD2F1837.HPSupportAssistant|HP Support Assistant|O
+AD2F1837.HPSureShieldAI|HP Sure Shield AI|O
+AD2F1837.HPSystemInformation|HP System Information|O
+AD2F1837.HPWelcome|HP Welcome|O
+AD2F1837.HPWorkWell|HP WorkWell|O
+AD2F1837.myHP|HP|O
+DellInc.DellSupportAssistforPCs|Dell SupportAssist|O
+DellInc.DellDigitalDelivery|Dell Digital Delivery|O
+DellInc.DellMobileConnect|Dell Mobile Connect|O
 E046963F.LenovoCompanion|Lenovo Vantage|O
-LenovoCompanyLimited.*|Lenovo services|O
+LenovoCompanyLimited.LenovoVantageService|Lenovo Vantage Service|O
 *Asphalt*|Asphalt|R
 *FarmVille*|FarmVille|R
 *HiddenCity*|Hidden City|R
@@ -255,7 +277,6 @@ LenovoCompanyLimited.*|Lenovo services|O
 *AutodeskSketchBook*|Autodesk SketchBook|R
 *CyberLinkMediaSuite*|CyberLink Media Suite|R
 *DrawboardPDF*|Drawboard PDF|R
-*EclipseManager*|Eclipse Manager|R
 *NYTCrossword*|NYT Crossword|R
 *OneCalendar*|One Calendar|R
 *LiveWallpaper*|Live Wallpaper|R
@@ -279,11 +300,25 @@ LenovoCompanyLimited.*|Lenovo services|O
 *Solitaire*|Solitaire|R
 MicrosoftCorporationII.Windows365|Windows 365|O
 Microsoft.SurfaceHub|Surface Hub|O
-AcerIncorporated.*|Acer preinstalled apps|O
-B9ECED6F.*|ASUS preinstalled apps|O
-SAMSUNGELECTRONICSCoLtd.*|Samsung apps|O
-SAMSUNGELECTRONICSCO.LTD.*|Samsung apps (alternate publisher id)|O
-9426MICRO-STARINTERNATION.*|MSI Center and preinstalled apps|O
+AcerIncorporated.AcerCareCenterS|Acer Care Center|O
+AcerIncorporated.AcerRegistration|Acer Product Registration|O
+B9ECED6F.ASUSPCAssistant|MyASUS|O
+B9ECED6F.Glidex|ASUS GlideX|O
+B9ECED6F.ScreenPadMaster|ASUS ScreenXpert|O
+SAMSUNGELECTRONICSCoLtd.SamsungQuickShare|Samsung Quick Share|O
+SAMSUNGELECTRONICSCoLtd.SamsungFlux|Samsung Flow|O
+SAMSUNGELECTRONICSCoLtd.SamsungNotes|Samsung Notes|O
+SAMSUNGELECTRONICSCoLtd.MultiControl|Samsung Multi control|O
+SAMSUNGELECTRONICSCoLtd.SecondScreen|Samsung Second screen|O
+SAMSUNGELECTRONICSCO.LTD.PCGallery|Samsung Gallery|O
+SAMSUNGELECTRONICSCO.LTD.SamsungStudio|Samsung Studio|O
+SAMSUNGELECTRONICSCO.LTD.SamsungScreenRecording|Samsung Screen recorder|O
+SAMSUNGELECTRONICSCO.LTD.Bixby|Samsung Bixby|O
+SAMSUNGELECTRONICSCO.LTD.SamsungWelcome|Samsung Galaxy Book Experience|O
+SAMSUNGELECTRONICSCO.LTD.SmartThingsWindows|Samsung SmartThings|O
+SAMSUNGELECTRONICSCO.LTD.PENUP|Samsung PENUP|O
+9426MICRO-STARINTERNATION.MSICenter|MSI Center|O
+9426MICRO-STARINTERNATION.BusinessCenter|MSI Center Pro|O
 E0469640.SmartAppearance|Lenovo Smart Appearance|O
 '@ -split "`r?`n" | Where-Object { $_ } | ForEach-Object {
     $p = $_ -split '\|'

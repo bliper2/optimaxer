@@ -431,9 +431,23 @@ It 'measurement comparison reports direction per metric' {
         Assert ([bool]($c -match 'Boot time: 30 s -> 25 s')) ($c -join ' | ')
     } finally { $global:OptiMeasurePath = $old }
 }
-It 'Appx removal checks provisioned copies' {
-    Assert ((Get-Command Test-AppxGone).ScriptBlock.ToString() -match 'Get-AppxProvisionedPackage') 'Test-AppxGone ignores provisioning'
-    Assert ((Get-TweakById 'ai-remove-apps').Test.ToString() -match 'Test-AppxGone') 'ai-remove-apps test'
+It 'Appx verification checks both inventories once per batch' {
+    $script:provisionReads = 0
+    function Get-AppxPackage { param([switch]$AllUsers) @(
+        @{ Name = 'Keep.Framework'; IsFramework = $true }
+        @{ Name = 'Installed.App' }
+    ) }
+    function Get-AppxProvisionedPackage {
+        param([switch]$Online)
+        $script:provisionReads++
+        @{ DisplayName = 'NewUser.App' }
+    }
+    Assert (Test-AppxGone @('Gone.*', 'Keep.*')) 'framework was counted as removable'
+    Assert ($script:provisionReads -eq 1) 'provisioned inventory was read repeatedly'
+    Assert (-not (Test-AppxGone 'installed.*')) 'installed package missed'
+    Assert (-not (Test-AppxGone 'NewUser.*')) 'provisioned package missed'
+    function Get-AppxProvisionedPackage { throw 'inventory unavailable' }
+    Assert (-not (Test-AppxGone 'Gone.*')) 'incomplete inventory reported success'
 }
 
 Write-Host 'DNS backup and restore'

@@ -1,7 +1,8 @@
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
-use std::io::Read;
+use std::io::{self, BufRead, BufReader, Read, Write};
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -214,6 +215,7 @@ pub fn installed_packages() -> Result<HashMap<String, InstalledPackage>, String>
     let directory = temp_export_dir()?;
     let output_path = directory.join("installed.json");
     let output = Command::new("winget.exe")
+        .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
         .args(["export", "--output"])
         .arg(&output_path)
         .args([
@@ -323,6 +325,83 @@ pub fn run_visible(action: Action, id: Option<&str>) -> Result<i32, String> {
         .wait()
         .map_err(|error| format!("Could not wait for WinGet: {error}"))?;
     Ok(status.code().unwrap_or(-1))
+}
+
+/// A helper owns the visible console. Pipes carry package IDs and results only;
+/// each installer reads and writes the console directly, including agreement prompts.
+pub struct BatchConsole {
+    child: std::process::Child,
+    replies: BufReader<std::process::ChildStdout>,
+}
+
+impl BatchConsole {
+    pub fn open(action: Action) -> io::Result<Self> {
+        let mut child = Command::new(std::env::current_exe()?)
+            .args(["--winget-batch", action.label()])
+            .creation_flags(windows_sys::Win32::System::Threading::CREATE_NEW_CONSOLE)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()?;
+        let replies = BufReader::new(child.stdout.take().expect("piped stdout"));
+        Ok(Self { child, replies })
+    }
+
+    pub fn run(&mut self, id: &str) -> io::Result<Result<i32, String>> {
+        if !valid_package_id(id) {
+            return Ok(Err("Invalid WinGet package ID".into()));
+        }
+        writeln!(self.child.stdin.as_mut().expect("piped stdin"), "{id}")?;
+        let mut line = String::new();
+        if self.replies.read_line(&mut line)? == 0 {
+            return Err(io::Error::other("The WinGet batch console closed"));
+        }
+        Ok(serde_json::from_str(&line)?)
+    }
+}
+
+impl Drop for BatchConsole {
+    fn drop(&mut self) {
+        drop(self.child.stdin.take());
+        let _ = self.child.wait();
+    }
+}
+
+pub fn batch_worker(mode: Option<&std::ffi::OsStr>) -> io::Result<()> {
+    use std::os::windows::io::AsHandle;
+    let action = match mode.and_then(|v| v.to_str()) {
+        Some("Install") => Action::Install,
+        Some("Upgrade") => Action::Upgrade,
+        _ => return Err(io::Error::other("Unknown batch action")),
+    };
+    // Preserve the protocol handles before allocating a console for a GUI-subsystem build.
+    let requests = fs::File::from(io::stdin().as_handle().try_clone_to_owned()?);
+    let mut replies = fs::File::from(io::stdout().as_handle().try_clone_to_owned()?);
+    use windows_sys::Win32::System::Console::{AllocConsole, GetConsoleCP};
+    if unsafe { GetConsoleCP() } == 0 && unsafe { AllocConsole() } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let input = fs::File::open("CONIN$")?;
+    let mut output = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("CONOUT$")?;
+    for id in BufReader::new(requests).lines() {
+        let id = id?;
+        let result = command_args(action, Some(&id)).and_then(|args| {
+            writeln!(output, "\n{} {id}", action.label()).map_err(|e| e.to_string())?;
+            let status = Command::new("winget.exe")
+                .args(args)
+                .stdin(input.try_clone().map_err(|e| e.to_string())?)
+                .stdout(output.try_clone().map_err(|e| e.to_string())?)
+                .stderr(output.try_clone().map_err(|e| e.to_string())?)
+                .status()
+                .map_err(|e| format!("Could not run WinGet: {e}"))?;
+            Ok(status.code().unwrap_or(-1))
+        });
+        serde_json::to_writer(&mut replies, &result)?;
+        replies.write_all(b"\n")?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

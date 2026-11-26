@@ -229,7 +229,7 @@ T -Id 'game-fso' -Cat $G -Name 'Disable fullscreen optimizations globally' -Tags
       Rg $GCS 'GameDVR_DXGIHonorFSEWindowsCompatible' 1
   )
 
-T -Id 'game-mpo' -Cat $G -Name 'Disable Multiplane Overlay (MPO)' -Tags optin -Risk Advanced -Restart `
+T -Id 'game-mpo' -Conflict 'mpo' -Cat $G -Name 'Disable Multiplane Overlay (MPO)' -Tags optin -Risk Advanced -Restart `
   -Desc 'Sets OverlayTestMode = 5 in the DWM key. Not recommended on Windows 11: it is a global workaround for flicker on some older driver and monitor combinations, current drivers fixed most of them, and it makes the desktop compositor do more work. Use it only if you see MPO flicker; undo restores the old value.' `
   -Reg @( Rg 'HKLM:\SOFTWARE\Microsoft\Windows\Dwm' 'OverlayTestMode' 5 )
 
