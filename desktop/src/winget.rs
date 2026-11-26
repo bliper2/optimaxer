@@ -218,12 +218,7 @@ pub fn installed_packages() -> Result<HashMap<String, InstalledPackage>, String>
         .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
         .args(["export", "--output"])
         .arg(&output_path)
-        .args([
-            "--source",
-            "winget",
-            "--include-versions",
-            "--disable-interactivity",
-        ])
+        .args(["--include-versions", "--disable-interactivity"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn();
