@@ -314,6 +314,14 @@ impl SoftwareUi {
                     failed.join(", ")
                 )
             };
+            let summary = if results.len() < total {
+                format!(
+                    "{summary} Batch stopped with {} unattempted.",
+                    total - results.len()
+                )
+            } else {
+                summary
+            };
             self.selected.clear();
             self.refresh(ctx);
             self.message = Some((failed.is_empty() && ok == total, summary));
