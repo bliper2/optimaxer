@@ -126,7 +126,20 @@ try {
     $stage = Join-Path $staging 'files'
     Write-Step 'Extracting...'
     Expand-SafeArchive -Zip $zip -Destination $stage
-    if (-not (Test-Path -LiteralPath (Join-Path $stage 'Optimaxer.ps1'))) { throw 'The package does not contain Optimaxer.ps1.' }
+    $entryPoint = Join-Path $stage 'Optimaxer.ps1'
+    if (-not (Test-Path -LiteralPath $entryPoint -PathType Leaf)) {
+        # GitHub source archives wrap all files in one version-named directory. Accept that layout only when it is
+        # the archive's sole top-level entry, so installation still copies one complete, validated package root.
+        $topDirs = @(Get-ChildItem -LiteralPath $stage -Directory -Force -ErrorAction Stop)
+        $topFiles = @(Get-ChildItem -LiteralPath $stage -File -Force -ErrorAction Stop)
+        if ($topDirs.Count -eq 1 -and $topFiles.Count -eq 0) {
+            $nestedEntryPoint = Join-Path $topDirs[0].FullName 'Optimaxer.ps1'
+            if (Test-Path -LiteralPath $nestedEntryPoint -PathType Leaf) { $stage = $topDirs[0].FullName }
+        }
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $stage 'Optimaxer.ps1') -PathType Leaf)) {
+        throw 'The package does not contain Optimaxer.ps1 at its root or in a single top-level folder.'
+    }
 
     Install-AppFiles -Source $stage -Target $Dir
     $script:LogFile = Join-Path $Dir 'install.log'
