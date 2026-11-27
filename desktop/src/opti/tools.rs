@@ -373,8 +373,10 @@ pub fn clear_all_caches() -> Vec<String> {
     ));
     // SAFETY: -1/-1 asks Windows to flush the system file cache.
     let fc = if quota {
-        SetLastError(0);
-        unsafe { SetSystemFileCacheSize(-1, -1, 0) }
+        unsafe {
+            SetLastError(0);
+            SetSystemFileCacheSize(-1, -1, 0)
+        }
     } else {
         0
     };
