@@ -113,7 +113,7 @@ impl OptiUi {
                 if kit::secondary(ui, "Free RAM", self.busy.is_none()).clicked()
                     && self.need_admin()
                 {
-                    self.pending = Some(Pending { title: "Free RAM now".into(), intro: "Clears every RAM cache Windows allows: process and system working sets, the file cache, the modified and standby lists, identical pages and the registry cache. Windows refills the file cache as you open files again.".into(), lines: vec![], action: Action::RunTool(Tool::FreeRam), restore_option: false, ok_label: "Free RAM".into() });
+                    self.pending = Some(Pending { title: "Free RAM now".into(), intro: "Releases Windows memory caches and trims process working sets. Windows automatically reuses cached RAM when apps need it; forcing a purge can slow the next app or file load.".into(), lines: vec![], action: Action::RunTool(Tool::FreeRam), restore_option: false, ok_label: "Free RAM".into() });
                 }
                 if compact_actions && kit::secondary(ui, "Open diagnostics", true).clicked() {
                     self.set_page(ctx, Page::Diagnostics);

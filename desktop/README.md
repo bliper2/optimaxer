@@ -55,7 +55,7 @@ Cleaner. 32 targets grouped by cleanup type: temporary files, Windows update, br
 
 Network. DNS provider switch with DNS-over-HTTPS where the provider offers it, cache flush, and stack reset. Before changing DNS, Optimaxer saves the original IPv4, IPv6 and supported DoH records. Restore requires confirmation, verifies the saved state, and leaves external DNS changes untouched while keeping the backup. The read-only benchmark sends five UDP A-record queries for `example.com` to each provider's first IPv4 server. It reports average response time, mean absolute change between consecutive successful response times, and successful answers. DNS query failures are not IP packet-loss measurements, and resolver response times do not predict latency to a game server.
 
-Tools. Restore point, Free RAM (clears process and system working sets, the file cache, the modified and standby lists, identical pages and the registry cache), TRIM, SFC, DISM, Windows Update reset, icon and Store cache reset, performance counters, registry backup, System Restore, and "Undo ALL Optimaxer tweaks".
+Tools. Restore point, Free RAM (clears Windows memory caches on demand and reports available RAM before and after; Windows reuses cached memory automatically, and a forced purge can slow the next app or file load), TRIM, SFC, DISM, Windows Update reset, icon and Store cache reset, performance counters, registry backup, System Restore, and "Undo ALL Optimaxer tweaks".
 
 Tools also includes a read-only backup check for the saved tweak-undo state and service backup JSON files. It validates JSON readability and required record fields. It cannot prove Windows will accept every restoration; missing backups are reported separately from invalid ones.
 

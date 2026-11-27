@@ -1,5 +1,6 @@
 # Native helpers for Free RAM: working sets, the memory lists (modified, standby, low-priority standby), the system
-# file cache, page combining and the registry cache. Everything except trimming working sets needs administrator.
+# file cache, page combining, the registry cache, and Windows' available-memory counters. Everything except trimming
+# working sets and reading the counters needs administrator.
 if (-not ('OptiMem' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
@@ -12,6 +13,8 @@ public static class OptiMem {
     [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
     [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll")] static extern void SetLastError(uint error);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx status);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetSystemFileCacheSize(IntPtr min, IntPtr max, int flags);
     [DllImport("ntdll.dll")] static extern int NtSetSystemInformation(int cls, IntPtr info, int len);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr h, uint access, out IntPtr tok);
@@ -20,6 +23,12 @@ public static class OptiMem {
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     struct TokPriv { public int Count; public long Luid; public int Attr; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct MemoryStatusEx {
+        public uint Length, Load;
+        public ulong TotalPhys, AvailPhys, TotalPageFile, AvailPageFile, TotalVirtual, AvailVirtual, AvailExtendedVirtual;
+    }
 
     const int SystemMemoryListInformation = 80;
     const int SystemCombinePhysicalMemoryInformation = 130;
@@ -32,9 +41,18 @@ public static class OptiMem {
         try {
             TokPriv tp = new TokPriv(); tp.Count = 1; tp.Attr = 2;
             if (!LookupPrivilegeValue(null, name, out tp.Luid)) return false;
-            AdjustTokenPrivileges(tok, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
+            SetLastError(0);
+            if (!AdjustTokenPrivileges(tok, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero)) return false;
             return Marshal.GetLastWin32Error() == 0;
         } finally { CloseHandle(tok); }
+    }
+
+    // ullAvailPhys includes immediately reusable standby/cache pages; WMI FreePhysicalMemory does not.
+    public static ulong[] GetMemoryStatus() {
+        MemoryStatusEx m = new MemoryStatusEx();
+        m.Length = (uint)Marshal.SizeOf(typeof(MemoryStatusEx));
+        if (!GlobalMemoryStatusEx(ref m)) return null;
+        return new ulong[] { m.AvailPhys, m.TotalPhys, m.Load };
     }
 
     static int MemoryListCommand(int command) {
@@ -45,11 +63,15 @@ public static class OptiMem {
 
     public static int TrimWorkingSets() {
         int n = 0;
+        int self = Process.GetCurrentProcess().Id;
         foreach (Process p in Process.GetProcesses()) {
-            IntPtr h = OpenProcess(0x0500, false, p.Id);
-            if (h == IntPtr.Zero) continue;
-            if (EmptyWorkingSet(h)) n++;
-            CloseHandle(h);
+            using (p) {
+                if (p.Id == self) continue;
+                IntPtr h = OpenProcess(0x0500, false, p.Id);
+                if (h == IntPtr.Zero) continue;
+                try { if (EmptyWorkingSet(h)) n++; }
+                finally { CloseHandle(h); }
+            }
         }
         return n;
     }
@@ -69,7 +91,11 @@ public static class OptiMem {
 
         r.Add("ok process working sets (" + TrimWorkingSets() + " processes)");
         r.Add(line("system working set", prof ? MemoryListCommand(MemoryEmptyWorkingSets) : -1));
-        r.Add(quota && SetSystemFileCacheSize(new IntPtr(-1), new IntPtr(-1), 0) ? "ok system file cache" : "failed system file cache (0x" + Marshal.GetLastWin32Error().ToString("X8") + ")");
+        if (!quota) r.Add("failed system file cache (SeIncreaseQuotaPrivilege unavailable)");
+        else {
+            SetLastError(0);
+            r.Add(SetSystemFileCacheSize(new IntPtr(-1), new IntPtr(-1), 0) ? "ok system file cache" : "failed system file cache (0x" + Marshal.GetLastWin32Error().ToString("X8") + ")");
+        }
         r.Add(line("modified page list", prof ? MemoryListCommand(MemoryFlushModifiedList) : -1));
         r.Add(line("standby list", prof ? MemoryListCommand(MemoryPurgeStandbyList) : -1));
         r.Add(line("low-priority standby list", prof ? MemoryListCommand(MemoryPurgeLowPriorityStandbyList) : -1));
