@@ -43,7 +43,7 @@ pub const TOOLS: [ToolInfo; 11] = [
     ToolInfo {
         tool: Tool::FreeRam,
         title: "Free RAM now",
-        desc: "Clears every RAM cache Windows allows: process and system working sets, file cache, modified and standby lists, identical pages and the registry cache.",
+        desc: "Releases Windows memory caches on demand. Windows reuses cached RAM automatically; a forced purge can slow the next app or file load.",
         changes_system: true,
     },
     ToolInfo {
@@ -179,30 +179,77 @@ pub fn create_restore_point(
     }
 }
 
-fn available_ram() -> u64 {
+fn memory_status() -> Option<(u64, u64, u32)> {
     let mut m: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
     m.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
     // SAFETY: dwLength is set and `m` is a valid out-pointer.
     if unsafe { GlobalMemoryStatusEx(&mut m) } == 0 {
-        0
+        None
     } else {
-        m.ullAvailPhys
+        Some((m.ullAvailPhys, m.ullTotalPhys, m.dwMemoryLoad))
+    }
+}
+
+fn memory_cleanup_summary(
+    before: Option<(u64, u64, u32)>,
+    after: Option<(u64, u64, u32)>,
+    succeeded: bool,
+) -> String {
+    let result = if succeeded {
+        "completed"
+    } else {
+        "incomplete; review the failed steps"
+    };
+    match (before, after) {
+        (Some((before_available, _, before_load)), Some((after_available, total, after_load))) => {
+            let change = after_available as i128 - before_available as i128;
+            let delta = if change >= 0 {
+                format!("+{}", crate::model::format_size(Some(change as u64)))
+            } else {
+                format!("-{}", crate::model::format_size(Some((-change) as u64)))
+            };
+            format!(
+                "RAM cache cleanup {result}. Available RAM {} -> {} ({delta}); memory load {before_load}% -> {after_load}% of {} total.",
+                crate::model::format_size(Some(before_available)),
+                crate::model::format_size(Some(after_available)),
+                crate::model::format_size(Some(total))
+            )
+        }
+        _ => format!(
+            "RAM cache cleanup {result}. Windows could not report available RAM before or after."
+        ),
     }
 }
 
 /// Trims the working set of every process this user may touch. Returns how many were trimmed.
-fn trim_working_sets() -> u32 {
+fn trim_working_sets() -> Result<u32, u32> {
     let mut pids = vec![0u32; 4096];
-    let mut bytes = 0u32;
-    // SAFETY: buffer size in bytes is passed; `bytes` receives the amount written.
-    if unsafe { EnumProcesses(pids.as_mut_ptr(), (pids.len() * 4) as u32, &mut bytes) } == 0 {
-        return 0;
-    }
+    let bytes = loop {
+        let mut bytes = 0u32;
+        // SAFETY: buffer size in bytes is passed; `bytes` receives the amount written.
+        if unsafe {
+            EnumProcesses(
+                pids.as_mut_ptr(),
+                (pids.len() * std::mem::size_of::<u32>()) as u32,
+                &mut bytes,
+            )
+        } == 0
+        {
+            return Err(unsafe { GetLastError() });
+        }
+        if (bytes as usize) < pids.len() * std::mem::size_of::<u32>() {
+            break bytes as usize;
+        }
+        if pids.len() >= 1 << 20 {
+            return Err(234); // ERROR_MORE_DATA: the process list still fills the maximum buffer.
+        }
+        pids.resize(pids.len() * 2, 0);
+    };
     let me = std::process::id();
     let mut n = 0;
     for pid in pids
         .iter()
-        .take(bytes as usize / 4)
+        .take(bytes / std::mem::size_of::<u32>())
         .copied()
         .filter(|p| *p > 4 && *p != me)
     {
@@ -222,7 +269,7 @@ fn trim_working_sets() -> u32 {
             CloseHandle(h);
         }
     }
-    n
+    Ok(n)
 }
 
 // region memory caches
@@ -236,6 +283,7 @@ unsafe extern "system" {
     fn SetSystemFileCacheSize(min: isize, max: isize, flags: u32) -> i32;
     fn GetCurrentProcess() -> *mut core::ffi::c_void;
     fn GetLastError() -> u32;
+    fn SetLastError(error: u32);
 }
 #[link(name = "advapi32")]
 unsafe extern "system" {
@@ -281,6 +329,7 @@ fn enable_privilege(name: &str) -> bool {
                 luid,
                 attributes: 2,
             };
+            SetLastError(0);
             AdjustTokenPrivileges(tok, 0, &tp, 0, std::ptr::null_mut(), std::ptr::null_mut()) != 0
                 && GetLastError() == 0
         };
@@ -313,20 +362,30 @@ pub fn clear_all_caches() -> Vec<String> {
     };
     let prof = enable_privilege("SeProfileSingleProcessPrivilege");
     let quota = enable_privilege("SeIncreaseQuotaPrivilege");
-    let mut out = vec![format!(
-        "ok process working sets ({} processes)",
-        trim_working_sets()
-    )];
+    let process_trim = match trim_working_sets() {
+        Ok(count) => format!("ok process working sets ({count} processes)"),
+        Err(error) => format!("failed process working sets ({error})"),
+    };
+    let mut out = vec![process_trim];
     out.push(line(
         "system working set",
         if prof { memory_list_command(2) } else { -1 },
     ));
     // SAFETY: -1/-1 asks Windows to flush the system file cache.
-    let fc = quota && unsafe { SetSystemFileCacheSize(-1, -1, 0) } != 0;
-    out.push(if fc {
-        "ok system file cache".into()
+    let fc = if quota {
+        unsafe {
+            SetLastError(0);
+            SetSystemFileCacheSize(-1, -1, 0)
+        }
     } else {
+        0
+    };
+    out.push(if fc != 0 {
+        "ok system file cache".into()
+    } else if quota {
         format!("failed system file cache ({})", unsafe { GetLastError() })
+    } else {
+        "failed system file cache (SeIncreaseQuotaPrivilege unavailable)".into()
     });
     out.push(line(
         "modified page list",
@@ -386,7 +445,7 @@ pub fn run(sys: &dyn System, tool: Tool, backups: &Path, log: &mut dyn FnMut(&st
             create_restore_point(sys, "Optimaxer - manual", log);
         }
         Tool::FreeRam => {
-            let before = available_ram();
+            let before = memory_status();
             let results = clear_all_caches();
             let succeeded = results.iter().all(|l| l.starts_with("ok "));
             for l in results {
@@ -396,18 +455,8 @@ pub fn run(sys: &dyn System, tool: Tool, backups: &Path, log: &mut dyn FnMut(&st
                 ));
             }
             std::thread::sleep(std::time::Duration::from_secs(1));
-            let after = available_ram();
-            log(&format!(
-                "RAM cache cleanup {}. Free RAM {} -> {} (+{}). Windows refills the file cache as you open files again.",
-                if succeeded {
-                    "completed"
-                } else {
-                    "incomplete; review the failed steps"
-                },
-                crate::model::format_size(Some(before)),
-                crate::model::format_size(Some(after)),
-                crate::model::format_size(Some(after.saturating_sub(before)))
-            ));
+            let after = memory_status();
+            log(&memory_cleanup_summary(before, after, succeeded));
         }
         Tool::Trim => {
             let out = sys.run("defrag.exe", &["/C", "/L"]);

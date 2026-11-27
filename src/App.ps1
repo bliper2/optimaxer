@@ -1077,7 +1077,7 @@ function Set-FeatureJob {
 # ================================================================ tools page
 $global:Tools = [ordered]@{
     restore = @{ Title = 'Create restore point';        Desc = 'Snapshot system settings so you can roll back from Windows System Restore.' }
-    ram     = @{ Title = 'Free RAM now';                Desc = 'Clears every RAM cache Windows allows: process and system working sets, file cache, modified and standby lists, identical pages and the registry cache.' }
+    ram     = @{ Title = 'Free RAM now';                Desc = 'Releases Windows memory caches on demand. Windows reuses cached RAM automatically; a forced purge can slow the next app or file load.' }
     drives  = @{ Title = 'Trim SSDs';                   Desc = 'Runs TRIM on every SSD. Takes seconds.' }
     defrag  = @{ Title = 'Defragment hard disks';       Desc = 'Slow: can take an hour or more on large HDDs. Runs in the background.' }
     health  = @{ Title = 'Disk health report';          Desc = 'Health, temperature, wear and error counters of your drives.' }
@@ -1105,11 +1105,20 @@ $toolJobs = @{
     restore = { [void](New-OptiRestorePoint 'Optimaxer - manual') }
     ram = {
         . "$OptiRoot\src\Native.ps1"
-        $before = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory
-        foreach ($l in [OptiMem]::ClearAll()) { Write-Log "  $l" $(if ($l -like 'ok *') { 'INFO' } else { 'WARN' }) }
+        $before = [OptiMem]::GetMemoryStatus()
+        $results = @([OptiMem]::ClearAll())
+        foreach ($l in $results) { Write-Log "  $l" $(if ($l -like 'ok *') { 'INFO' } else { 'WARN' }) }
         Start-Sleep -Seconds 1
-        $after = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory
-        Write-Log ("RAM caches cleared. Free RAM {0} -> {1} (+{2}). Windows refills the file cache as you open files again." -f (Format-Size ($before * 1KB)), (Format-Size ($after * 1KB)), (Format-Size ([math]::Max(0, $after - $before) * 1KB))) 'OK'
+        $after = [OptiMem]::GetMemoryStatus()
+        $failed = @($results | Where-Object { $_ -notlike 'ok *' })
+        $level = if ($failed.Count -or -not $before -or -not $after) { 'WARN' } else { 'OK' }
+        if ($before -and $after) {
+            $change = [long]$after[0] - [long]$before[0]
+            $delta = if ($change -ge 0) { "+$(Format-Size $change)" } else { "-$(Format-Size (-$change))" }
+            Write-Log ("RAM cache cleanup {0}. Available RAM {1} -> {2} ({3}); memory load {4}% -> {5}% of {6} total." -f $(if ($failed.Count) { 'incomplete; review the failed steps' } else { 'completed' }), (Format-Size $before[0]), (Format-Size $after[0]), $delta, $before[2], $after[2], (Format-Size $after[1])) $level
+        } else {
+            Write-Log ("RAM cache cleanup {0}. Windows could not report available RAM before or after." -f $(if ($failed.Count) { 'incomplete; review the failed steps' } else { 'completed' })) 'WARN'
+        }
     }
     drives = {
         foreach ($v in Get-Volume | Where-Object { $_.DriveLetter -and $_.DriveType -eq 'Fixed' }) {
@@ -1377,6 +1386,7 @@ function Invoke-Tool {
     }
     if (-not (Test-Elevated)) { return }
     if ($Key -eq 'defrag' -and -not (Confirm-Action 'Defragmenting hard disks can take an hour or more and the app stays busy until it finishes. Continue?')) { return }
+    if ($Key -eq 'ram' -and -not (Confirm-Action 'Windows automatically reuses cached RAM when apps need it. This forced cleanup also trims process working sets and can make the next app or file load slower. Continue?')) { return }
     if ($Key -eq 'revert' -and -not (Confirm-Action 'Restore ALL settings changed by Optimaxer to their original values?')) { return }
     if ($Key -in 'bootcost', 'gameprof', 'gameundo', 'searchex', 'wake', 'measure') { Invoke-FeatureTool $Key; return }
     $after = if ($Key -eq 'revert') { { Update-TweakStatus } } else { $null }
